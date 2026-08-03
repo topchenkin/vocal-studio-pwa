@@ -1,0 +1,388 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Download,
+  Lock,
+  Mic2,
+  Music2,
+  Sparkles,
+  Upload,
+  WandSparkles,
+} from "lucide-react";
+import Link from "next/link";
+import Button from "@/components/ui/Button";
+import { useAuth } from "@/context/AuthContext";
+import { getChatSessionToken } from "@/lib/chat-media";
+
+const MAX_BYTES = 10 * 1024 * 1024;
+
+const STEPS = [
+  "1. Отправка файла в нейросеть Demucs…",
+  "2. Разделение вокала и музыки на сервере…",
+  "3. Сведение дорожек…",
+] as const;
+
+type ResultTracks = {
+  minusUrl: string;
+  vocalUrl: string;
+  model: string;
+};
+
+type Props = {
+  locked?: boolean;
+};
+
+function base64ToObjectUrl(b64: string, mime: string) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: mime }));
+}
+
+export default function VocalRemover({ locked = false }: Props) {
+  const { tier } = useAuth();
+  const [file, setFile] = useState<File | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<ResultTracks | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(
+    () => () => {
+      if (result) {
+        URL.revokeObjectURL(result.minusUrl);
+        URL.revokeObjectURL(result.vocalUrl);
+      }
+    },
+    [result]
+  );
+
+  const clearResult = () => {
+    if (result) {
+      URL.revokeObjectURL(result.minusUrl);
+      URL.revokeObjectURL(result.vocalUrl);
+    }
+    setResult(null);
+  };
+
+  const selectFile = (selected?: File | null) => {
+    if (!selected) return;
+    const name = selected.name.toLowerCase();
+    const okType =
+      selected.type.includes("mpeg") ||
+      selected.type.includes("wav") ||
+      selected.type.includes("wave") ||
+      name.endsWith(".mp3") ||
+      name.endsWith(".wav");
+    if (!okType) {
+      setError("Загрузите MP3 или WAV.");
+      return;
+    }
+    if (selected.size > MAX_BYTES) {
+      setError("Файл больше 10MB.");
+      return;
+    }
+    clearResult();
+    setFile(selected);
+    setError("");
+    setStepIndex(0);
+  };
+
+  const processAudio = async () => {
+    if (!file || processing || locked) return;
+    setProcessing(true);
+    setError("");
+    setStepIndex(0);
+
+    const stepTimer = window.setInterval(() => {
+      setStepIndex((current) => Math.min(STEPS.length - 1, current + 1));
+    }, 4500);
+
+    try {
+      const token = await getChatSessionToken();
+      if (!token) {
+        setError("Сессия истекла. Войдите снова.");
+        return;
+      }
+
+      const form = new FormData();
+      form.append("file", file);
+
+      const response = await fetch("/api/ai/separate-vocal", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        detail?: string;
+        attempts?: string[];
+        vocalUrl?: string;
+        minusUrl?: string;
+        vocalBase64?: string;
+        minusBase64?: string;
+        vocalMime?: string;
+        minusMime?: string;
+        model?: string;
+        space?: string;
+      };
+
+      const vocalUrl =
+        payload.vocalUrl ||
+        (payload.vocalBase64
+          ? base64ToObjectUrl(
+              payload.vocalBase64,
+              payload.vocalMime || "audio/wav"
+            )
+          : "");
+      const minusUrl =
+        payload.minusUrl ||
+        (payload.minusBase64
+          ? base64ToObjectUrl(
+              payload.minusBase64,
+              payload.minusMime || "audio/wav"
+            )
+          : "");
+
+      if (!response.ok || !vocalUrl || !minusUrl) {
+        const detail = payload.detail ? `\n\nДетали: ${payload.detail}` : "";
+        const attempts =
+          payload.attempts?.length
+            ? `\n\nПопытки:\n- ${payload.attempts.join("\n- ")}`
+            : "";
+        setError(
+          (payload.error ||
+            "Сервер нейросети Demucs временно перегружен. Попробуйте через 2 минуты или укажите HUGGINGFACE_API_KEY") +
+            detail +
+            attempts
+        );
+        clearResult();
+        return;
+      }
+
+      clearResult();
+      setResult({
+        vocalUrl,
+        minusUrl,
+        model: payload.model || payload.space || "htdemucs",
+      });
+      setStepIndex(STEPS.length - 1);
+    } catch {
+      setError(
+        "Сервер нейросети Demucs временно перегружен. Попробуйте через 2 минуты или укажите HUGGINGFACE_API_KEY"
+      );
+      clearResult();
+    } finally {
+      window.clearInterval(stepTimer);
+      setProcessing(false);
+    }
+  };
+
+  if (locked) {
+    return (
+      <section className="relative overflow-hidden rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border sm:p-6">
+        <div className="pointer-events-none absolute inset-0 bg-studio-bg/40 backdrop-blur-[2px]" />
+        <div className="relative z-10 flex flex-col items-center py-10 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/15 ring-1 ring-amber-400/30">
+            <Lock className="h-7 w-7 text-amber-300" />
+          </div>
+          <h2 className="mt-4 font-display text-2xl font-semibold">
+            Удаление вокала
+          </h2>
+          <p className="mt-2 max-w-sm text-sm text-studio-muted">
+            Инструмент доступен по тарифу, заданному администратором. Сейчас у
+            вас:{" "}
+            <span className="font-medium text-studio-text">{tier}</span>.
+          </p>
+          <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
+            <Button fullWidth size="lg">
+              <Sparkles className="h-5 w-5" />
+              Перейти на Premium
+            </Button>
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-3xl bg-studio-surface p-4 ring-1 ring-studio-border sm:p-6">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-500/10">
+          <WandSparkles className="h-5 w-5 text-blue-400" />
+        </div>
+        <div>
+          <h2 className="font-display text-2xl font-semibold">
+            Удаление вокала
+          </h2>
+          <p className="mt-1 text-sm text-studio-muted">
+            Настоящее разделение через Meta Demucs v4 (HT-Demucs) на Hugging Face
+            Space. Без браузерных «фейковых» фильтров.
+          </p>
+        </div>
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="audio/mpeg,audio/wav,audio/x-wav,audio/wave,.mp3,.wav"
+        className="hidden"
+        onChange={(event) => selectFile(event.target.files?.[0])}
+      />
+
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          selectFile(event.dataTransfer.files[0]);
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        className={`mt-6 flex w-full flex-col items-center rounded-2xl border border-dashed px-4 py-8 text-center transition ${
+          dragging
+            ? "border-studio-accent bg-studio-accent/10"
+            : "border-studio-border bg-studio-bg/60 hover:border-studio-accent/60"
+        }`}
+      >
+        <Upload className="h-8 w-8 text-studio-accent" />
+        <span className="mt-3 text-sm font-medium">
+          {file ? file.name : "Перетащите MP3 / WAV сюда"}
+        </span>
+        <span className="mt-1 text-xs text-studio-muted">
+          До 10MB · реальная нейросеть Demucs
+        </span>
+      </button>
+
+      {file && !result && (
+        <div className="mt-4">
+          {processing && (
+            <div className="mb-4 space-y-3 rounded-2xl bg-studio-bg/70 p-4 ring-1 ring-studio-border">
+              {STEPS.map((step, index) => (
+                <div key={step} className="flex items-center gap-3 text-sm">
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                      index < stepIndex
+                        ? "bg-emerald-500/20 text-emerald-300"
+                        : index === stepIndex
+                          ? "bg-studio-accent/25 text-studio-accent-light"
+                          : "bg-studio-card text-studio-muted"
+                    }`}
+                  >
+                    {index < stepIndex ? "✓" : index + 1}
+                  </span>
+                  <span
+                    className={
+                      index === stepIndex
+                        ? "text-studio-text"
+                        : "text-studio-muted"
+                    }
+                  >
+                    {step}
+                  </span>
+                  {index === stepIndex && (
+                    <span className="ml-auto h-4 w-4 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
+                  )}
+                </div>
+              ))}
+              <p className="text-[11px] text-studio-muted">
+                Обработка на GPU Space может занять 1–3 минуты.
+              </p>
+            </div>
+          )}
+          <Button
+            fullWidth
+            size="lg"
+            disabled={processing}
+            onClick={() => void processAudio()}
+          >
+            <WandSparkles className="h-5 w-5" />
+            {processing ? "Demucs работает…" : "Разделить нейросетью Demucs"}
+          </Button>
+        </div>
+      )}
+
+      {result && file && (
+        <div className="mt-6 space-y-3">
+          <ResultTrack
+            title="Минусовка (Backing Track)"
+            icon={<Music2 className="h-5 w-5 text-studio-accent" />}
+            src={result.minusUrl}
+            filename={`minus-${file.name.replace(/\.\w+$/, "")}.wav`}
+          />
+          <ResultTrack
+            title="Изолированный вокал"
+            icon={<Mic2 className="h-5 w-5 text-blue-400" />}
+            src={result.vocalUrl}
+            filename={`vocal-${file.name.replace(/\.\w+$/, "")}.wav`}
+          />
+          <p className="text-center text-[11px] text-studio-muted">
+            Модель: {result.model}
+          </p>
+          <button
+            type="button"
+            className="w-full text-sm text-studio-accent hover:underline"
+            onClick={() => {
+              clearResult();
+              setFile(null);
+            }}
+          >
+            Загрузить другой файл
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 flex gap-3 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-100 ring-1 ring-amber-400/30">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+          <p className="whitespace-pre-wrap break-words">{error}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ResultTrack({
+  title,
+  icon,
+  src,
+  filename,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  src: string;
+  filename: string;
+}) {
+  return (
+    <div className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {icon}
+          <span className="truncate text-sm font-medium">{title}</span>
+        </div>
+        <a
+          href={src}
+          download={filename}
+          className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
+          aria-label={`Скачать ${title}`}
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      </div>
+      <audio controls playsInline src={src} className="h-10 w-full" />
+    </div>
+  );
+}

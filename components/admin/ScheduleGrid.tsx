@@ -1,0 +1,724 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Plus,
+  UserRound,
+  LayoutGrid,
+  List,
+  CalendarClock,
+  UserPlus,
+  XCircle,
+} from "lucide-react";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
+import MonthCalendar, {
+  localDateKey,
+} from "@/components/calendar/MonthCalendar";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabase";
+import type { Lesson, StudentProfile } from "@/types";
+
+function statusBadge(status: Lesson["status"], hasStudent: boolean) {
+  if (status === "completed") return <Badge variant="success">Завершён</Badge>;
+  if (status === "cancelled") return <Badge variant="muted">Отменён</Badge>;
+  return hasStudent ? (
+    <Badge variant="gold">Ученик записан</Badge>
+  ) : (
+    <Badge>Свободный слот</Badge>
+  );
+}
+
+function ScheduleCard({
+  lesson,
+  studentLabel,
+  completingId,
+  onComplete,
+  onOpenReschedule,
+  onRejectReschedule,
+  onCancel,
+  onAssign,
+}: {
+  lesson: Lesson;
+  studentLabel: (studentId: string | null) => string;
+  completingId: string | null;
+  onComplete: (lessonId: string) => Promise<void>;
+  onOpenReschedule: (lesson: Lesson) => void;
+  onRejectReschedule: (lessonId: string) => Promise<void>;
+  onCancel: (lessonId: string) => Promise<void>;
+  onAssign: (lesson: Lesson) => void;
+}) {
+  const lessonDate = new Date(lesson.datetime);
+  const hasStudent = Boolean(lesson.student_id);
+
+  return (
+    <article className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border transition hover:ring-studio-accent/30">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent/10">
+            <CalendarDays className="h-5 w-5 text-studio-accent" />
+          </div>
+          <div>
+            <p className="font-medium">
+              {lessonDate.toLocaleDateString("ru-RU", {
+                day: "numeric",
+                month: "long",
+              })}
+            </p>
+            <p className="flex items-center gap-1 text-sm text-studio-muted">
+              <Clock3 className="h-3.5 w-3.5" />
+              {lessonDate.toLocaleTimeString("ru-RU", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          </div>
+        </div>
+        {statusBadge(lesson.status, hasStudent)}
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 rounded-xl bg-studio-bg/50 px-3 py-2.5 text-sm">
+        <UserRound className="h-4 w-4 text-studio-muted" />
+        <span className={hasStudent ? "text-studio-text" : "text-studio-muted"}>
+          {studentLabel(lesson.student_id)}
+        </span>
+      </div>
+
+      {lesson.reschedule_request === "pending" && (
+        <div className="mt-3 rounded-xl bg-studio-gold/10 p-3 ring-1 ring-studio-gold/20">
+          <p className="text-xs text-studio-gold">Запрошен перенос урока</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenReschedule(lesson)}
+              className="rounded-lg bg-studio-accent px-3 py-1.5 text-xs text-white"
+            >
+              Перенести
+            </button>
+            <button
+              type="button"
+              onClick={() => void onRejectReschedule(lesson.id)}
+              className="rounded-lg bg-studio-card px-3 py-1.5 text-xs text-studio-muted"
+            >
+              Отклонить
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lesson.status === "open" && (
+        <Button
+          className="mt-4"
+          fullWidth
+          variant="secondary"
+          onClick={() => onAssign(lesson)}
+        >
+          <UserPlus className="h-4 w-4" />
+          Назначить ученика
+        </Button>
+      )}
+
+      {lesson.status === "scheduled" && hasStudent && (
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+          <Button
+            fullWidth
+            variant="secondary"
+            disabled={completingId === lesson.id}
+            onClick={() => void onComplete(lesson.id)}
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {completingId === lesson.id ? "Завершаем..." : "Завершить"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => void onCancel(lesson.id)}
+            className="rounded-xl px-3 text-studio-muted ring-1 ring-studio-border hover:text-red-400"
+            aria-label="Отменить урок"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+export default function ScheduleGrid() {
+  const { isMockAdmin } = useAuth();
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [students, setStudents] = useState<StudentProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [view, setView] = useState<"calendar" | "list">("calendar");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [rescheduleLesson, setRescheduleLesson] = useState<Lesson | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [assignLesson, setAssignLesson] = useState<Lesson | null>(null);
+  const [assignStudentId, setAssignStudentId] = useState("");
+
+  const lessonsByDate = useMemo(
+    () =>
+      lessons.reduce<Record<string, Lesson[]>>((result, lesson) => {
+        const key = localDateKey(lesson.datetime);
+        result[key] = [...(result[key] ?? []), lesson];
+        return result;
+      }, {}),
+    [lessons]
+  );
+
+  useEffect(() => {
+    if (selectedDate && lessonsByDate[selectedDate]) return;
+    const today = localDateKey(new Date());
+    const firstFuture =
+      Object.keys(lessonsByDate).find((key) => key >= today) ??
+      Object.keys(lessonsByDate)[0] ??
+      null;
+    setSelectedDate(firstFuture);
+  }, [lessonsByDate, selectedDate]);
+
+  const loadSchedule = useCallback(async () => {
+    if (isMockAdmin) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(14, 0, 0, 0);
+      const nextDay = new Date(tomorrow);
+      nextDay.setDate(nextDay.getDate() + 1);
+      nextDay.setHours(17, 30, 0, 0);
+
+      setStudents([
+        {
+          id: "demo-student-anna",
+          email: "anna@example.com",
+          full_name: "Анна Волкова",
+          role: "student",
+          app_sub_tier: "premium",
+          app_sub_variant: "individual",
+          cat_level: "pro",
+          is_active_student: true,
+          lesson_pay_type: "abonement",
+          custom_lesson_price: 3000,
+          custom_abonement_price: 20000,
+          lessons_balance: 5,
+          debt_amount: 0,
+        },
+      ]);
+      setLessons([
+        {
+          id: "demo-lesson-booked",
+          student_id: "demo-student-anna",
+          datetime: tomorrow.toISOString(),
+          status: "scheduled",
+          reschedule_request: "none",
+        },
+        {
+          id: "demo-lesson-free",
+          student_id: null,
+          datetime: nextDay.toISOString(),
+          status: "open",
+          reschedule_request: "none",
+        },
+      ]);
+      setLoading(false);
+      return;
+    }
+
+    const [lessonsResult, studentsResult] = await Promise.all([
+      supabase.from("lessons").select("*").order("datetime", { ascending: true }),
+      supabase.from("profiles").select("*").eq("role", "student"),
+    ]);
+
+    if (lessonsResult.error || studentsResult.error) {
+      setError("Не удалось загрузить расписание");
+      console.error(
+        "Unable to load schedule:",
+        lessonsResult.error?.message ?? studentsResult.error?.message
+      );
+    } else {
+      setLessons(lessonsResult.data ?? []);
+      setStudents(studentsResult.data ?? []);
+      setError("");
+    }
+    setLoading(false);
+  }, [isMockAdmin]);
+
+  useEffect(() => {
+    void loadSchedule();
+  }, [loadSchedule]);
+
+  const createSlot = async () => {
+    if (!date || !time) return;
+
+    setSaving(true);
+    setError("");
+    const datetime = new Date(`${date}T${time}`).toISOString();
+
+    if (isMockAdmin) {
+      setLessons((current) => [
+        ...current,
+        {
+          id: `demo-slot-${Date.now()}`,
+          student_id: null,
+          datetime,
+          status: "open",
+          reschedule_request: "none",
+        },
+      ]);
+      setSaving(false);
+      setCreateOpen(false);
+      setDate("");
+      setTime("");
+      showSuccess("Тестовый свободный слот создан");
+      return;
+    }
+
+    const { data, error: insertError } = await supabase
+      .from("lessons")
+      .insert({
+        student_id: null,
+        datetime,
+        status: "open",
+        reschedule_request: "none",
+      })
+      .select("*")
+      .single();
+    setSaving(false);
+
+    if (insertError) {
+      setError("Не удалось создать слот");
+      console.error("Unable to create slot:", insertError.message);
+      return;
+    }
+
+    setLessons((current) =>
+      [...current, data].sort(
+        (a, b) =>
+          new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
+      )
+    );
+    setCreateOpen(false);
+    setDate("");
+    setTime("");
+    showSuccess("Свободный слот создан");
+  };
+
+  const completeLesson = async (lessonId: string) => {
+    setCompletingId(lessonId);
+    setError("");
+
+    if (isMockAdmin) {
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === lessonId ? { ...lesson, status: "completed" } : lesson
+        )
+      );
+      setCompletingId(null);
+      showSuccess("Тестовый урок завершён");
+      return;
+    }
+
+    const { error: completeError } = await supabase.rpc("complete_lesson", {
+      lesson_id: lessonId,
+    });
+    setCompletingId(null);
+
+    if (completeError) {
+      setError("Не удалось завершить урок");
+      console.error("Unable to complete lesson:", completeError.message);
+      return;
+    }
+
+    setLessons((current) =>
+      current.map((lesson) =>
+        lesson.id === lessonId ? { ...lesson, status: "completed" } : lesson
+      )
+    );
+    showSuccess("Урок завершён, баланс ученика обновлён");
+  };
+
+  const openReschedule = (lesson: Lesson) => {
+    const current = new Date(lesson.datetime);
+    setRescheduleLesson(lesson);
+    setRescheduleDate(localDateKey(current));
+    setRescheduleTime(
+      current.toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+  };
+
+  const resolveReschedule = async (lessonId: string, approve: boolean) => {
+    const newDatetime =
+      approve && rescheduleDate && rescheduleTime
+        ? new Date(`${rescheduleDate}T${rescheduleTime}`).toISOString()
+        : null;
+    if (approve && !newDatetime) return;
+
+    if (isMockAdmin) {
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === lessonId
+            ? {
+                ...lesson,
+                datetime: newDatetime ?? lesson.datetime,
+                reschedule_request: approve ? "approved" : "rejected",
+              }
+            : lesson
+        )
+      );
+    } else {
+      const { error: resolveError } = await supabase.rpc(
+        "admin_resolve_reschedule",
+        {
+          lesson_id: lessonId,
+          approve,
+          new_datetime: newDatetime,
+        }
+      );
+      if (resolveError) {
+        setError(`Не удалось обработать перенос: ${resolveError.message}`);
+        return;
+      }
+      await loadSchedule();
+    }
+    setRescheduleLesson(null);
+    showSuccess(approve ? "Урок перенесён" : "Запрос на перенос отклонён");
+  };
+
+  const cancelLesson = async (lessonId: string) => {
+    if (isMockAdmin) {
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === lessonId ? { ...lesson, status: "cancelled" } : lesson
+        )
+      );
+    } else {
+      const { error: cancelError } = await supabase.rpc("admin_cancel_lesson", {
+        lesson_id: lessonId,
+      });
+      if (cancelError) {
+        setError(`Не удалось отменить урок: ${cancelError.message}`);
+        return;
+      }
+      await loadSchedule();
+    }
+    showSuccess("Урок отменён");
+  };
+
+  const assignStudent = async () => {
+    if (!assignLesson || !assignStudentId) return;
+    if (isMockAdmin) {
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === assignLesson.id
+            ? {
+                ...lesson,
+                student_id: assignStudentId,
+                status: "scheduled",
+              }
+            : lesson
+        )
+      );
+    } else {
+      const { error: assignError } = await supabase.rpc("admin_assign_lesson", {
+        lesson_id: assignLesson.id,
+        target_student_id: assignStudentId,
+      });
+      if (assignError) {
+        setError(`Не удалось назначить ученика: ${assignError.message}`);
+        return;
+      }
+      await loadSchedule();
+    }
+    setAssignLesson(null);
+    setAssignStudentId("");
+    showSuccess("Ученик записан на урок");
+  };
+
+  const showSuccess = (message: string) => {
+    setSuccess(message);
+    window.setTimeout(() => setSuccess(""), 3000);
+  };
+
+  const studentLabel = (studentId: string | null) => {
+    if (!studentId) return "Свободно";
+    const profile = students.find((student) => student.id === studentId);
+    return profile
+      ? profile.full_name || profile.email || `Ученик ${profile.id.slice(0, 8)}`
+      : `Ученик ${studentId.slice(0, 8)}`;
+  };
+
+  if (loading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((item) => (
+          <div
+            key={item}
+            className="h-40 animate-pulse rounded-2xl bg-studio-surface ring-1 ring-studio-border"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <div>
+            <h3 className="font-display text-xl font-semibold">Расписание</h3>
+            <p className="text-sm text-studio-muted">
+              Слоты, записи и завершённые уроки
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
+              <button
+                type="button"
+                onClick={() => setView("calendar")}
+                className={`rounded-lg p-2 transition ${
+                  view === "calendar"
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "text-studio-muted"
+                }`}
+                aria-label="Календарь"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                className={`rounded-lg p-2 transition ${
+                  view === "list"
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "text-studio-muted"
+                }`}
+                aria-label="Список"
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Новый слот
+            </Button>
+          </div>
+        </div>
+
+        {success && (
+          <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400 ring-1 ring-emerald-500/20">
+            <CheckCircle2 className="h-4 w-4" />
+            {success}
+          </div>
+        )}
+        {error && <p className="text-sm text-red-400">{error}</p>}
+
+        {view === "calendar" && lessons.length > 0 && (
+          <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
+            <MonthCalendar
+              availableDates={new Set(Object.keys(lessonsByDate))}
+              selectedDate={selectedDate}
+              onSelect={setSelectedDate}
+              allowPast
+            />
+            <div>
+              <p className="mb-3 font-medium capitalize">
+                {selectedDate
+                  ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString(
+                      "ru-RU",
+                      { weekday: "long", day: "numeric", month: "long" }
+                    )
+                  : "Выберите день"}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(selectedDate ? lessonsByDate[selectedDate] ?? [] : []).map(
+                  (lesson) => (
+                    <ScheduleCard
+                      key={lesson.id}
+                      lesson={lesson}
+                      studentLabel={studentLabel}
+                      completingId={completingId}
+                      onComplete={completeLesson}
+                      onOpenReschedule={openReschedule}
+                      onRejectReschedule={(lessonId) =>
+                        resolveReschedule(lessonId, false)
+                      }
+                      onCancel={cancelLesson}
+                      onAssign={(lesson) => {
+                        setAssignLesson(lesson);
+                        setAssignStudentId("");
+                      }}
+                    />
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === "list" && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {lessons.map((lesson) => (
+              <ScheduleCard
+                key={lesson.id}
+                lesson={lesson}
+                studentLabel={studentLabel}
+                completingId={completingId}
+                onComplete={completeLesson}
+                onOpenReschedule={openReschedule}
+                onRejectReschedule={(lessonId) =>
+                  resolveReschedule(lessonId, false)
+                }
+                onCancel={cancelLesson}
+                onAssign={(targetLesson) => {
+                  setAssignLesson(targetLesson);
+                  setAssignStudentId("");
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {lessons.length === 0 && (
+          <div className="rounded-2xl bg-studio-surface p-10 text-center ring-1 ring-studio-border">
+            <CalendarDays className="mx-auto h-9 w-9 text-studio-muted" />
+            <p className="mt-3 text-sm text-studio-muted">
+              В расписании пока нет слотов
+            </p>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Новый свободный слот"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <label>
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Дата
+            </span>
+            <input
+              type="date"
+              value={date}
+              min={new Date().toISOString().split("T")[0]}
+              onChange={(event) => setDate(event.target.value)}
+              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            />
+          </label>
+          <label>
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Время
+            </span>
+            <input
+              type="time"
+              value={time}
+              onChange={(event) => setTime(event.target.value)}
+              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            />
+          </label>
+          <Button
+            fullWidth
+            onClick={() => void createSlot()}
+            disabled={!date || !time || saving}
+          >
+            <Plus className="h-4 w-4" />
+            {saving ? "Создаём..." : "Создать слот"}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(rescheduleLesson)}
+        onClose={() => setRescheduleLesson(null)}
+        title="Подтвердить перенос"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <label>
+              <span className="mb-1.5 block text-xs text-studio-muted">
+                Новая дата
+              </span>
+              <input
+                type="date"
+                value={rescheduleDate}
+                onChange={(event) => setRescheduleDate(event.target.value)}
+                className="w-full rounded-xl bg-studio-surface px-3 py-3 text-sm ring-1 ring-studio-border"
+              />
+            </label>
+            <label>
+              <span className="mb-1.5 block text-xs text-studio-muted">
+                Новое время
+              </span>
+              <input
+                type="time"
+                value={rescheduleTime}
+                onChange={(event) => setRescheduleTime(event.target.value)}
+                className="w-full rounded-xl bg-studio-surface px-3 py-3 text-sm ring-1 ring-studio-border"
+              />
+            </label>
+          </div>
+          <p className="text-xs text-studio-muted">
+            Ученик получит Push и email через 5 минут, если не прочитает
+            уведомление.
+          </p>
+          <Button
+            fullWidth
+            disabled={!rescheduleDate || !rescheduleTime}
+            onClick={() =>
+              rescheduleLesson &&
+              void resolveReschedule(rescheduleLesson.id, true)
+            }
+          >
+            <CalendarClock className="h-4 w-4" />
+            Подтвердить новое время
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(assignLesson)}
+        onClose={() => setAssignLesson(null)}
+        title="Назначить ученика"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <select
+            value={assignStudentId}
+            onChange={(event) => setAssignStudentId(event.target.value)}
+            className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border"
+          >
+            <option value="">Выберите ученика</option>
+            {students.map((student) => (
+              <option key={student.id} value={student.id}>
+                {student.full_name || student.email || student.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          <Button
+            fullWidth
+            disabled={!assignStudentId}
+            onClick={() => void assignStudent()}
+          >
+            <UserPlus className="h-4 w-4" />
+            Записать на этот слот
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
+}

@@ -1,0 +1,33 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+
+export default function AdminProtectedLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { isAdmin, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !isAdmin) {
+      router.replace("/");
+    }
+  }, [isAdmin, loading, router]);
+
+  if (loading || !isAdmin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+        <div
+          className="h-9 w-9 animate-spin rounded-full border-2 border-studio-accent border-t-transparent"
+          aria-label="Проверка прав доступа"
+        />
+      </div>
+    );
+  }
+
+  return children;
+}

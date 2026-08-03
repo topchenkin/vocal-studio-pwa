@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --studio-bg: 10 10 15;
+  --studio-surface: 18 18 26;
+  --studio-card: 26 26 38;
+  --studio-border: 42 42 61;
+  --studio-muted: 107 107 138;
+  --studio-text: 255 255 255;
+  --studio-accent: 192 132 252;
+  --studio-accent-light: 233 213 255;
+  --studio-gold: 251 191 36;
+  --studio-gold-dark: 217 119 6;
+  --studio-card-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+html.light {
+  --studio-bg: 248 247 252;
+  --studio-surface: 255 255 255;
+  --studio-card: 243 240 249;
+  --studio-border: 220 213 232;
+  --studio-muted: 104 94 124;
+  --studio-text: 31 23 43;
+  --studio-accent: 139 92 246;
+  --studio-accent-light: 109 40 217;
+  --studio-gold: 180 117 0;
+  --studio-gold-dark: 146 86 0;
+  --studio-card-shadow: 0 8px 30px rgba(73, 54, 99, 0.12);
+}
+
+@layer base {
+  html {
+    @apply scroll-smooth antialiased;
+    transition:
+      background-color 240ms ease,
+      color 240ms ease;
+  }
+
+  body {
+    @apply min-h-screen bg-studio-bg text-studio-text;
+  }
+
+  ::selection {
+    @apply bg-studio-accent/30 text-white;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-studio-accent-light via-studio-accent to-studio-gold bg-clip-text text-transparent;
+  }
+}

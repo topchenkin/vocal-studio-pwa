@@ -1,0 +1,21 @@
+{
+  "functions": {
+    "app/api/ai/separate-vocal/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "uniquevocal.ru" }],
+      "destination": "https://www.uniquevocal.ru/:path*",
+      "permanent": true
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/notifications/email-fallback",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
