@@ -18,7 +18,7 @@ export default function StudentNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-6 flex gap-1 overflow-x-auto rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
+    <nav className="mb-4 flex shrink-0 gap-1 overflow-x-auto rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
       {items.map((item) => {
         const Icon = item.icon;
         const active =

@@ -12,6 +12,7 @@ import {
   Mail,
   ShieldCheck,
 } from "lucide-react";
+import BrandWordmark from "@/components/BrandWordmark";
 import Logo from "@/components/Logo";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
@@ -148,12 +149,7 @@ export default function AdminLoginPage() {
         <section className="rounded-3xl bg-studio-card p-6 ring-1 ring-studio-border shadow-card sm:p-8">
           <div className="flex items-center gap-3">
             <Logo size={48} />
-            <div>
-              <p className="font-display text-xl font-semibold">
-                Unique Vocal Studio
-              </p>
-              <p className="text-xs text-studio-muted">Панель управления</p>
-            </div>
+            <BrandWordmark size="lg" subtitle="Панель управления" />
           </div>
 
           <div className="mt-8 flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-accent/10 ring-1 ring-studio-accent/30">

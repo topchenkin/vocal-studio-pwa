@@ -35,18 +35,16 @@ export default function DashboardLayout({
           compact ? "min-h-0 flex-1 pb-3 pt-3" : "pb-10 pt-6"
         )}
       >
-        {!compact && <Header />}
+        <Header />
 
-        <div className={cn(compact ? "shrink-0" : "mt-8")}>
-          {!compact && (
-            <Link
-              href="/"
-              className="mb-4 inline-flex items-center gap-1.5 text-sm text-studio-muted transition-colors hover:text-studio-text"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              На главную
-            </Link>
-          )}
+        <div className={cn(compact ? "mt-4 shrink-0" : "mt-8")}>
+          <Link
+            href="/"
+            className="mb-4 inline-flex items-center gap-1.5 text-sm text-studio-muted transition-colors hover:text-studio-text"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            На главную
+          </Link>
 
           <h1
             className={cn(

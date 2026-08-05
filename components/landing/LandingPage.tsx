@@ -217,7 +217,7 @@ export default function LandingPage() {
         </section>
 
         <footer className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-studio-border/60 pt-6 text-xs text-studio-muted sm:flex-row">
-          <span>© Unique Vocal Studio</span>
+          <span>© <span className="text-studio-gold">Unique</span> <span className="text-studio-accent">Vocal</span> <span className="text-gradient">Studio</span></span>
           <Link
             href="/admin/login"
             className="inline-flex items-center gap-1.5 transition hover:text-studio-accent-light"

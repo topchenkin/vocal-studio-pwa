@@ -36,12 +36,22 @@ export type VocalReport = {
   durationSec: number;
 };
 
-/** Soft in-tune window. */
-const IN_TUNE_CENTS = 40;
+/**
+ * Pro-test “green” band — a bit tighter than live tuner (±45¢),
+ * still realistic for teachers (~±8–11 Hz mid-voice).
+ */
+export const TEST_IN_TUNE_CENTS = 35;
+
 const VOICED_DB = -48;
-/** Ignore first N ms of each voiced burst (attack / pitch lock-in). */
-const ONSET_TRIM_MS = 250;
-const MIN_SCOREABLE = 8;
+/** Ignore attack / pitch lock-in at the start of each voiced burst. */
+const ONSET_TRIM_MS = 320;
+/** Scale note-change windows are not scored (glide between targets). */
+const SCALE_TRANSITION_MS = 480;
+const MIN_SCOREABLE = 6;
+/** Std below this is treated as natural shimmer / light vibrato, not instability. */
+const NATURAL_VIBRATO_STD_CENTS = 22;
+/** Loudness IQR below this is ignored (AGC / mic noise). */
+const NATURAL_DYNAMICS_IQR_DB = 5;
 
 export function rmsToDb(rms: number): number {
   if (rms <= 1e-8) return -80;
@@ -74,12 +84,26 @@ export function targetNoteAtTime(
 ): string {
   if (mode === "note") return singleNote;
   const third = durationMs / 3;
-  const edge = 200;
+  const edge = SCALE_TRANSITION_MS;
   if (tMs < third - edge) return "C4";
   if (tMs < third + edge) return tMs < third ? "C4" : "E4";
   if (tMs < third * 2 - edge) return "E4";
   if (tMs < third * 2 + edge) return tMs < third * 2 ? "E4" : "G4";
   return "G4";
+}
+
+/** True while the singer is expected to glide between scale steps. */
+export function isScaleTransition(
+  mode: VocalTestMode,
+  tMs: number,
+  durationMs: number
+): boolean {
+  if (mode !== "scale") return false;
+  const third = durationMs / 3;
+  return (
+    Math.abs(tMs - third) < SCALE_TRANSITION_MS ||
+    Math.abs(tMs - third * 2) < SCALE_TRANSITION_MS
+  );
 }
 
 export function samplePitchFrame(
@@ -127,8 +151,14 @@ export function samplePitchFrame(
   };
 }
 
-/** Mark scoreable frames: voiced + past onset trim inside each continuous burst. */
-export function markScoreableSamples(samples: VocalSample[]): VocalSample[] {
+/**
+ * Mark scoreable frames: voiced + past onset trim, excluding scale transitions.
+ */
+export function markScoreableSamples(
+  samples: VocalSample[],
+  mode: VocalTestMode = "note",
+  durationMs = 10_000
+): VocalSample[] {
   const out = samples.map((s) => ({ ...s, scoreable: false }));
   let burstStart: number | null = null;
 
@@ -136,7 +166,9 @@ export function markScoreableSamples(samples: VocalSample[]): VocalSample[] {
     const sample = out[i]!;
     if (sample.voiced && sample.centsFolded !== null) {
       if (burstStart === null) burstStart = sample.tMs;
-      if (sample.tMs - burstStart >= ONSET_TRIM_MS) {
+      const pastOnset = sample.tMs - burstStart >= ONSET_TRIM_MS;
+      const inTransition = isScaleTransition(mode, sample.tMs, durationMs);
+      if (pastOnset && !inTransition) {
         sample.scoreable = true;
       }
     } else {
@@ -151,18 +183,29 @@ function clampScore(value: number): number {
 }
 
 /**
- * Continuous pitch accuracy (not binary ±25¢).
- * 0¢ → 100, 25¢ → ~85, 40¢ → ~65, 60¢ → ~30, 100¢+ → ~0
+ * Pitch credit for the pro test.
+ * Slightly stricter than live ±45¢, but a clean teacher take lands 90+.
+ * 0–18¢ → 100, 35¢ → ~93, 55¢ → ~78, 80¢ → ~55
  */
 function softPitchCredit(absCents: number): number {
-  if (absCents <= 15) return 100;
-  if (absCents <= IN_TUNE_CENTS) {
-    return 100 - ((absCents - 15) / (IN_TUNE_CENTS - 15)) * 35;
+  if (absCents <= 18) return 100;
+  if (absCents <= TEST_IN_TUNE_CENTS) {
+    return 100 - ((absCents - 18) / (TEST_IN_TUNE_CENTS - 18)) * 7;
   }
-  if (absCents <= 80) {
-    return 65 - ((absCents - IN_TUNE_CENTS) / (80 - IN_TUNE_CENTS)) * 55;
+  if (absCents <= 70) {
+    return 93 - ((absCents - TEST_IN_TUNE_CENTS) / (70 - TEST_IN_TUNE_CENTS)) * 33;
   }
-  return Math.max(0, 10 - (absCents - 80) / 20);
+  return Math.max(20, 60 - (absCents - 70) / 2.5);
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  }
+  return sorted[mid] ?? 0;
 }
 
 export function calcPitchAccuracy(samples: VocalSample[]): number {
@@ -172,16 +215,19 @@ export function calcPitchAccuracy(samples: VocalSample[]): number {
       ? scored
       : samples.filter((s) => s.voiced && s.centsFolded !== null);
   if (pool.length === 0) return 0;
-  const avg =
-    pool.reduce(
-      (sum, s) => sum + softPitchCredit(Math.abs(s.centsFolded ?? 99)),
-      0
-    ) / pool.length;
-  return clampScore(avg);
+
+  const credits = pool.map((s) =>
+    softPitchCredit(Math.abs(s.centsFolded ?? 99))
+  );
+  // Median resists a few bad frames / mic glitches better than mean.
+  const med = median(credits);
+  const mean = credits.reduce((a, b) => a + b, 0) / credits.length;
+  // Blend: mostly median, a bit of mean so sustained drift still matters.
+  return clampScore(med * 0.65 + mean * 0.35);
 }
 
 /**
- * Tone stability from folded-cents std (octave-safe).
+ * Tone stability — light vibrato must not kill the score.
  */
 export function calcToneStability(samples: VocalSample[]): number {
   const scored = samples.filter((s) => s.scoreable && s.centsFolded !== null);
@@ -197,7 +243,8 @@ export function calcToneStability(samples: VocalSample[]): number {
     values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
   const std = Math.sqrt(variance);
 
-  return clampScore(100 - (std / 45) * 100);
+  const excess = Math.max(0, std - NATURAL_VIBRATO_STD_CENTS);
+  return clampScore(100 - (excess / 55) * 100);
 }
 
 /**
@@ -214,7 +261,8 @@ export function calcBreathControl(samples: VocalSample[]): number {
   const q3 = dbs[Math.floor(dbs.length * 0.75)] ?? dbs[dbs.length - 1]!;
   const iqr = Math.max(0, q3 - q1);
 
-  return clampScore(100 - (iqr / 14) * 100);
+  const excess = Math.max(0, iqr - NATURAL_DYNAMICS_IQR_DB);
+  return clampScore(100 - (excess / 20) * 100);
 }
 
 export function buildVocalReport(
@@ -223,12 +271,14 @@ export function buildVocalReport(
   targetLabel: string,
   durationSec: number
 ): VocalReport {
-  const marked = markScoreableSamples(samples);
+  const durationMs = Math.max(1000, durationSec * 1000);
+  const marked = markScoreableSamples(samples, mode, durationMs);
   const pitchAccuracy = calcPitchAccuracy(marked);
   const toneStability = calcToneStability(marked);
   const breathControl = calcBreathControl(marked);
+  // Pitch dominates; stability/breath shouldn't block a strong 90+ take.
   const overallScore = clampScore(
-    pitchAccuracy * 0.5 + toneStability * 0.3 + breathControl * 0.2
+    pitchAccuracy * 0.55 + toneStability * 0.25 + breathControl * 0.2
   );
   return {
     pitchAccuracy,

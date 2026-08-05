@@ -11,6 +11,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useState } from "react";
+import BrandWordmark from "@/components/BrandWordmark";
 import Logo from "@/components/Logo";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { useAuth } from "@/context/AuthContext";
@@ -36,16 +37,8 @@ export default function Header({ showNav = true }: HeaderProps) {
   return (
     <header className="relative flex items-center justify-between animate-fade-in opacity-0 [animation-fill-mode:forwards]">
       <Link href="/" className="flex items-center gap-3">
-        <Logo size={44} />
-        <div>
-          <p className="font-display text-lg font-semibold leading-tight tracking-wide sm:text-xl">
-            Unique{" "}
-            <span className="text-studio-accent">Vocal</span> Studio
-          </p>
-          <p className="text-[10px] text-studio-muted sm:text-xs">
-            Студия вокала
-          </p>
-        </div>
+        <Logo size={48} />
+        <BrandWordmark subtitle="Студия вокала" />
       </Link>
 
       <div className="flex items-center gap-1 sm:gap-2">

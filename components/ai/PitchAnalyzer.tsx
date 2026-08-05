@@ -20,13 +20,15 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
 import {
-  analyzeFrequency,
   describeNote,
   detectPitchHz,
   frequencyFromMidi,
+  hzToleranceForMidi,
   midiFromNoteLabel,
   pickPracticeNote,
   PRACTICE_NOTES,
+  stabilizeLivePitch,
+  STUDENT_IN_TUNE_CENTS,
 } from "@/lib/pitch";
 import {
   buildVocalReport,
@@ -34,6 +36,7 @@ import {
   mentorFeedback,
   samplePitchFrame,
   targetNoteAtTime,
+  TEST_IN_TUNE_CENTS,
   type VocalReport,
   type VocalSample,
   type VocalTestMode,
@@ -43,7 +46,7 @@ type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
 const TEST_MS = 10_000;
 const SAMPLE_MS = 100;
-const IN_TUNE_CENTS = 25;
+const IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
 const SCALE_STEPS = ["C4", "E4", "G4"] as const;
 
 export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) {
@@ -78,6 +81,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const testStartRef = useRef(0);
   const testModeRef = useRef(testMode);
   const targetNoteRef = useRef(targetNote);
+  const smoothedHzRef = useRef<number | null>(null);
+  const heldMidiRef = useRef<number | null>(null);
 
   useEffect(() => {
     testModeRef.current = testMode;
@@ -114,6 +119,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     setNote("—");
     setHz(0);
     setTestProgress(0);
+    smoothedHzRef.current = null;
+    heldMidiRef.current = null;
   }, []);
 
   useEffect(() => () => stopMic(), [stopMic]);
@@ -155,8 +162,19 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       floatBuf[i] = ((timeData[i] ?? 128) - 128) / 128;
     }
     const frequency = detectPitchHz(floatBuf, ctx.sampleRate);
-    const pitch = frequency > 0 ? analyzeFrequency(frequency) : null;
-    if (pitch) {
+    const stable =
+      frequency > 0
+        ? stabilizeLivePitch(
+            frequency,
+            smoothedHzRef.current,
+            heldMidiRef.current
+          )
+        : null;
+
+    if (stable) {
+      smoothedHzRef.current = stable.smoothedHz;
+      heldMidiRef.current = stable.heldMidi;
+      const pitch = stable.pitch;
       setNote(pitch.note);
       setHz(Math.round(pitch.frequency * 10) / 10);
       setCents(pitch.cents);
@@ -164,10 +182,23 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       else if (pitch.cents > IN_TUNE_CENTS) setZone("sharp");
       else setZone("in-tune");
     } else {
-      setNote("—");
-      setHz(0);
-      setCents(0);
-      setZone("silent");
+      // Soft decay: don't instantly clear on one quiet frame
+      if (smoothedHzRef.current && smoothedHzRef.current > 0) {
+        smoothedHzRef.current *= 0.85;
+        if (smoothedHzRef.current < 80) {
+          smoothedHzRef.current = null;
+          heldMidiRef.current = null;
+          setNote("—");
+          setHz(0);
+          setCents(0);
+          setZone("silent");
+        }
+      } else {
+        setNote("—");
+        setHz(0);
+        setCents(0);
+        setZone("silent");
+      }
     }
 
     rafRef.current = requestAnimationFrame(tick);
@@ -344,9 +375,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       g.stroke();
     }
 
-    // in-tune band
-    const yTop = height / 2 - (IN_TUNE_CENTS / 60) * (height / 2);
-    const yBot = height / 2 + (IN_TUNE_CENTS / 60) * (height / 2);
+    // in-tune band (pro-test window)
+    const yTop = height / 2 - (TEST_IN_TUNE_CENTS / 60) * (height / 2);
+    const yBot = height / 2 + (TEST_IN_TUNE_CENTS / 60) * (height / 2);
     g.fillStyle = "rgba(52, 211, 153, 0.12)";
     g.fillRect(0, yTop, width, yBot - yTop);
 
@@ -419,6 +450,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   }, [cents, zone]);
 
   const liveTargetHz = frequencyFromMidi(midiFromNoteLabel(targetNote));
+  const liveHzTolerance = Math.round(
+    hzToleranceForMidi(midiFromNoteLabel(targetNote), IN_TUNE_CENTS)
+  );
   const mentor = report
     ? mentorFeedback(report.overallScore, profile?.cat_level)
     : "";
@@ -464,8 +498,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         <div>
           <h2 className="font-display text-2xl font-semibold">ИИ-тюнер нот</h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Живой тюнер и короткий тест точности — видно, насколько чисто вы
-            держите ноту.
+            Живой тюнер для учеников: допуск ~±{IN_TUNE_CENTS}¢
+            (около ±10–15 Гц в среднем регистре), нота не прыгает от каждого
+            микроколебания.
           </p>
         </div>
       </div>
@@ -525,7 +560,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             />
           </div>
           <p className="mt-3 text-center text-xs text-studio-muted">
-            Зелёная зона: ±{IN_TUNE_CENTS} центов
+            Зелёная зона для учеников: ±{IN_TUNE_CENTS}¢ ≈ ±{liveHzTolerance} Гц
+            на {targetNote}
           </p>
         </div>
       </div>
@@ -558,8 +594,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              10 секунд: спойте целевую ноту или гамму — получите оценку точности
-              и стабильности.
+              10 секунд: целевая нота или гамма. Допуск теста ±{TEST_IN_TUNE_CENTS}¢
+              (чуть строже живого тюнера) — чистый проход реально даёт 90+.
             </p>
           </div>
         </div>
@@ -786,7 +822,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
                 />
               </div>
               <p className="mt-1 text-[11px] text-studio-muted">
-                Зелёная полоса — зона ±{IN_TUNE_CENTS} ¢
+                Зелёная полоса — зона теста ±{TEST_IN_TUNE_CENTS}¢ (~±8–11 Гц)
               </p>
             </div>
 

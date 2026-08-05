@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldAlert } from "lucide-react";
+import BrandWordmark from "@/components/BrandWordmark";
 import Logo from "@/components/Logo";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
@@ -97,12 +98,7 @@ export default function AdminPasswordSetupPage() {
       <section className="relative w-full max-w-md rounded-3xl bg-studio-card p-6 ring-1 ring-studio-border shadow-card sm:p-8">
         <div className="flex items-center gap-3">
           <Logo size={48} />
-          <div>
-            <p className="font-display text-xl font-semibold">
-              Unique Vocal Studio
-            </p>
-            <p className="text-xs text-studio-muted">{ADMIN_EMAIL}</p>
-          </div>
+          <BrandWordmark size="lg" subtitle={ADMIN_EMAIL} />
         </div>
 
         {success ? (

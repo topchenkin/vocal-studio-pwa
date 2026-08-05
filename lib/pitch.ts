@@ -39,6 +39,29 @@ export type DetectedPitch = {
   cents: number;
 };
 
+/**
+ * Student-friendly “in tune” window (±cents from note center).
+ * ~45¢ mid-voice ≈ ±10–15 Hz (C4≈7 Hz, G4≈10 Hz, A4≈12 Hz) —
+ * forgiving for learners, still tighter than a full semitone (100¢).
+ */
+export const STUDENT_IN_TUNE_CENTS = 45;
+
+/**
+ * Hysteresis: keep showing the same note until pitch drifts this far
+ * from that note’s center. Stops adjacent-note flicker on unstable voices.
+ */
+export const NOTE_HOLD_CENTS = 58;
+
+/** EMA factor for live Hz (0 = freeze, 1 = raw). Lower = calmer display. */
+export const PITCH_SMOOTH_ALPHA = 0.22;
+
+/** Absolute Hz band around a target for “close enough” hints (mid register). */
+export function hzToleranceForMidi(midi: number, cents = STUDENT_IN_TUNE_CENTS): number {
+  const f = frequencyFromMidi(midi);
+  return f * (Math.pow(2, cents / 1200) - 1);
+}
+
+
 /** MIDI note number → frequency (A4 = 440). */
 export function frequencyFromMidi(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
@@ -264,6 +287,56 @@ export function analyzeFrequency(frequency: number): DetectedPitch | null {
     octave,
     midi,
     cents,
+  };
+}
+
+/**
+ * Stable live note for learners: smooth Hz + hold current note until
+ * pitch clearly leaves its hysteresis band.
+ */
+export function stabilizeLivePitch(
+  rawHz: number,
+  previousSmoothedHz: number | null,
+  heldMidi: number | null
+): {
+  smoothedHz: number;
+  pitch: DetectedPitch;
+  heldMidi: number;
+} | null {
+  if (!Number.isFinite(rawHz) || rawHz <= 0) return null;
+
+  let hz = rawHz;
+  if (previousSmoothedHz && previousSmoothedHz > 0) {
+    hz = snapToNearbyOctave(hz, previousSmoothedHz);
+    hz =
+      previousSmoothedHz * (1 - PITCH_SMOOTH_ALPHA) + hz * PITCH_SMOOTH_ALPHA;
+  }
+
+  const midiExact = midiFromFrequency(hz);
+  let midi = Math.round(midiExact);
+
+  if (heldMidi !== null) {
+    const centsFromHeld = (midiExact - heldMidi) * 100;
+    if (Math.abs(centsFromHeld) < NOTE_HOLD_CENTS) {
+      midi = heldMidi;
+    }
+  }
+
+  const cents = Math.round((midiExact - midi) * 100);
+  const noteIndex = ((midi % 12) + 12) % 12;
+  const octave = Math.floor(midi / 12) - 1;
+
+  return {
+    smoothedHz: hz,
+    heldMidi: midi,
+    pitch: {
+      frequency: hz,
+      note: `${NOTE_NAMES[noteIndex]}${octave}`,
+      noteIndex,
+      octave,
+      midi,
+      cents,
+    },
   };
 }
 

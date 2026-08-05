@@ -112,8 +112,14 @@ export default function StudentDashboardClient() {
       subtitle={isChat ? undefined : "Личный кабинет ученика"}
       compact={isChat}
     >
-      {!isChat && <StudentNav />}
-      <div className={isChat ? "sticky top-0 z-20 bg-studio-bg/95 pb-3 pt-1 backdrop-blur" : ""}>
+      <StudentNav />
+      <div
+        className={
+          isChat
+            ? "sticky top-0 z-20 shrink-0 bg-studio-bg/95 pb-3 pt-1 backdrop-blur"
+            : ""
+        }
+      >
         <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
       </div>
 

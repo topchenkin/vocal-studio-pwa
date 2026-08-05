@@ -79,8 +79,8 @@ export default function AdminDashboardClient() {
       subtitle={isChat ? undefined : "Unique Vocal Studio — управление"}
       compact={isChat}
     >
-      {isMockAdmin && !isChat && (
-        <div className="mb-4 flex gap-3 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-200 ring-1 ring-amber-500/30">
+      {isMockAdmin && (
+        <div className="mb-4 flex shrink-0 gap-3 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-200 ring-1 ring-amber-500/30">
           <AlertTriangle className="h-5 w-5 shrink-0" />
           <p>
             Тестовый вход не создаёт Supabase-сессию, поэтому здесь показаны
@@ -93,7 +93,7 @@ export default function AdminDashboardClient() {
         className={
           isChat
             ? "sticky top-0 z-20 shrink-0 bg-studio-bg/95 pb-3 backdrop-blur"
-            : ""
+            : "shrink-0"
         }
       >
         <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
