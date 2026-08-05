@@ -15,7 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { decodeBlobToAudioBuffer, mixAudioBuffers } from "@/lib/wav-client";
+import { mixAudioBuffers } from "@/lib/wav-client";
 
 const MAX_TRACKS = 10;
 const PEAK_BUCKETS = 120;
@@ -27,9 +27,19 @@ type Track = {
   url: string;
   durationSec: number;
   peaks: number[];
+  /** Pre-decoded for zero-lag overdub start */
+  buffer: AudioBuffer;
 };
 
 type Props = { locked?: boolean };
+
+async function decodeWithContext(
+  ctx: AudioContext,
+  blob: Blob
+): Promise<AudioBuffer> {
+  const arrayBuf = await blob.arrayBuffer();
+  return ctx.decodeAudioData(arrayBuf.slice(0));
+}
 
 function buildPeaks(buffer: AudioBuffer, buckets = PEAK_BUCKETS): number[] {
   const channel = buffer.getChannelData(0);
@@ -180,10 +190,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
     if (!keepPlayhead) setPlayheadSec(0);
   };
 
-  const stopMic = () => {
+  const releaseMic = () => {
     stopMeter();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    recorderRef.current = null;
+    setRecordingId(null);
+  };
+
+  /** End take but keep mic stream warm for next overdub (no getUserMedia lag). */
+  const endRecorderKeepMic = () => {
+    stopMeter();
     recorderRef.current = null;
     setRecordingId(null);
   };
@@ -197,7 +214,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           /* ignore */
         }
       }
-      stopMic();
+      releaseMic();
       stopPlayback();
       void audioCtxRef.current?.close();
       tracksRef.current.forEach((t) => URL.revokeObjectURL(t.url));
@@ -209,7 +226,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const ensureAudioCtx = async () => {
     if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext();
+      audioCtxRef.current = new AudioContext({ latencyHint: "interactive" });
     }
     if (audioCtxRef.current.state === "suspended") {
       await audioCtxRef.current.resume();
@@ -217,13 +234,39 @@ export default function MultitrackMixer({ locked = false }: Props) {
     return audioCtxRef.current;
   };
 
-  const startPlayhead = (ctx: AudioContext, durationSec: number) => {
+  const ensureMicStream = async () => {
+    const live = streamRef.current;
+    if (live && live.getAudioTracks().some((t) => t.readyState === "live")) {
+      return live;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+    streamRef.current = stream;
+    return stream;
+  };
+
+  /** Warm AudioContext + mic on first user gesture so Record starts instantly. */
+  const armEngine = async () => {
+    await ensureAudioCtx();
+    try {
+      await ensureMicStream();
+    } catch {
+      /* permission may come on Record click */
+    }
+  };
+
+  const startPlayhead = (ctx: AudioContext, durationSec: number, t0: number) => {
     playDurationRef.current = Math.max(durationSec, 0.1);
-    playStartedAtRef.current = ctx.currentTime;
+    playStartedAtRef.current = t0;
     setPlaying(true);
     const tick = () => {
       const elapsed = ctx.currentTime - playStartedAtRef.current;
-      setPlayheadSec(elapsed);
+      setPlayheadSec(Math.max(0, elapsed));
       const recording = Boolean(recordingIdRef.current);
       if (!recording && elapsed >= playDurationRef.current) {
         stopPlayback();
@@ -234,19 +277,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
     playRafRef.current = requestAnimationFrame(tick);
   };
 
-  const playMonitorTracks = async (
-    ctx: AudioContext,
-    list: Track[],
-    when: number
-  ) => {
+  /** Instant — uses pre-decoded AudioBuffers, no await decode. */
+  const playMonitorTracks = (ctx: AudioContext, list: Track[], when: number) => {
     if (list.length === 0) return 0;
-    const buffers = await Promise.all(
-      list.map((track) => decodeBlobToAudioBuffer(track.blob))
-    );
-    const duration = Math.max(...buffers.map((b) => b.duration), 0.1);
-    sourcesRef.current = buffers.map((buffer) => {
+    const duration = Math.max(...list.map((t) => t.buffer.duration), 0.1);
+    sourcesRef.current = list.map((track) => {
       const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      source.buffer = track.buffer;
       source.connect(ctx.destination);
       source.start(when);
       return source;
@@ -255,6 +292,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const startInputMeter = (ctx: AudioContext, stream: MediaStream) => {
+    stopMeter();
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
@@ -277,6 +315,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const toggleMonitor = (id: string) => {
     if (recordingId || playing) return;
+    void armEngine();
     setMonitorIds((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -290,19 +329,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setError("");
     try {
       const ctx = await ensureAudioCtx();
-      const duration = await playMonitorTracks(
-        ctx,
-        monitorTracks,
-        ctx.currentTime
-      );
-      startPlayhead(ctx, duration);
+      await armEngine();
+      const t0 = ctx.currentTime;
+      const duration = playMonitorTracks(ctx, monitorTracks, t0);
+      startPlayhead(ctx, duration, t0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось воспроизвести");
       stopPlayback();
     }
   };
 
-  /** Reaper-style overdub: play armed tracks + record new lane in sync. */
+  /** Reaper-style overdub: play armed tracks + record new lane in the same sample. */
   const startOverdub = async () => {
     if (tracks.length >= MAX_TRACKS || recordingId) return;
     setError("");
@@ -310,14 +347,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
     try {
       const ctx = await ensureAudioCtx();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-      });
-      streamRef.current = stream;
+      // Mic is usually already warm after armEngine / previous take
+      const stream = await ensureMicStream();
       chunksRef.current = [];
       const id = crypto.randomUUID();
       const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -338,12 +369,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
           const recordedSec =
             audioCtxRef.current && playStartedAtRef.current
               ? Math.max(
-                  0.1,
+                  0.05,
                   audioCtxRef.current.currentTime - playStartedAtRef.current
                 )
               : playheadSec;
           stopPlayback();
-          stopMic();
+          endRecorderKeepMic();
 
           const blob = new Blob(chunksRef.current, {
             type: recorder.mimeType || "audio/webm",
@@ -351,12 +382,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
           const url = URL.createObjectURL(blob);
           let peaks = Array.from({ length: 64 }, () => 0.15);
           let durationSec = recordedSec;
+          let buffer: AudioBuffer;
           try {
-            const buffer = await decodeBlobToAudioBuffer(blob);
+            buffer = await decodeWithContext(ctx, blob);
             peaks = buildPeaks(buffer);
             durationSec = buffer.duration || recordedSec;
           } catch {
-            /* keep approx */
+            // Fallback empty buffer so track stays playable-shaped
+            buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * recordedSec)), ctx.sampleRate);
           }
           setTracks((current) => {
             const next = [
@@ -368,6 +401,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                 url,
                 durationSec,
                 peaks,
+                buffer,
               },
             ];
             setMonitorIds((selected) => [...selected, id]);
@@ -377,18 +411,16 @@ export default function MultitrackMixer({ locked = false }: Props) {
         })();
       };
 
-      const t0 = ctx.currentTime + 0.05;
-      const monitorDuration = await playMonitorTracks(ctx, monitorTracks, t0);
-      startInputMeter(ctx, stream);
-      recorder.start(100);
+      // Same clock: monitor + record start together — no artificial delay
+      const t0 = ctx.currentTime;
+      const monitorDuration = playMonitorTracks(ctx, monitorTracks, t0);
+      recorder.start(50);
       setRecordingId(id);
-      // While recording, playhead runs freely (not capped by monitor length)
-      startPlayhead(ctx, Math.max(monitorDuration, 60));
-      // Align transport clock to scheduled start
-      playStartedAtRef.current = t0;
+      startInputMeter(ctx, stream);
+      startPlayhead(ctx, Math.max(monitorDuration, 3600), t0);
     } catch {
       setError("Не удалось получить доступ к микрофону");
-      stopMic();
+      releaseMic();
       stopPlayback();
     }
   };
@@ -398,7 +430,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
       recorderRef.current.stop();
       return;
     }
-    stopMic();
     stopPlayback();
   };
 
@@ -413,7 +444,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const resetAll = () => {
-    stopAll();
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+    stopPlayback();
+    releaseMic();
     setTracks((current) => {
       current.forEach((t) => URL.revokeObjectURL(t.url));
       return [];
@@ -433,11 +468,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setMixing(true);
     setError("");
     try {
-      const buffers = await Promise.all(
-        tracks.map((track) => decodeBlobToAudioBuffer(track.blob))
-      );
-      const mixed = await mixAudioBuffers(buffers);
-      const mixBuffer = await decodeBlobToAudioBuffer(mixed);
+      const mixed = await mixAudioBuffers(tracks.map((track) => track.buffer));
+      const ctx = await ensureAudioCtx();
+      const mixBuffer = await decodeWithContext(ctx, mixed);
       if (mixUrl) URL.revokeObjectURL(mixUrl);
       setMixUrl(URL.createObjectURL(mixed));
       setMixPeaks(buildPeaks(mixBuffer, 140));
@@ -499,6 +532,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
             fullWidth
             size="lg"
             disabled={tracks.length >= MAX_TRACKS}
+            onPointerDown={() => void armEngine()}
             onClick={() => void startOverdub()}
           >
             <Circle className="h-5 w-5 fill-current text-rose-400" />
@@ -518,6 +552,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           size="lg"
           variant="secondary"
           disabled={monitorTracks.length === 0 || Boolean(recordingId)}
+          onPointerDown={() => void armEngine()}
           onClick={() =>
             playing && !recordingId ? stopPlayback() : void listenOnly()
           }

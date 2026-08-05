@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { ADMIN_DISPLAY_NAME } from "@/lib/admin";
 import {
   deleteChatMessageDirect,
   editChatMessageDirect,
-  getChatSessionToken,
+  sendChatMessageDirect,
   toLegacyChatMessages,
 } from "@/lib/chat-media";
 import {
@@ -14,7 +15,6 @@ import {
 } from "@/lib/media-mime";
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
-import type { ChatMessage } from "@/types";
 
 export type ChatSendPayload = {
   message?: string;
@@ -22,23 +22,6 @@ export type ChatSendPayload = {
   file?: File | null;
   mediaDurationSec?: number | null;
 };
-
-async function parseJsonResponse(response: Response) {
-  const raw = await response.text();
-  try {
-    return JSON.parse(raw) as {
-      error?: string;
-      message?: ChatMessage;
-      deleted?: boolean;
-      messageId?: string;
-    };
-  } catch {
-    throw new Error(
-      raw.trim().slice(0, 180) ||
-        `Сервер вернул ошибку (${response.status})`
-    );
-  }
-}
 
 async function uploadChatMedia(
   userId: string,
@@ -63,7 +46,7 @@ async function uploadChatMedia(
 }
 
 export function useChatMessages(studentId: string | null) {
-  const { user, isMockAdmin } = useAuth();
+  const { user, profile, isAdmin, isMockAdmin } = useAuth();
   const [messages, setMessages] = useState<LegacyChatMessage[]>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -141,12 +124,6 @@ export function useChatMessages(studentId: string | null) {
       setError("");
 
       try {
-        const token = await getChatSessionToken();
-        if (!token) {
-          setError("Сессия истекла. Войдите повторно.");
-          return;
-        }
-
         const data =
           typeof payload === "string"
             ? { message: payload, messageType: "text" as const }
@@ -166,29 +143,20 @@ export function useChatMessages(studentId: string | null) {
           mediaMime = uploaded.mime;
         }
 
-        const response = await fetch("/api/chat/messages", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            studentId,
-            messageType,
-            message: data.message ?? "",
-            mediaDurationSec: data.mediaDurationSec ?? null,
-            mediaPath: mediaPath ?? null,
-            mediaMime: mediaMime ?? null,
-          }),
+        const created = await sendChatMessageDirect({
+          studentId,
+          senderId: user.id,
+          senderName: isAdmin
+            ? ADMIN_DISPLAY_NAME
+            : profile?.full_name || "Ученик",
+          messageType,
+          message: data.message ?? "",
+          mediaDurationSec: data.mediaDurationSec ?? null,
+          mediaPath: mediaPath ?? null,
+          mediaMime: mediaMime ?? null,
         });
-        const result = await parseJsonResponse(response);
-
-        if (!response.ok || !result.message) {
-          setError(result.error ?? "Не удалось отправить сообщение");
-          return;
-        }
         const [mapped] = await toLegacyChatMessages([
-          { ...result.message, threadId: result.message.student_id },
+          { ...created, threadId: studentId },
         ]);
         mergeLegacy(mapped);
       } catch (err) {
@@ -199,7 +167,7 @@ export function useChatMessages(studentId: string | null) {
         setSending(false);
       }
     },
-    [mergeLegacy, sending, studentId, user]
+    [isAdmin, mergeLegacy, profile?.full_name, sending, studentId, user]
   );
 
   const edit = useCallback(

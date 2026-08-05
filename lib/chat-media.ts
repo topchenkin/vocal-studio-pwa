@@ -63,6 +63,90 @@ export async function getChatSessionToken() {
   return session?.access_token ?? null;
 }
 
+type SendMessageType = "text" | "voice" | "image" | "sticker" | "video";
+
+/** Client-side send — GitHub Pages has no Next API (POST → 405/HTML error). */
+export async function sendChatMessageDirect(input: {
+  studentId?: string;
+  groupId?: string;
+  senderId: string;
+  senderName: string;
+  messageType?: SendMessageType;
+  message?: string;
+  mediaPath?: string | null;
+  mediaMime?: string | null;
+  mediaDurationSec?: number | null;
+}): Promise<DbChatRow> {
+  const messageType = input.messageType ?? "text";
+  const text = input.message?.trim() ?? "";
+  if ((!input.studentId && !input.groupId) || (input.studentId && input.groupId)) {
+    throw new Error("Некорректный чат");
+  }
+  if (messageType === "text" && (!text || text.length > 2000)) {
+    throw new Error("Введите сообщение");
+  }
+  if (messageType === "sticker" && !text) {
+    throw new Error("Sticker id required");
+  }
+  if (
+    (messageType === "voice" ||
+      messageType === "video" ||
+      messageType === "image") &&
+    !input.mediaPath
+  ) {
+    throw new Error("Файл не загружен");
+  }
+
+  const payloadMessage =
+    messageType === "text" || messageType === "sticker"
+      ? text
+      : messageType === "voice"
+        ? "🎤 Голосовое сообщение"
+        : messageType === "video"
+          ? "🎬 Видеосообщение"
+          : "📷 Фото";
+
+  if (input.groupId) {
+    const { data, error } = await supabase
+      .from("group_chat_messages")
+      .insert({
+        group_id: input.groupId,
+        sender_id: input.senderId,
+        sender_name: input.senderName,
+        message: payloadMessage,
+        message_type: messageType,
+        media_path: input.mediaPath ?? null,
+        media_mime: input.mediaMime ?? null,
+        media_duration_sec: input.mediaDurationSec ?? null,
+      })
+      .select("*")
+      .single();
+    if (error || !data) {
+      throw new Error(error?.message || "Не удалось отправить сообщение");
+    }
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from("chat_messages")
+    .insert({
+      student_id: input.studentId!,
+      sender_id: input.senderId,
+      sender_name: input.senderName,
+      message: payloadMessage,
+      message_type: messageType,
+      media_path: input.mediaPath ?? null,
+      media_mime: input.mediaMime ?? null,
+      media_duration_sec: input.mediaDurationSec ?? null,
+    })
+    .select("*")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message || "Не удалось отправить сообщение");
+  }
+  return data;
+}
+
 /** Client-side edit — GitHub Pages has no Next API (PATCH → 405). */
 export async function editChatMessageDirect(
   table: ChatTable,
