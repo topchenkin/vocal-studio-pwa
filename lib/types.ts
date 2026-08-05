@@ -43,6 +43,8 @@ export interface ChatMessage {
   mediaUrl?: string | null;
   mediaDurationSec?: number | null;
   stickerId?: string | null;
+  editedAt?: string | null;
+  deletedAt?: string | null;
 }
 
 export interface Note {

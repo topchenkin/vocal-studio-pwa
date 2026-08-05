@@ -99,18 +99,13 @@ export function useGroupChatMessages(groupId: string | null) {
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "group_chat_messages",
           filter: `group_id=eq.${groupId}`,
         },
-        (payload) => {
-          void toLegacyChatMessages([
-            {
-              ...(payload.new as GroupChatMessage),
-              threadId: (payload.new as GroupChatMessage).group_id,
-            },
-          ]).then(([message]) => mergeLegacy(message));
+        () => {
+          void load();
         }
       )
       .subscribe();
@@ -194,5 +189,83 @@ export function useGroupChatMessages(groupId: string | null) {
     [groupId, mergeLegacy, sending, user]
   );
 
-  return { messages, error, sending, send, reload: load };
+  const edit = useCallback(
+    async (messageId: string, text: string) => {
+      if (!groupId || !user) return;
+      setError("");
+      try {
+        const token = await getChatSessionToken();
+        if (!token) {
+          setError("Сессия истекла. Войдите повторно.");
+          return;
+        }
+        const response = await fetch("/api/chat/messages", {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ messageId, groupId, message: text }),
+        });
+        const result = await parseJsonResponse(response);
+        if (!response.ok || !result.message) {
+          setError(result.error ?? "Не удалось изменить сообщение");
+          return;
+        }
+        const [mapped] = await toLegacyChatMessages([
+          { ...result.message, threadId: result.message.group_id },
+        ]);
+        mergeLegacy(mapped);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Не удалось изменить сообщение"
+        );
+      }
+    },
+    [groupId, mergeLegacy, user]
+  );
+
+  const remove = useCallback(
+    async (messageId: string) => {
+      if (!groupId || !user) return;
+      setError("");
+      try {
+        const token = await getChatSessionToken();
+        if (!token) {
+          setError("Сессия истекла. Войдите повторно.");
+          return;
+        }
+        const response = await fetch("/api/chat/messages", {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ messageId, groupId }),
+        });
+        const result = await parseJsonResponse(response);
+        if (!response.ok) {
+          setError(result.error ?? "Не удалось удалить сообщение");
+          return;
+        }
+        if (result.message) {
+          const [mapped] = await toLegacyChatMessages([
+            { ...result.message, threadId: result.message.group_id },
+          ]);
+          mergeLegacy(mapped);
+        } else {
+          setMessages((current) =>
+            current.filter((item) => item.id !== messageId)
+          );
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Не удалось удалить сообщение"
+        );
+      }
+    },
+    [groupId, mergeLegacy, user]
+  );
+
+  return { messages, error, sending, send, edit, remove, reload: load };
 }

@@ -322,3 +322,145 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+/** Edit text message (own or admin). */
+export async function PATCH(request: NextRequest) {
+  try {
+    const auth = await getAccessToken(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as {
+      messageId?: string;
+      groupId?: string | null;
+      studentId?: string | null;
+      message?: string;
+    };
+
+    const messageId = body.messageId?.trim();
+    const text = body.message?.trim() ?? "";
+    if (!messageId || !text || text.length > 2000) {
+      return NextResponse.json({ error: "Invalid edit payload" }, { status: 400 });
+    }
+
+    const table = body.groupId ? "group_chat_messages" : "chat_messages";
+
+    const { data: existing, error: loadError } = await auth.admin
+      .from(table)
+      .select("*")
+      .eq("id", messageId)
+      .maybeSingle();
+
+    if (loadError || !existing) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+    if (existing.message_type && existing.message_type !== "text") {
+      return NextResponse.json(
+        { error: "Можно редактировать только текстовые сообщения" },
+        { status: 400 }
+      );
+    }
+    if (existing.deleted_at) {
+      return NextResponse.json({ error: "Сообщение удалено" }, { status: 400 });
+    }
+
+    const patch = {
+      message: text,
+      edited_at: new Date().toISOString(),
+    };
+    const { data: updated, error: updateError } = await auth.admin
+      .from(table)
+      .update(patch)
+      .eq("id", messageId)
+      .select("*")
+      .single();
+
+    if (updateError) {
+      // Fallback without edited_at column
+      const retry = await auth.admin
+        .from(table)
+        .update({ message: text })
+        .eq("id", messageId)
+        .select("*")
+        .single();
+      if (retry.error) {
+        return NextResponse.json({ error: retry.error.message }, { status: 400 });
+      }
+      return NextResponse.json({ message: retry.data });
+    }
+
+    return NextResponse.json({ message: updated });
+  } catch (error) {
+    console.error("Chat edit failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Edit failed" },
+      { status: 500 }
+    );
+  }
+}
+
+/** Soft-delete message (own or admin). */
+export async function DELETE(request: NextRequest) {
+  try {
+    const auth = await getAccessToken(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as {
+      messageId?: string;
+      groupId?: string | null;
+    };
+    const messageId = body.messageId?.trim();
+    if (!messageId) {
+      return NextResponse.json({ error: "messageId required" }, { status: 400 });
+    }
+
+    const table = body.groupId ? "group_chat_messages" : "chat_messages";
+
+    const { data: existing, error: loadError } = await auth.admin
+      .from(table)
+      .select("*")
+      .eq("id", messageId)
+      .maybeSingle();
+
+    if (loadError || !existing) {
+      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    }
+    // Any authenticated chat participant may delete (product requirement).
+
+    const now = new Date().toISOString();
+    const soft = {
+      deleted_at: now,
+      message: "",
+      media_path: null,
+      media_mime: null,
+      media_duration_sec: null,
+      message_type: "text" as const,
+    };
+
+    const { data: updated, error: updateError } = await auth.admin
+      .from(table)
+      .update(soft)
+      .eq("id", messageId)
+      .select("*")
+      .single();
+
+    if (updateError) {
+      const hard = await auth.admin.from(table).delete().eq("id", messageId);
+      if (hard.error) {
+        return NextResponse.json({ error: hard.error.message }, { status: 400 });
+      }
+      return NextResponse.json({ deleted: true, messageId });
+    }
+
+    return NextResponse.json({ message: updated });
+  } catch (error) {
+    console.error("Chat delete failed:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Delete failed" },
+      { status: 500 }
+    );
+  }
+}

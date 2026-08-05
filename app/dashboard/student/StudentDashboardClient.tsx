@@ -12,7 +12,6 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import Tabs from "@/components/ui/Tabs";
 import SubscriptionStatus from "@/components/student/SubscriptionStatus";
 import UpcomingLessons from "@/components/student/UpcomingLessons";
-import BookLessonSlots from "@/components/student/BookLessonSlots";
 import NotesSection from "@/components/student/NotesSection";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import StudentNav from "@/components/student/StudentNav";
@@ -136,7 +135,6 @@ export default function StudentDashboardClient() {
             <div className="space-y-8">
               <SubscriptionStatus />
               <UpcomingLessons />
-              <BookLessonSlots />
             </div>
           )}
           {activeTab === "notes" && <NotesSection />}

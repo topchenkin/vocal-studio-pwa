@@ -83,6 +83,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const targetNoteRef = useRef(targetNote);
   const smoothedHzRef = useRef<number | null>(null);
   const heldMidiRef = useRef<number | null>(null);
+  const missFramesRef = useRef(0);
 
   useEffect(() => {
     testModeRef.current = testMode;
@@ -121,6 +122,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     setTestProgress(0);
     smoothedHzRef.current = null;
     heldMidiRef.current = null;
+    missFramesRef.current = 0;
   }, []);
 
   useEffect(() => () => stopMic(), [stopMic]);
@@ -158,9 +160,14 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     drawWave(timeData);
 
     const floatBuf = new Float32Array(analyser.fftSize);
-    for (let i = 0; i < timeData.length; i += 1) {
-      floatBuf[i] = ((timeData[i] ?? 128) - 128) / 128;
+    if (typeof analyser.getFloatTimeDomainData === "function") {
+      analyser.getFloatTimeDomainData(floatBuf);
+    } else {
+      for (let i = 0; i < timeData.length; i += 1) {
+        floatBuf[i] = ((timeData[i] ?? 128) - 128) / 128;
+      }
     }
+
     const frequency = detectPitchHz(floatBuf, ctx.sampleRate);
     const stable =
       frequency > 0
@@ -172,6 +179,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         : null;
 
     if (stable) {
+      missFramesRef.current = 0;
       smoothedHzRef.current = stable.smoothedHz;
       heldMidiRef.current = stable.heldMidi;
       const pitch = stable.pitch;
@@ -182,18 +190,11 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       else if (pitch.cents > IN_TUNE_CENTS) setZone("sharp");
       else setZone("in-tune");
     } else {
-      // Soft decay: don't instantly clear on one quiet frame
-      if (smoothedHzRef.current && smoothedHzRef.current > 0) {
-        smoothedHzRef.current *= 0.85;
-        if (smoothedHzRef.current < 80) {
-          smoothedHzRef.current = null;
-          heldMidiRef.current = null;
-          setNote("—");
-          setHz(0);
-          setCents(0);
-          setZone("silent");
-        }
-      } else {
+      missFramesRef.current += 1;
+      // Drop lock after a few quiet frames — avoid sticky wrong notes.
+      if (missFramesRef.current >= 4) {
+        smoothedHzRef.current = null;
+        heldMidiRef.current = null;
         setNote("—");
         setHz(0);
         setCents(0);
@@ -214,9 +215,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
       },
     });
     const AudioCtx =

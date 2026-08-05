@@ -47,13 +47,13 @@ export type DetectedPitch = {
 export const STUDENT_IN_TUNE_CENTS = 45;
 
 /**
- * Hysteresis: keep showing the same note until pitch drifts this far
- * from that note’s center. Stops adjacent-note flicker on unstable voices.
+ * Hysteresis for live note label — enough to stop flicker, not so wide
+ * that neighboring notes stick incorrectly.
  */
-export const NOTE_HOLD_CENTS = 58;
+export const NOTE_HOLD_CENTS = 40;
 
-/** EMA factor for live Hz (0 = freeze, 1 = raw). Lower = calmer display. */
-export const PITCH_SMOOTH_ALPHA = 0.22;
+/** EMA for live Hz — responsive enough to track real pitch changes. */
+export const PITCH_SMOOTH_ALPHA = 0.38;
 
 /** Absolute Hz band around a target for “close enough” hints (mid register). */
 export function hzToleranceForMidi(midi: number, cents = STUDENT_IN_TUNE_CENTS): number {

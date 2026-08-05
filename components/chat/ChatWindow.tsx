@@ -6,6 +6,7 @@ import {
   ImagePlus,
   Mic,
   Pause,
+  Pencil,
   Play,
   Send,
   Smile,
@@ -34,6 +35,8 @@ interface ChatWindowProps {
   messages: ChatMessage[];
   currentUser: User;
   onSend: (payload: string | ChatSendPayload) => void;
+  onEdit?: (messageId: string, text: string) => void;
+  onDelete?: (messageId: string) => void;
   placeholder?: string;
   disabled?: boolean;
 }
@@ -43,11 +46,14 @@ export default function ChatWindow({
   messages,
   currentUser,
   onSend,
+  onEdit,
+  onDelete,
   placeholder = "Напишите сообщение...",
   disabled,
 }: ChatWindowProps) {
   const [text, setText] = useState("");
   const [panel, setPanel] = useState<"none" | "emoji" | "sticker">("none");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [phase, setPhase] = useState<RecordPhase>("idle");
   const [recordKind, setRecordKind] = useState<RecordKind>("voice");
   const [recordMs, setRecordMs] = useState(0);
@@ -114,6 +120,13 @@ export default function ChatWindow({
 
   const handleSendText = () => {
     if (!text.trim() || disabled) return;
+    if (editingId && onEdit) {
+      onEdit(editingId, text.trim());
+      setEditingId(null);
+      setText("");
+      setPanel("none");
+      return;
+    }
     onSend({ message: text.trim(), messageType: "text" });
     setText("");
     setPanel("none");
@@ -285,10 +298,16 @@ export default function ChatWindow({
             const isOwn = msg.senderId === currentUser.id;
             const sticker = msg.stickerId ? getSticker(msg.stickerId) : null;
             const isAnnouncement = msg.messageType === "announcement";
+            const isDeleted = Boolean(msg.deletedAt);
+            const canManage =
+              !disabled &&
+              !isAnnouncement &&
+              !isDeleted &&
+              Boolean(onDelete || onEdit);
             return (
               <div
                 key={msg.id}
-                className={`flex ${
+                className={`group flex ${
                   isAnnouncement
                     ? "justify-center"
                     : isOwn
@@ -297,7 +316,7 @@ export default function ChatWindow({
                 }`}
               >
                 <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  className={`relative max-w-[80%] rounded-2xl px-4 py-2.5 ${
                     isAnnouncement
                       ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
                       : isOwn
@@ -314,7 +333,11 @@ export default function ChatWindow({
                       {msg.senderName}
                     </p>
                   ) : null}
-                  {msg.messageType === "sticker" && sticker ? (
+                  {isDeleted ? (
+                    <p className="text-sm italic opacity-60">
+                      Сообщение удалено
+                    </p>
+                  ) : msg.messageType === "sticker" && sticker ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={sticker.src}
@@ -356,7 +379,40 @@ export default function ChatWindow({
                   )}
                   <p className="mt-1 text-[10px] opacity-60">
                     {formatTime(msg.createdAt)}
+                    {msg.editedAt && !isDeleted ? " · изменено" : ""}
                   </p>
+                  {canManage && (
+                    <div className="mt-1.5 flex gap-1 opacity-80 sm:absolute sm:-top-2 sm:right-2 sm:mt-0 sm:rounded-lg sm:bg-studio-bg/90 sm:p-1 sm:opacity-0 sm:ring-1 sm:ring-studio-border sm:group-hover:opacity-100">
+                      {onEdit &&
+                        (!msg.messageType || msg.messageType === "text") && (
+                          <button
+                            type="button"
+                            className="rounded-md p-1.5 text-studio-muted hover:text-studio-text"
+                            title="Изменить"
+                            onClick={() => {
+                              setEditingId(msg.id);
+                              setText(msg.text);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      {onDelete && (
+                        <button
+                          type="button"
+                          className="rounded-md p-1.5 text-studio-muted hover:text-red-300"
+                          title="Удалить"
+                          onClick={() => {
+                            if (window.confirm("Удалить это сообщение?")) {
+                              onDelete(msg.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -519,14 +575,33 @@ export default function ChatWindow({
                 </ComposerIcon>
               </div>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSendText()}
-                  placeholder={placeholder}
-                  className="min-w-0 flex-1 rounded-xl bg-studio-card px-4 py-2.5 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
-                />
+                <div className="min-w-0 flex-1">
+                  {editingId ? (
+                    <div className="mb-1.5 flex items-center justify-between rounded-lg bg-studio-accent/10 px-3 py-1.5 text-xs text-studio-accent-light">
+                      <span>Редактирование сообщения</span>
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => {
+                          setEditingId(null);
+                          setText("");
+                        }}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  ) : null}
+                  <input
+                    type="text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSendText()}
+                    placeholder={
+                      editingId ? "Измените текст..." : placeholder
+                    }
+                    className="w-full rounded-xl bg-studio-card px-4 py-2.5 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+                  />
+                </div>
                 {canSendText ? (
                   <button
                     type="button"

@@ -11,6 +11,8 @@ type MediaMessage = {
   message_type?: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | null;
   media_path?: string | null;
   media_duration_sec?: number | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
 };
 
 export async function toLegacyChatMessages(
@@ -19,24 +21,28 @@ export async function toLegacyChatMessages(
   return Promise.all(
     records.map(async (record) => {
       let mediaUrl: string | null = null;
-      if (record.media_path) {
+      if (record.media_path && !record.deleted_at) {
         const { data } = await supabase.storage
           .from("chat-media")
           .createSignedUrl(record.media_path, 60 * 60);
         mediaUrl = data?.signedUrl ?? null;
       }
       const messageType = record.message_type ?? "text";
+      const deleted = Boolean(record.deleted_at);
       return {
         id: record.id,
         chatId: record.threadId,
         senderId: record.sender_id,
         senderName: record.sender_name,
-        text: record.message,
+        text: deleted ? "" : record.message,
         createdAt: record.created_at,
-        messageType,
-        mediaUrl,
-        mediaDurationSec: record.media_duration_sec ?? null,
-        stickerId: messageType === "sticker" ? record.message : null,
+        messageType: deleted ? "text" : messageType,
+        mediaUrl: deleted ? null : mediaUrl,
+        mediaDurationSec: deleted ? null : record.media_duration_sec ?? null,
+        stickerId:
+          !deleted && messageType === "sticker" ? record.message : null,
+        editedAt: record.edited_at ?? null,
+        deletedAt: record.deleted_at ?? null,
       };
     })
   );

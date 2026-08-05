@@ -27,9 +27,9 @@ function statusBadge(status: Lesson["status"], hasStudent: boolean) {
   if (status === "completed") return <Badge variant="success">Завершён</Badge>;
   if (status === "cancelled") return <Badge variant="muted">Отменён</Badge>;
   return hasStudent ? (
-    <Badge variant="gold">Ученик записан</Badge>
+    <Badge variant="gold">В расписании</Badge>
   ) : (
-    <Badge>Свободный слот</Badge>
+    <Badge>Без ученика</Badge>
   );
 }
 
@@ -87,6 +87,12 @@ function ScheduleCard({
           {studentLabel(lesson.student_id)}
         </span>
       </div>
+
+      {lesson.is_recurring ? (
+        <p className="mt-3 text-xs text-studio-accent-light">
+          Повторяется каждую неделю
+        </p>
+      ) : null}
 
       {lesson.reschedule_request === "pending" && (
         <div className="mt-3 rounded-xl bg-studio-gold/10 p-3 ring-1 ring-studio-gold/20">
@@ -155,6 +161,9 @@ export default function ScheduleGrid() {
   const [createOpen, setCreateOpen] = useState(false);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [createStudentId, setCreateStudentId] = useState("");
+  const [weeklyRepeat, setWeeklyRepeat] = useState(false);
+  const [weeklyCount, setWeeklyCount] = useState(8);
   const [saving, setSaving] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -219,14 +228,16 @@ export default function ScheduleGrid() {
           student_id: "demo-student-anna",
           datetime: tomorrow.toISOString(),
           status: "scheduled",
-          reschedule_request: "none",
+          reschedule_request: "pending",
+          is_recurring: true,
         },
         {
-          id: "demo-lesson-free",
-          student_id: null,
+          id: "demo-lesson-2",
+          student_id: "demo-student-anna",
           datetime: nextDay.toISOString(),
-          status: "open",
+          status: "scheduled",
           reschedule_request: "none",
+          is_recurring: false,
         },
       ]);
       setLoading(false);
@@ -256,60 +267,107 @@ export default function ScheduleGrid() {
     void loadSchedule();
   }, [loadSchedule]);
 
-  const createSlot = async () => {
-    if (!date || !time) return;
+  const createLesson = async () => {
+    if (!date || !time || !createStudentId) return;
 
     setSaving(true);
     setError("");
-    const datetime = new Date(`${date}T${time}`).toISOString();
+    const start = new Date(`${date}T${time}`);
+    if (Number.isNaN(start.getTime())) {
+      setSaving(false);
+      setError("Некорректные дата или время");
+      return;
+    }
+
+    const weeks = weeklyRepeat
+      ? Math.max(1, Math.min(52, Number(weeklyCount) || 8))
+      : 1;
+    const seriesId = weeklyRepeat ? crypto.randomUUID() : null;
+    const rows = Array.from({ length: weeks }, (_, index) => {
+      const when = new Date(start);
+      when.setDate(when.getDate() + index * 7);
+      return {
+        student_id: createStudentId,
+        datetime: when.toISOString(),
+        status: "scheduled" as const,
+        reschedule_request: "none" as const,
+        is_recurring: weeklyRepeat,
+        series_id: seriesId,
+      };
+    });
 
     if (isMockAdmin) {
-      setLessons((current) => [
-        ...current,
-        {
-          id: `demo-slot-${Date.now()}`,
-          student_id: null,
-          datetime,
-          status: "open",
-          reschedule_request: "none",
-        },
-      ]);
+      setLessons((current) =>
+        [
+          ...current,
+          ...rows.map((row, index) => ({
+            id: `demo-lesson-${Date.now()}-${index}`,
+            ...row,
+          })),
+        ].sort(
+          (a, b) =>
+            new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
+        )
+      );
       setSaving(false);
       setCreateOpen(false);
       setDate("");
       setTime("");
-      showSuccess("Тестовый свободный слот создан");
+      setCreateStudentId("");
+      setWeeklyRepeat(false);
+      showSuccess(
+        weeklyRepeat
+          ? `Добавлено ${weeks} еженедельных уроков`
+          : "Урок добавлен в расписание"
+      );
       return;
     }
 
     const { data, error: insertError } = await supabase
       .from("lessons")
-      .insert({
-        student_id: null,
-        datetime,
-        status: "open",
-        reschedule_request: "none",
-      })
-      .select("*")
-      .single();
+      .insert(rows)
+      .select("*");
     setSaving(false);
 
     if (insertError) {
-      setError("Не удалось создать слот");
-      console.error("Unable to create slot:", insertError.message);
-      return;
+      // Fallback without optional columns if migration not applied yet
+      const fallbackRows = rows.map(({ student_id, datetime, status, reschedule_request }) => ({
+        student_id,
+        datetime,
+        status,
+        reschedule_request,
+      }));
+      const retry = await supabase.from("lessons").insert(fallbackRows).select("*");
+      if (retry.error) {
+        setError("Не удалось создать урок");
+        console.error("Unable to create lesson:", insertError.message, retry.error.message);
+        return;
+      }
+      setLessons((current) =>
+        [...current, ...(retry.data ?? [])].sort(
+          (a, b) =>
+            new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
+        )
+      );
+    } else {
+      setLessons((current) =>
+        [...current, ...(data ?? [])].sort(
+          (a, b) =>
+            new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
+        )
+      );
     }
 
-    setLessons((current) =>
-      [...current, data].sort(
-        (a, b) =>
-          new Date(a.datetime).getTime() - new Date(b.datetime).getTime()
-      )
-    );
     setCreateOpen(false);
     setDate("");
     setTime("");
-    showSuccess("Свободный слот создан");
+    setCreateStudentId("");
+    setWeeklyRepeat(false);
+    showSuccess(
+      weeklyRepeat
+        ? `Добавлено ${weeks} еженедельных уроков`
+        : "Урок добавлен в расписание"
+    );
   };
 
   const completeLesson = async (lessonId: string) => {
@@ -479,7 +537,7 @@ export default function ScheduleGrid() {
           <div>
             <h3 className="font-display text-xl font-semibold">Расписание</h3>
             <p className="text-sm text-studio-muted">
-              Слоты, записи и завершённые уроки
+              Уроки назначает преподаватель · ученик может запросить перенос
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -511,10 +569,17 @@ export default function ScheduleGrid() {
             </div>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="h-4 w-4" />
-              Новый слот
+              Добавить урок
             </Button>
           </div>
         </div>
+
+        {lessons.some((l) => l.reschedule_request === "pending") && (
+          <div className="rounded-2xl bg-studio-gold/10 px-4 py-3 text-sm text-studio-gold ring-1 ring-studio-gold/25">
+            Есть запросы на перенос — отмечены в карточках уроков. Откройте день
+            в календаре или список.
+          </div>
+        )}
 
         {success && (
           <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400 ring-1 ring-emerald-500/20">
@@ -594,7 +659,7 @@ export default function ScheduleGrid() {
           <div className="rounded-2xl bg-studio-surface p-10 text-center ring-1 ring-studio-border">
             <CalendarDays className="mx-auto h-9 w-9 text-studio-muted" />
             <p className="mt-3 text-sm text-studio-muted">
-              В расписании пока нет слотов
+              Пока нет уроков — добавьте занятие ученику
             </p>
           </div>
         )}
@@ -603,10 +668,27 @@ export default function ScheduleGrid() {
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="Новый свободный слот"
+        title="Добавить урок"
         size="sm"
       >
         <div className="space-y-4">
+          <label>
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Ученик
+            </span>
+            <select
+              value={createStudentId}
+              onChange={(event) => setCreateStudentId(event.target.value)}
+              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            >
+              <option value="">Выберите ученика</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.full_name || student.email || student.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             <span className="mb-1.5 block text-xs font-medium text-studio-muted">
               Дата
@@ -630,13 +712,48 @@ export default function ScheduleGrid() {
               className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
             />
           </label>
+          <label className="flex items-start gap-3 rounded-xl bg-studio-surface px-4 py-3 ring-1 ring-studio-border">
+            <input
+              type="checkbox"
+              checked={weeklyRepeat}
+              onChange={(event) => setWeeklyRepeat(event.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="block text-sm font-medium">
+                Повторять каждую неделю
+              </span>
+              <span className="mt-0.5 block text-xs text-studio-muted">
+                Сразу создаст серию уроков в календаре на выбранное время
+              </span>
+            </span>
+          </label>
+          {weeklyRepeat && (
+            <label>
+              <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+                Сколько недель подряд
+              </span>
+              <input
+                type="number"
+                min={2}
+                max={52}
+                value={weeklyCount}
+                onChange={(event) => setWeeklyCount(Number(event.target.value))}
+                className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+              />
+            </label>
+          )}
           <Button
             fullWidth
-            onClick={() => void createSlot()}
-            disabled={!date || !time || saving}
+            onClick={() => void createLesson()}
+            disabled={!date || !time || !createStudentId || saving}
           >
             <Plus className="h-4 w-4" />
-            {saving ? "Создаём..." : "Создать слот"}
+            {saving
+              ? "Сохраняем..."
+              : weeklyRepeat
+                ? `Создать ${weeklyCount} уроков`
+                : "Добавить урок"}
           </Button>
         </div>
       </Modal>

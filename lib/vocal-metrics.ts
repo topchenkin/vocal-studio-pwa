@@ -44,12 +44,10 @@ export const TEST_IN_TUNE_CENTS = 35;
 
 const VOICED_DB = -48;
 /** Ignore attack / pitch lock-in at the start of each voiced burst. */
-const ONSET_TRIM_MS = 320;
+const ONSET_TRIM_MS = 180;
 /** Scale note-change windows are not scored (glide between targets). */
-const SCALE_TRANSITION_MS = 480;
-const MIN_SCOREABLE = 6;
-/** Std below this is treated as natural shimmer / light vibrato, not instability. */
-const NATURAL_VIBRATO_STD_CENTS = 22;
+const SCALE_TRANSITION_MS = 400;
+const MIN_SCOREABLE = 4;
 /** Loudness IQR below this is ignored (AGC / mic noise). */
 const NATURAL_DYNAMICS_IQR_DB = 5;
 
@@ -131,8 +129,8 @@ export function samplePitchFrame(
   }
 
   const targetHz = frequencyFromMidi(midiFromNoteLabel(targetNote));
-  // Prefer continuity with previous frame, else snap toward target pitch class/octave.
-  const reference = previousHz && previousHz > 0 ? previousHz : targetHz;
+  const reference =
+    previousHz && previousHz > 0 ? previousHz : targetHz;
   hz = snapToNearbyOctave(hz, reference);
 
   const pitch = analyzeFrequency(hz);
@@ -228,23 +226,31 @@ export function calcPitchAccuracy(samples: VocalSample[]): number {
 
 /**
  * Tone stability — light vibrato must not kill the score.
+ * Uses median absolute deviation around the median (robust to octave glitches).
  */
 export function calcToneStability(samples: VocalSample[]): number {
   const scored = samples.filter((s) => s.scoreable && s.centsFolded !== null);
-  const pool =
-    scored.length >= MIN_SCOREABLE
-      ? scored
-      : samples.filter((s) => s.voiced && s.centsFolded !== null);
-  if (pool.length < 3) return 0;
+  const voiced = samples.filter((s) => s.voiced && s.centsFolded !== null);
+  const pool = scored.length >= 3 ? scored : voiced;
+  if (pool.length === 0) return 0;
+  // Sparse but present voiced frames — don't punish with a hard zero.
+  if (pool.length < 3) {
+    const abs = pool.map((s) => Math.abs(s.centsFolded ?? 99));
+    const avg = abs.reduce((a, b) => a + b, 0) / abs.length;
+    return clampScore(100 - Math.max(0, avg - 20) / 2);
+  }
 
   const values = pool.map((s) => s.centsFolded ?? 0);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance =
-    values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
-  const std = Math.sqrt(variance);
+  const med = median(values);
+  const mad =
+    median(values.map((v) => Math.abs(v - med))) ||
+    Math.sqrt(
+      values.reduce((a, b) => a + (b - med) ** 2, 0) / values.length
+    );
 
-  const excess = Math.max(0, std - NATURAL_VIBRATO_STD_CENTS);
-  return clampScore(100 - (excess / 55) * 100);
+  // First ~12¢ MAD is natural shimmer / light vibrato.
+  const excess = Math.max(0, mad - 12);
+  return clampScore(100 - (excess / 45) * 100);
 }
 
 /**

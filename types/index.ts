@@ -37,6 +37,9 @@ export interface Lesson {
   datetime: string;
   status: LessonStatus;
   reschedule_request: RescheduleRequest;
+  series_id?: string | null;
+  is_recurring?: boolean;
+  preferred_reschedule_at?: string | null;
 }
 
 export interface Exercise {
@@ -151,6 +154,8 @@ export interface ChatMessage {
   media_path: string | null;
   media_mime: string | null;
   media_duration_sec: number | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
 }
 
 export interface GroupChat {
@@ -180,6 +185,8 @@ export interface GroupChatMessage {
   media_path: string | null;
   media_mime: string | null;
   media_duration_sec: number | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
 }
 
 export interface LessonHomework {
