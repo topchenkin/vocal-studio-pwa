@@ -16,30 +16,43 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Scissors,
   Sparkles,
   Square,
   Trash2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { decodeBlobToAudioBuffer, mixAudioBuffersWithOffsets } from "@/lib/wav-client";
+import {
+  decodeBlobToAudioBuffer,
+  mixAudioBuffersWithOffsets,
+} from "@/lib/wav-client";
 
 const MAX_TRACKS = 10;
 const PEAK_BUCKETS = 128;
 const MIN_TIMELINE_SEC = 6;
+const MIN_CLIP_SEC = 0.05;
 
 type Track = {
   id: string;
   name: string;
   blob: Blob;
   url: string;
-  durationSec: number;
+  /** Full source duration */
+  sourceDurationSec: number;
   peaks: number[];
   buffer: AudioBuffer;
-  /** Clip start on the shared timeline (seconds) */
+  /** Clip start on the shared timeline */
   offsetSec: number;
+  /** Inclusive trim window inside the source buffer */
+  trimStartSec: number;
+  trimEndSec: number;
 };
 
 type Props = { locked?: boolean };
+
+function clipDuration(track: Pick<Track, "trimStartSec" | "trimEndSec">) {
+  return Math.max(MIN_CLIP_SEC, track.trimEndSec - track.trimStartSec);
+}
 
 function buildPeaks(buffer: AudioBuffer, buckets = PEAK_BUCKETS): number[] {
   const channel = buffer.getChannelData(0);
@@ -50,6 +63,29 @@ function buildPeaks(buffer: AudioBuffer, buckets = PEAK_BUCKETS): number[] {
     const start = i * block;
     const end = Math.min(channel.length, start + block);
     for (let j = start; j < end; j += 1) {
+      peak = Math.max(peak, Math.abs(channel[j] ?? 0));
+    }
+    peaks.push(peak);
+  }
+  const max = Math.max(...peaks, 0.001);
+  return peaks.map((p) => p / max);
+}
+
+/** Peaks for the visible (trimmed) region only */
+function buildTrimmedPeaks(track: Track, buckets = PEAK_BUCKETS): number[] {
+  const { buffer, trimStartSec, trimEndSec } = track;
+  const sr = buffer.sampleRate;
+  const start = Math.max(0, Math.floor(trimStartSec * sr));
+  const end = Math.min(buffer.length, Math.ceil(trimEndSec * sr));
+  const channel = buffer.getChannelData(0);
+  const len = Math.max(1, end - start);
+  const block = Math.max(1, Math.floor(len / buckets));
+  const peaks: number[] = [];
+  for (let i = 0; i < buckets; i += 1) {
+    let peak = 0;
+    const a = start + i * block;
+    const b = Math.min(end, a + block);
+    for (let j = a; j < b; j += 1) {
       peak = Math.max(peak, Math.abs(channel[j] ?? 0));
     }
     peaks.push(peak);
@@ -75,48 +111,95 @@ function pickRecorderMime(): string {
   return "";
 }
 
+async function decodeWithCtx(
+  ctx: AudioContext,
+  blob: Blob
+): Promise<AudioBuffer> {
+  const bytes = await blob.arrayBuffer();
+  return ctx.decodeAudioData(bytes.slice(0));
+}
+
+type DragMode = "move" | "trim-start" | "trim-end";
+
 function ClipLane({
   track,
   timelineSec,
   playheadSec,
   active,
   disabled,
-  onOffsetChange,
+  onChange,
 }: {
   track: Track;
   timelineSec: number;
   playheadSec: number;
   active: boolean;
   disabled: boolean;
-  onOffsetChange: (offsetSec: number) => void;
+  onChange: (patch: Partial<Track>) => void;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ startX: number; startOffset: number } | null>(null);
+  const dragRef = useRef<{
+    mode: DragMode;
+    startX: number;
+    offsetSec: number;
+    trimStartSec: number;
+    trimEndSec: number;
+  } | null>(null);
 
   const span = Math.max(timelineSec, 0.001);
+  const dur = clipDuration(track);
   const leftPct = (Math.max(0, track.offsetSec) / span) * 100;
-  const widthPct = Math.min(
-    100 - leftPct,
-    (Math.max(track.durationSec, 0.08) / span) * 100
-  );
+  const widthPct = Math.min(100 - leftPct, (Math.max(dur, 0.08) / span) * 100);
   const playheadPct = Math.min(100, (playheadSec / span) * 100);
+  const peaks = useMemo(() => buildTrimmedPeaks(track), [track]);
 
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const onPointerDown = (
+    event: ReactPointerEvent<Element>,
+    mode: DragMode
+  ) => {
     if (disabled) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+    if (event.currentTarget instanceof Element) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     dragRef.current = {
+      mode,
       startX: event.clientX,
-      startOffset: track.offsetSec,
+      offsetSec: track.offsetSec,
+      trimStartSec: track.trimStartSec,
+      trimEndSec: track.trimEndSec,
     };
   };
 
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || !railRef.current) return;
+  const onPointerMove = (event: ReactPointerEvent<Element>) => {
+    const drag = dragRef.current;
+    if (!drag || !railRef.current) return;
     const width = railRef.current.clientWidth || 1;
-    const dx = event.clientX - dragRef.current.startX;
-    const next = dragRef.current.startOffset + (dx / width) * span;
-    const maxOffset = Math.max(0, span - track.durationSec * 0.05);
-    onOffsetChange(Math.min(maxOffset, Math.max(0, next)));
+    const dSec = ((event.clientX - drag.startX) / width) * span;
+
+    if (drag.mode === "move") {
+      onChange({ offsetSec: Math.max(0, drag.offsetSec + dSec) });
+      return;
+    }
+
+    if (drag.mode === "trim-start") {
+      // Keep right edge of clip fixed on timeline (Reaper-like)
+      let nextTrim = drag.trimStartSec + dSec;
+      nextTrim = Math.max(0, Math.min(drag.trimEndSec - MIN_CLIP_SEC, nextTrim));
+      const applied = nextTrim - drag.trimStartSec;
+      onChange({
+        trimStartSec: nextTrim,
+        offsetSec: Math.max(0, drag.offsetSec + applied),
+      });
+      return;
+    }
+
+    // trim-end
+    let nextEnd = drag.trimEndSec + dSec;
+    nextEnd = Math.max(
+      drag.trimStartSec + MIN_CLIP_SEC,
+      Math.min(track.sourceDurationSec, nextEnd)
+    );
+    onChange({ trimEndSec: nextEnd });
   };
 
   const onPointerUp = () => {
@@ -129,45 +212,68 @@ function ClipLane({
       className="relative h-16 overflow-hidden rounded-xl bg-studio-bg ring-1 ring-studio-border"
     >
       <div
-        role="slider"
-        aria-label={`Позиция ${track.name}`}
-        aria-valuemin={0}
-        aria-valuemax={Math.round(span * 1000)}
-        aria-valuenow={Math.round(track.offsetSec * 1000)}
-        tabIndex={disabled ? -1 : 0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        className={`absolute inset-y-1 flex cursor-grab touch-none items-stretch overflow-hidden rounded-lg active:cursor-grabbing ${
+        className={`absolute inset-y-1 flex touch-none items-stretch overflow-hidden rounded-lg ${
           active
             ? "ring-2 ring-studio-accent/70"
             : "ring-1 ring-studio-border/80"
-        } ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
-        style={{ left: `${leftPct}%`, width: `${Math.max(widthPct, 4)}%` }}
+        } ${disabled ? "opacity-70" : ""}`}
+        style={{ left: `${leftPct}%`, width: `${Math.max(widthPct, 5)}%` }}
       >
-        <div className="flex w-5 shrink-0 items-center justify-center bg-studio-accent/25">
-          <GripVertical className="h-4 w-4 text-studio-accent-light" />
+        <button
+          type="button"
+          aria-label="Обрезать начало"
+          disabled={disabled}
+          onPointerDown={(e) => onPointerDown(e, "trim-start")}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className="w-3 shrink-0 cursor-ew-resize bg-studio-gold/40 hover:bg-studio-gold/70 disabled:cursor-not-allowed"
+        />
+        <div
+          role="slider"
+          aria-label={`Позиция ${track.name}`}
+          tabIndex={disabled ? -1 : 0}
+          onPointerDown={(e) => onPointerDown(e, "move")}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className={`flex min-w-0 flex-1 cursor-grab items-stretch active:cursor-grabbing ${
+            disabled ? "cursor-not-allowed" : ""
+          }`}
+        >
+          <div className="flex w-5 shrink-0 items-center justify-center bg-studio-accent/25">
+            <GripVertical className="h-4 w-4 text-studio-accent-light" />
+          </div>
+          <div className="flex min-w-0 flex-1 items-end gap-px bg-studio-card/90 px-1 py-1.5">
+            {peaks.map((peak, index) => {
+              const t =
+                track.offsetSec +
+                (index / Math.max(1, peaks.length - 1)) * dur;
+              const played = active && t <= playheadSec;
+              return (
+                <span
+                  key={index}
+                  className={`w-full rounded-sm ${
+                    played
+                      ? "bg-gradient-to-t from-studio-accent to-studio-gold"
+                      : "bg-studio-accent/35"
+                  }`}
+                  style={{ height: `${Math.max(8, peak * 100)}%` }}
+                />
+              );
+            })}
+          </div>
         </div>
-        <div className="flex min-w-0 flex-1 items-end gap-px bg-studio-card/90 px-1 py-1.5">
-          {track.peaks.map((peak, index) => {
-            const t =
-              track.offsetSec +
-              (index / Math.max(1, track.peaks.length - 1)) * track.durationSec;
-            const played = active && t <= playheadSec;
-            return (
-              <span
-                key={index}
-                className={`w-full rounded-sm ${
-                  played
-                    ? "bg-gradient-to-t from-studio-accent to-studio-gold"
-                    : "bg-studio-accent/35"
-                }`}
-                style={{ height: `${Math.max(8, peak * 100)}%` }}
-              />
-            );
-          })}
-        </div>
+        <button
+          type="button"
+          aria-label="Обрезать конец"
+          disabled={disabled}
+          onPointerDown={(e) => onPointerDown(e, "trim-end")}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className="w-3 shrink-0 cursor-ew-resize bg-studio-gold/40 hover:bg-studio-gold/70 disabled:cursor-not-allowed"
+        />
       </div>
       {playheadSec > 0 && (
         <div
@@ -200,7 +306,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const playDurationRef = useRef(0);
   const playRafRef = useRef<number | null>(null);
   const recordingIdRef = useRef<string | null>(null);
+  const takeIdRef = useRef(0);
   const tracksRef = useRef<Track[]>([]);
+  const stoppingRecRef = useRef(false);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -218,12 +326,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
     const end = Math.max(
       MIN_TIMELINE_SEC,
       playheadSec,
-      ...tracks.map((t) => t.offsetSec + t.durationSec)
+      ...tracks.map((t) => t.offsetSec + clipDuration(t))
     );
     return end + 1;
   }, [playheadSec, tracks]);
 
-  const stopPlayback = () => {
+  const selected = tracks.find((t) => t.id === selectedId) ?? null;
+
+  const stopPlayback = (opts?: { keepPlayhead?: boolean }) => {
     if (playRafRef.current) cancelAnimationFrame(playRafRef.current);
     playRafRef.current = null;
     sourcesRef.current.forEach((source) => {
@@ -235,17 +345,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
     });
     sourcesRef.current = [];
     setPlaying(false);
-    setPlayheadSec(0);
+    if (!opts?.keepPlayhead) {
+      setPlayheadSec(0);
+    }
   };
 
-  const releaseMic = () => {
-    if (recorderRef.current?.state === "recording") {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        /* ignore */
-      }
-    }
+  const releaseMicFully = () => {
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -254,7 +359,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   useEffect(
     () => () => {
-      releaseMic();
+      try {
+        if (recorderRef.current?.state === "recording") {
+          recorderRef.current.stop();
+        }
+      } catch {
+        /* ignore */
+      }
+      releaseMicFully();
       stopPlayback();
       void audioCtxRef.current?.close();
       tracksRef.current.forEach((t) => URL.revokeObjectURL(t.url));
@@ -265,8 +377,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
   );
 
   const ensureAudioCtx = async () => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext({ latencyHint: "playback" });
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      audioCtxRef.current = new AudioContext({ latencyHint: "interactive" });
     }
     if (audioCtxRef.current.state === "suspended") {
       await audioCtxRef.current.resume();
@@ -275,11 +387,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const ensureMic = async () => {
-    if (
-      streamRef.current &&
-      streamRef.current.getAudioTracks().some((t) => t.readyState === "live")
-    ) {
-      return streamRef.current;
+    const existing = streamRef.current;
+    if (existing?.getAudioTracks().some((t) => t.readyState === "live")) {
+      return existing;
     }
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -312,34 +422,57 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const playLanes = (ctx: AudioContext, list: Track[], when: number) => {
     if (list.length === 0) return 0.1;
     const duration = Math.max(
-      ...list.map((t) => t.offsetSec + t.buffer.duration),
+      ...list.map((t) => t.offsetSec + clipDuration(t)),
       0.1
     );
     sourcesRef.current = list.map((track) => {
       const source = ctx.createBufferSource();
       source.buffer = track.buffer;
       source.connect(ctx.destination);
-      source.start(when + Math.max(0, track.offsetSec));
+      const playDur = clipDuration(track);
+      // offset into buffer, duration — avoids playing trimmed tails/heads
+      source.start(
+        when + Math.max(0, track.offsetSec),
+        track.trimStartSec,
+        playDur
+      );
       return source;
     });
     return duration;
   };
 
-  const setTrackOffset = (id: string, offsetSec: number) => {
+  const patchTrack = (id: string, patch: Partial<Track>) => {
     setTracks((current) =>
-      current.map((track) =>
-        track.id === id
-          ? { ...track, offsetSec: Math.max(0, offsetSec) }
-          : track
-      )
+      current.map((track) => (track.id === id ? { ...track, ...patch } : track))
     );
   };
 
   const nudgeSelected = (deltaSec: number) => {
-    if (!selectedId || recordingId || playing) return;
-    const track = tracks.find((t) => t.id === selectedId);
-    if (!track) return;
-    setTrackOffset(selectedId, track.offsetSec + deltaSec);
+    if (!selected || recordingId || playing) return;
+    patchTrack(selected.id, {
+      offsetSec: Math.max(0, selected.offsetSec + deltaSec),
+    });
+  };
+
+  /** Trim selected clip at current playhead (start or end). */
+  const trimSelectedAtPlayhead = (edge: "start" | "end") => {
+    if (!selected || recordingId) return;
+    const clipStart = selected.offsetSec;
+    const clipEnd = selected.offsetSec + clipDuration(selected);
+    if (playheadSec <= clipStart + 0.01 || playheadSec >= clipEnd - 0.01) {
+      return;
+    }
+    const local = playheadSec - clipStart;
+    if (edge === "start") {
+      patchTrack(selected.id, {
+        trimStartSec: selected.trimStartSec + local,
+        offsetSec: playheadSec,
+      });
+      return;
+    }
+    patchTrack(selected.id, {
+      trimEndSec: selected.trimStartSec + local,
+    });
   };
 
   const listenOnly = async () => {
@@ -348,7 +481,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setError("");
     try {
       const ctx = await ensureAudioCtx();
-      const t0 = ctx.currentTime;
+      const t0 = ctx.currentTime + 0.02;
       const duration = playLanes(ctx, monitorTracks, t0);
       startPlayhead(ctx, duration, t0);
     } catch (err) {
@@ -358,34 +491,67 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const startOverdub = async () => {
-    if (tracks.length >= MAX_TRACKS || recordingId) return;
+    if (tracks.length >= MAX_TRACKS || recordingId || stoppingRecRef.current) {
+      return;
+    }
     setError("");
     stopPlayback();
+
+    const take = ++takeIdRef.current;
+
     try {
       const ctx = await ensureAudioCtx();
       const stream = await ensureMic();
-      chunksRef.current = [];
+      // Per-take chunk list (closure) — never share with the next recording
+      const chunks: Blob[] = [];
+      chunksRef.current = chunks;
       const id = crypto.randomUUID();
       const mime = pickRecorderMime();
-      const recorder = new MediaRecorder(
-        stream,
-        mime ? { mimeType: mime } : undefined
-      );
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
       recorderRef.current = recorder;
+
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
+        // Ignore late events from an older take
+        if (take !== takeIdRef.current) return;
+        if (event.data.size > 0) chunks.push(event.data);
       };
+
+      recorder.onerror = () => {
+        if (take !== takeIdRef.current) return;
+        setError("Сбой записи микрофона. Попробуйте ещё раз.");
+        setRecordingId(null);
+        recorderRef.current = null;
+        stopPlayback();
+      };
+
       recorder.onstop = () => {
         void (async () => {
+          if (take !== takeIdRef.current) return;
+          stoppingRecRef.current = false;
+          // Stop monitor after capture fully finalized — avoids glitches mid-stop
           stopPlayback();
           setRecordingId(null);
           recorderRef.current = null;
 
-          const blob = new Blob(chunksRef.current, {
-            type: recorder.mimeType || "audio/webm",
+          if (chunks.length === 0) {
+            setError("Пустая запись — микрофон не отдал данные. Попробуйте снова.");
+            return;
+          }
+
+          const blob = new Blob(chunks, {
+            type: recorder.mimeType || mime || "audio/webm",
           });
+          if (blob.size < 256) {
+            setError("Запись слишком короткая или повреждена.");
+            return;
+          }
+
           try {
-            const buffer = await decodeBlobToAudioBuffer(blob);
+            // Decode on the SAME AudioContext — avoids device reset / audio jumps
+            // that happen when opening a throwaway AudioContext per take.
+            const buffer = await decodeWithCtx(ctx, blob);
             const url = URL.createObjectURL(blob);
             const peaks = buildPeaks(buffer);
             setTracks((current) => {
@@ -396,10 +562,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   name: `Дорожка ${current.length + 1}`,
                   blob,
                   url,
-                  durationSec: buffer.duration,
+                  sourceDurationSec: buffer.duration,
                   peaks,
                   buffer,
                   offsetSec: 0,
+                  trimStartSec: 0,
+                  trimEndSec: buffer.duration,
                 },
               ];
               setMonitorIds((ids) => [...ids, id]);
@@ -407,31 +575,72 @@ export default function MultitrackMixer({ locked = false }: Props) {
               return next;
             });
           } catch (err) {
-            setError(
-              err instanceof Error
-                ? err.message
-                : "Не удалось обработать запись"
-            );
+            // Fallback decode path
+            try {
+              const buffer = await decodeBlobToAudioBuffer(blob);
+              const url = URL.createObjectURL(blob);
+              setTracks((current) => [
+                ...current,
+                {
+                  id,
+                  name: `Дорожка ${current.length + 1}`,
+                  blob,
+                  url,
+                  sourceDurationSec: buffer.duration,
+                  peaks: buildPeaks(buffer),
+                  buffer,
+                  offsetSec: 0,
+                  trimStartSec: 0,
+                  trimEndSec: buffer.duration,
+                },
+              ]);
+              setMonitorIds((ids) => [...ids, id]);
+              setSelectedId(id);
+            } catch {
+              setError(
+                err instanceof Error
+                  ? err.message
+                  : "Не удалось обработать запись"
+              );
+            }
           }
           setPlayheadSec(0);
         })();
       };
 
-      const t0 = ctx.currentTime;
+      // Start monitor slightly ahead so first buffer is scheduled cleanly
+      const t0 = ctx.currentTime + 0.03;
       const monitorDuration = playLanes(ctx, monitorTracks, t0);
-      recorder.start(100);
+      // No timeslice: one continuous stream — timeslices caused dropouts / gaps
+      recorder.start();
       setRecordingId(id);
       startPlayhead(ctx, Math.max(monitorDuration, 3600), t0);
     } catch {
       setError("Не удалось получить доступ к микрофону");
-      releaseMic();
+      releaseMicFully();
       stopPlayback();
     }
   };
 
   const stopAll = () => {
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      if (stoppingRecRef.current) return;
+      stoppingRecRef.current = true;
+      try {
+        // Flush final bytes before stop — prevents truncated takes
+        if (typeof recorder.requestData === "function") {
+          recorder.requestData();
+        }
+      } catch {
+        /* some browsers throw if no data yet */
+      }
+      try {
+        recorder.stop();
+      } catch {
+        stoppingRecRef.current = false;
+        setRecordingId(null);
+      }
       return;
     }
     stopPlayback();
@@ -449,11 +658,16 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const resetAll = () => {
-    stopAll();
-    if (recorderRef.current?.state !== "recording") {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+    takeIdRef.current += 1;
+    if (recorderRef.current?.state === "recording") {
+      try {
+        recorderRef.current.stop();
+      } catch {
+        /* ignore */
+      }
     }
+    stopPlayback();
+    releaseMicFully();
     setTracks((current) => {
       current.forEach((t) => URL.revokeObjectURL(t.url));
       return [];
@@ -467,6 +681,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setMixPeaks([]);
     setError("");
     setPlayheadSec(0);
+    stoppingRecRef.current = false;
   };
 
   const mixAll = async () => {
@@ -478,9 +693,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
         tracks.map((track) => ({
           buffer: track.buffer,
           offsetSec: track.offsetSec,
+          trimStartSec: track.trimStartSec,
+          trimEndSec: track.trimEndSec,
         }))
       );
-      const mixBuffer = await decodeBlobToAudioBuffer(mixed);
+      const ctx = await ensureAudioCtx();
+      const mixBuffer = await decodeWithCtx(ctx, mixed);
       if (mixUrl) URL.revokeObjectURL(mixUrl);
       setMixUrl(URL.createObjectURL(mixed));
       setMixPeaks(buildPeaks(mixBuffer, 140));
@@ -520,10 +738,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Сведение дорожек
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Мини-редактор как в Reaper: запишите партии, затем{" "}
-            <span className="text-studio-text">перетащите клипы</span> по
-            шкале или сдвиньте кнопками — пока не лягут идеально. Потом
-            сведите в один файл.
+            Мини-редактор: запись, перетаскивание клипов, обрезка краёв
+            (золотые ручки) и сведение. Сначала выровняйте на слух — потом
+            «Свести всё».
           </p>
         </div>
       </div>
@@ -531,9 +748,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
       <div className="mt-4 flex items-start gap-2 rounded-2xl bg-studio-bg/70 px-3 py-2.5 text-xs text-studio-muted ring-1 ring-studio-border">
         <Headphones className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
         <p>
-          Наушники обязательны. Галочка = дорожка звучит при записи/прослушке.
-          После дубля выберите клип и подвигайте его, слушая микс — так всегда
-          попадаете в синхрон.
+          Наушники обязательны. Перетаскивание середины клипа — сдвиг, краёв —
+          обрезка. Кнопки «Обрезать» режут по playhead во время прослушки.
         </p>
       </div>
 
@@ -567,7 +783,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
           variant="secondary"
           disabled={monitorTracks.length === 0 || Boolean(recordingId)}
           onClick={() =>
-            playing && !recordingId ? stopPlayback() : void listenOnly()
+            playing && !recordingId
+              ? stopPlayback({ keepPlayhead: true })
+              : void listenOnly()
           }
         >
           {playing && !recordingId ? (
@@ -603,31 +821,68 @@ export default function MultitrackMixer({ locked = false }: Props) {
         </Button>
       </div>
 
-      {/* Nudge bar */}
-      {selectedId && !recordingId && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-studio-card px-3 py-2 ring-1 ring-studio-border">
-          <span className="text-xs text-studio-muted">Сдвиг клипа:</span>
-          {[
-            { label: "−100 мс", d: -0.1 },
-            { label: "−10 мс", d: -0.01 },
-            { label: "+10 мс", d: 0.01 },
-            { label: "+100 мс", d: 0.1 },
-          ].map((btn) => (
+      {selected && !recordingId && (
+        <div className="mt-4 space-y-2 rounded-2xl bg-studio-card px-3 py-3 ring-1 ring-studio-border">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-studio-muted">Сдвиг:</span>
+            {[
+              { label: "−100 мс", d: -0.1 },
+              { label: "−10 мс", d: -0.01 },
+              { label: "+10 мс", d: 0.01 },
+              { label: "+100 мс", d: 0.1 },
+            ].map((btn) => (
+              <button
+                key={btn.label}
+                type="button"
+                disabled={busy}
+                onClick={() => nudgeSelected(btn.d)}
+                className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/50 disabled:opacity-40"
+              >
+                {btn.label}
+              </button>
+            ))}
+            <span className="ml-auto text-xs tabular-nums text-studio-muted">
+              старт {formatTime(selected.offsetSec)} · длина{" "}
+              {formatTime(clipDuration(selected))}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-xs text-studio-muted">
+              <Scissors className="h-3.5 w-3.5" />
+              Обрезка по playhead:
+            </span>
             <button
-              key={btn.label}
               type="button"
               disabled={busy}
-              onClick={() => nudgeSelected(btn.d)}
-              className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/50 disabled:opacity-40"
+              onClick={() => trimSelectedAtPlayhead("start")}
+              className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-amber-400/50 disabled:opacity-40"
+              title="Поставьте playhead на клип (Слушать) и обрежьте начало до этой точки"
             >
-              {btn.label}
+              Обрезать начало
             </button>
-          ))}
-          <span className="ml-auto text-xs tabular-nums text-studio-muted">
-            {formatTime(
-              tracks.find((t) => t.id === selectedId)?.offsetSec ?? 0
-            )}
-          </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => trimSelectedAtPlayhead("end")}
+              className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-amber-400/50 disabled:opacity-40"
+              title="Поставьте playhead на клип (Слушать) и обрежьте конец до этой точки"
+            >
+              Обрезать конец
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                patchTrack(selected.id, {
+                  trimStartSec: 0,
+                  trimEndSec: selected.sourceDurationSec,
+                })
+              }
+              className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text disabled:opacity-40"
+            >
+              Сбросить обрезку
+            </button>
+          </div>
         </div>
       )}
 
@@ -652,16 +907,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
       <div className="mt-3 space-y-3">
         {tracks.map((track, index) => {
           const monitored = monitorIds.includes(track.id);
-          const selected = selectedId === track.id;
+          const isSelected = selectedId === track.id;
           return (
             <div
               key={track.id}
               className={`rounded-2xl bg-studio-card p-3 ring-1 transition ${
-                selected
+                isSelected
                   ? "ring-studio-accent/55"
-                  : monitored
-                    ? "ring-studio-border"
-                    : "ring-studio-border/70"
+                  : "ring-studio-border"
               }`}
             >
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -689,7 +942,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                     </span>
                     <span className="truncate">{track.name}</span>
                     <span className="text-xs text-studio-muted">
-                      {formatTime(track.durationSec)} · старт{" "}
+                      {formatTime(clipDuration(track))} · @
                       {formatTime(track.offsetSec)}
                     </span>
                   </button>
@@ -704,19 +957,16 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              <div
-                onPointerDown={() => setSelectedId(track.id)}
-                className="contents"
-              >
+              <div onPointerDown={() => setSelectedId(track.id)}>
                 <ClipLane
                   track={track}
                   timelineSec={timelineSec}
                   playheadSec={
                     monitored || recordingId || playing ? playheadSec : 0
                   }
-                  active={selected || monitored}
+                  active={isSelected || monitored}
                   disabled={busy}
-                  onOffsetChange={(offset) => setTrackOffset(track.id, offset)}
+                  onChange={(patch) => patchTrack(track.id, patch)}
                 />
               </div>
             </div>
@@ -725,8 +975,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
         {tracks.length === 0 && !recordingId && (
           <div className="rounded-2xl border border-dashed border-studio-border px-4 py-10 text-center text-sm text-studio-muted">
-            1) Запишите первую дорожку → 2) отметьте её → 3) «Запись с
-            прослушкой» → 4) перетащите новый клип, пока не совпадёт с первой.
+            Запишите дорожки → подвигайте и обрежьте клипы → «Свести всё».
           </div>
         )}
       </div>

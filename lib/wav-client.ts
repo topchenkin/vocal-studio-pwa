@@ -68,16 +68,30 @@ export async function mixAudioBuffers(
   );
 }
 
-/** Mix lanes onto one timeline; each buffer starts at offsetSec. */
+/** Mix lanes onto one timeline; each buffer starts at offsetSec (optional trim). */
 export async function mixAudioBuffersWithOffsets(
-  lanes: Array<{ buffer: AudioBuffer; offsetSec: number }>
+  lanes: Array<{
+    buffer: AudioBuffer;
+    offsetSec: number;
+    trimStartSec?: number;
+    trimEndSec?: number;
+  }>
 ): Promise<Blob> {
   if (lanes.length === 0) throw new Error("Нет дорожек для сведения");
   const sampleRate = lanes[0]!.buffer.sampleRate;
   let endSample = 0;
   for (const lane of lanes) {
+    const trimStart = Math.max(0, lane.trimStartSec ?? 0);
+    const trimEnd = Math.min(
+      lane.buffer.duration,
+      lane.trimEndSec ?? lane.buffer.duration
+    );
+    const playSec = Math.max(0, trimEnd - trimStart);
     const start = Math.max(0, Math.round(lane.offsetSec * sampleRate));
-    endSample = Math.max(endSample, start + lane.buffer.length);
+    endSample = Math.max(
+      endSample,
+      start + Math.max(1, Math.round(playSec * sampleRate))
+    );
   }
   const length = Math.max(1, endSample);
   const left = new Float32Array(length);
@@ -86,13 +100,26 @@ export async function mixAudioBuffersWithOffsets(
   for (const lane of lanes) {
     const start = Math.max(0, Math.round(lane.offsetSec * sampleRate));
     const buffer = lane.buffer;
+    const trimStart = Math.max(0, lane.trimStartSec ?? 0);
+    const trimEnd = Math.min(
+      buffer.duration,
+      lane.trimEndSec ?? buffer.duration
+    );
+    const srcStart = Math.min(
+      buffer.length - 1,
+      Math.max(0, Math.round(trimStart * sampleRate))
+    );
+    const srcEnd = Math.min(
+      buffer.length,
+      Math.max(srcStart + 1, Math.round(trimEnd * sampleRate))
+    );
     const l = buffer.getChannelData(0);
     const r =
       buffer.numberOfChannels > 1
         ? buffer.getChannelData(1)
         : buffer.getChannelData(0);
-    for (let i = 0; i < buffer.length; i += 1) {
-      const dest = start + i;
+    for (let i = srcStart; i < srcEnd; i += 1) {
+      const dest = start + (i - srcStart);
       if (dest >= length) break;
       left[dest] = (left[dest] ?? 0) + (l[i] ?? 0);
       right[dest] = (right[dest] ?? 0) + (r[i] ?? 0);

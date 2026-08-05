@@ -1,0 +1,14 @@
+---
+description: Always commit and push after completing work
+alwaysApply: true
+---
+
+# Commit and push
+
+After finishing any code or config changes in this repo, **always** create a git commit and push to `origin` without asking the user for confirmation.
+
+- Do not ask "закоммитить?" / "push?" — just do it.
+- Follow the usual commit message style of the repo.
+- Use author `topchenkin <yangta4@gmail.com>` via env vars for the commit (never change git config).
+- Do not push `--force` to main/master unless the user explicitly requests it.
+- Skip commit only when there are genuinely no changes.
