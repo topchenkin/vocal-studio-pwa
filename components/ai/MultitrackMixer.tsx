@@ -17,6 +17,7 @@ import {
   Play,
   RotateCcw,
   Scissors,
+  SkipBack,
   Sparkles,
   Square,
   Trash2,
@@ -275,12 +276,134 @@ function ClipLane({
           className="w-3 shrink-0 cursor-ew-resize bg-studio-gold/40 hover:bg-studio-gold/70 disabled:cursor-not-allowed"
         />
       </div>
-      {playheadSec > 0 && (
+      <div
+        className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.7)]"
+        style={{ left: `${playheadPct}%` }}
+      />
+    </div>
+  );
+}
+
+/** Click/drag ruler to set playback cue on the shared timeline. */
+function TimelineScrubber({
+  timelineSec,
+  playheadSec,
+  disabled,
+  onSeekStart,
+  onSeek,
+  onSeekEnd,
+}: {
+  timelineSec: number;
+  playheadSec: number;
+  disabled: boolean;
+  onSeekStart: () => void;
+  onSeek: (sec: number) => void;
+  onSeekEnd: () => void;
+}) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const span = Math.max(timelineSec, 0.001);
+  const playheadPct = Math.min(100, (playheadSec / span) * 100);
+
+  const marks = useMemo(() => {
+    const step = span > 60 ? 10 : span > 20 ? 5 : span > 8 ? 2 : 1;
+    const out: number[] = [];
+    for (let t = 0; t <= span + 0.001; t += step) out.push(t);
+    return out;
+  }, [span]);
+
+  const secFromClientX = (clientX: number) => {
+    const el = railRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return ratio * span;
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px] text-studio-muted">
+        <span>Старт с · клик / перетаскивание</span>
+        <span className="tabular-nums font-medium text-studio-text">
+          {formatTime(playheadSec)}
+        </span>
+      </div>
+      <div
+        ref={railRef}
+        role="slider"
+        aria-label="Позиция воспроизведения"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(span)}
+        aria-valuenow={Math.round(playheadSec)}
+        tabIndex={disabled ? -1 : 0}
+        onPointerDown={(event) => {
+          if (disabled) return;
+          draggingRef.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          onSeekStart();
+          onSeek(secFromClientX(event.clientX));
+        }}
+        onPointerMove={(event) => {
+          if (!draggingRef.current || disabled) return;
+          onSeek(secFromClientX(event.clientX));
+        }}
+        onPointerUp={() => {
+          if (!draggingRef.current) return;
+          draggingRef.current = false;
+          onSeekEnd();
+        }}
+        onPointerCancel={() => {
+          draggingRef.current = false;
+          onSeekEnd();
+        }}
+        onKeyDown={(event) => {
+          if (disabled) return;
+          const step = event.shiftKey ? 1 : 0.1;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            onSeekStart();
+            onSeek(Math.max(0, playheadSec - step));
+            onSeekEnd();
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            onSeekStart();
+            onSeek(Math.min(span, playheadSec + step));
+            onSeekEnd();
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            onSeekStart();
+            onSeek(0);
+            onSeekEnd();
+          }
+        }}
+        className={`relative h-11 touch-none select-none overflow-hidden rounded-xl bg-studio-bg ring-1 ring-studio-border ${
+          disabled
+            ? "cursor-not-allowed opacity-60"
+            : "cursor-ew-resize hover:ring-studio-accent/40"
+        }`}
+      >
+        <div className="absolute inset-x-2 bottom-1.5 top-5">
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-studio-border" />
+          {marks.map((t) => (
+            <div
+              key={t}
+              className="absolute top-0 flex -translate-x-1/2 flex-col items-center"
+              style={{ left: `${(t / span) * 100}%` }}
+            >
+              <span className="h-2 w-px bg-studio-muted/50" />
+              <span className="mt-0.5 text-[9px] tabular-nums text-studio-muted">
+                {Math.floor(t / 60)}:{String(Math.floor(t % 60)).padStart(2, "0")}
+              </span>
+            </div>
+          ))}
+        </div>
         <div
-          className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-white/90 shadow-[0_0_8px_rgba(255,255,255,0.7)]"
+          className="pointer-events-none absolute inset-y-1 z-10 w-0.5 bg-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.75)]"
           style={{ left: `${playheadPct}%` }}
-        />
-      )}
+        >
+          <span className="absolute -top-0.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-sm bg-rose-300" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -303,12 +426,15 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const playStartedAtRef = useRef(0);
+  const playFromSecRef = useRef(0);
   const playDurationRef = useRef(0);
   const playRafRef = useRef<number | null>(null);
   const recordingIdRef = useRef<string | null>(null);
+  const playheadSecRef = useRef(0);
   const takeIdRef = useRef(0);
   const tracksRef = useRef<Track[]>([]);
   const stoppingRecRef = useRef(false);
+  const resumeAfterSeekRef = useRef(false);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -316,6 +442,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   useEffect(() => {
     recordingIdRef.current = recordingId;
   }, [recordingId]);
+  useEffect(() => {
+    playheadSecRef.current = playheadSec;
+  }, [playheadSec]);
 
   const monitorTracks = useMemo(
     () => tracks.filter((track) => monitorIds.includes(track.id)),
@@ -403,15 +532,23 @@ export default function MultitrackMixer({ locked = false }: Props) {
     return stream;
   };
 
-  const startPlayhead = (ctx: AudioContext, durationSec: number, t0: number) => {
-    playDurationRef.current = Math.max(durationSec, 0.1);
+  const startPlayhead = (
+    ctx: AudioContext,
+    endSec: number,
+    t0: number,
+    fromSec: number
+  ) => {
+    playFromSecRef.current = Math.max(0, fromSec);
+    playDurationRef.current = Math.max(endSec, fromSec + 0.1);
     playStartedAtRef.current = t0;
+    setPlayheadSec(playFromSecRef.current);
     setPlaying(true);
     const tick = () => {
       const elapsed = ctx.currentTime - playStartedAtRef.current;
-      setPlayheadSec(Math.max(0, elapsed));
-      if (!recordingIdRef.current && elapsed >= playDurationRef.current) {
-        stopPlayback();
+      const pos = playFromSecRef.current + elapsed;
+      setPlayheadSec(Math.max(0, pos));
+      if (!recordingIdRef.current && pos >= playDurationRef.current) {
+        stopPlayback({ keepPlayhead: true });
         return;
       }
       playRafRef.current = requestAnimationFrame(tick);
@@ -419,25 +556,47 @@ export default function MultitrackMixer({ locked = false }: Props) {
     playRafRef.current = requestAnimationFrame(tick);
   };
 
-  const playLanes = (ctx: AudioContext, list: Track[], when: number) => {
-    if (list.length === 0) return 0.1;
+  /**
+   * Schedule monitored clips from a timeline cue (`fromSec`).
+   * Clips that end before the cue are skipped; mid-clip starts use buffer offset.
+   */
+  const playLanes = (
+    ctx: AudioContext,
+    list: Track[],
+    when: number,
+    fromSec = 0
+  ) => {
+    const cue = Math.max(0, fromSec);
+    if (list.length === 0) return cue + 0.1;
     const duration = Math.max(
       ...list.map((t) => t.offsetSec + clipDuration(t)),
+      cue + 0.1,
       0.1
     );
-    sourcesRef.current = list.map((track) => {
+    const sources: AudioBufferSourceNode[] = [];
+    for (const track of list) {
+      const clipStart = Math.max(0, track.offsetSec);
+      const playDur = clipDuration(track);
+      const clipEnd = clipStart + playDur;
+      if (cue >= clipEnd - 0.0005) continue;
+
       const source = ctx.createBufferSource();
       source.buffer = track.buffer;
       source.connect(ctx.destination);
-      const playDur = clipDuration(track);
-      // offset into buffer, duration — avoids playing trimmed tails/heads
-      source.start(
-        when + Math.max(0, track.offsetSec),
-        track.trimStartSec,
-        playDur
-      );
-      return source;
-    });
+
+      if (cue <= clipStart) {
+        source.start(
+          when + (clipStart - cue),
+          track.trimStartSec,
+          playDur
+        );
+      } else {
+        const into = cue - clipStart;
+        source.start(when, track.trimStartSec + into, playDur - into);
+      }
+      sources.push(source);
+    }
+    sourcesRef.current = sources;
     return duration;
   };
 
@@ -477,17 +636,38 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const listenOnly = async () => {
     if (recordingId || monitorTracks.length === 0) return;
-    stopPlayback();
+    const fromSec = playheadSecRef.current;
+    stopPlayback({ keepPlayhead: true });
     setError("");
     try {
       const ctx = await ensureAudioCtx();
       const t0 = ctx.currentTime + 0.02;
-      const duration = playLanes(ctx, monitorTracks, t0);
-      startPlayhead(ctx, duration, t0);
+      const duration = playLanes(ctx, monitorTracks, t0, fromSec);
+      startPlayhead(ctx, duration, t0, fromSec);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось воспроизвести");
-      stopPlayback();
+      stopPlayback({ keepPlayhead: true });
     }
+  };
+
+  const seekTo = (sec: number) => {
+    const next = Math.max(0, Math.min(sec, timelineSec));
+    playheadSecRef.current = next;
+    setPlayheadSec(next);
+  };
+
+  const onSeekStart = () => {
+    if (recordingId) return;
+    resumeAfterSeekRef.current = playing && !recordingId;
+    if (playing) {
+      stopPlayback({ keepPlayhead: true });
+    }
+  };
+
+  const onSeekEnd = () => {
+    if (!resumeAfterSeekRef.current) return;
+    resumeAfterSeekRef.current = false;
+    void listenOnly();
   };
 
   const startOverdub = async () => {
@@ -495,7 +675,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
       return;
     }
     setError("");
-    stopPlayback();
+    const cueSec = playheadSecRef.current;
+    stopPlayback({ keepPlayhead: true });
 
     const take = ++takeIdRef.current;
 
@@ -565,7 +746,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   sourceDurationSec: buffer.duration,
                   peaks,
                   buffer,
-                  offsetSec: 0,
+                  // Align punch-in take to the cue where recording began
+                  offsetSec: cueSec,
                   trimStartSec: 0,
                   trimEndSec: buffer.duration,
                 },
@@ -589,7 +771,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   sourceDurationSec: buffer.duration,
                   peaks: buildPeaks(buffer),
                   buffer,
-                  offsetSec: 0,
+                  offsetSec: cueSec,
                   trimStartSec: 0,
                   trimEndSec: buffer.duration,
                 },
@@ -604,17 +786,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
               );
             }
           }
-          setPlayheadSec(0);
+          setPlayheadSec(cueSec);
         })();
       };
 
       // Start monitor slightly ahead so first buffer is scheduled cleanly
       const t0 = ctx.currentTime + 0.03;
-      const monitorDuration = playLanes(ctx, monitorTracks, t0);
+      const monitorDuration = playLanes(ctx, monitorTracks, t0, cueSec);
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
       setRecordingId(id);
-      startPlayhead(ctx, Math.max(monitorDuration, 3600), t0);
+      startPlayhead(ctx, Math.max(monitorDuration, cueSec + 3600), t0, cueSec);
     } catch {
       setError("Не удалось получить доступ к микрофону");
       releaseMicFully();
@@ -738,9 +920,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Сведение дорожек
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Мини-редактор: запись, перетаскивание клипов, обрезка краёв
-            (золотые ручки) и сведение. Сначала выровняйте на слух — потом
-            «Свести всё».
+            Мини-редактор: запись, старт с метки на линейке, сдвиг/обрезка
+            клипов и сведение. Поставьте курсор — «Слушать» и запись пойдут
+            с этого времени.
           </p>
         </div>
       </div>
@@ -748,8 +930,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
       <div className="mt-4 flex items-start gap-2 rounded-2xl bg-studio-bg/70 px-3 py-2.5 text-xs text-studio-muted ring-1 ring-studio-border">
         <Headphones className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
         <p>
-          Наушники обязательны. Перетаскивание середины клипа — сдвиг, краёв —
-          обрезка. Кнопки «Обрезать» режут по playhead во время прослушки.
+          Наушники обязательны. Линейка сверху — старт с выбранного времени
+          (прослушка и запись с punch-in). Клип: середина — сдвиг, края —
+          обрезка.
         </p>
       </div>
 
@@ -886,7 +1069,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between text-xs text-studio-muted">
+      <div className="mt-4 flex items-center justify-between gap-2 text-xs text-studio-muted">
         <span className="font-medium text-studio-text">
           {recordingId ? (
             <span className="inline-flex items-center gap-1.5 text-rose-300">
@@ -897,12 +1080,41 @@ export default function MultitrackMixer({ locked = false }: Props) {
             <span>PLAY · {formatTime(playheadSec)}</span>
           ) : (
             <span>
-              Таймлайн · {tracks.length}/{MAX_TRACKS}
+              Курс · {formatTime(playheadSec)} · {tracks.length}/{MAX_TRACKS}
             </span>
           )}
         </span>
-        <span>~{formatTime(timelineSec)}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={Boolean(recordingId) || playheadSec <= 0}
+            onClick={() => {
+              onSeekStart();
+              seekTo(0);
+              onSeekEnd();
+            }}
+            className="inline-flex items-center gap-1 rounded-lg bg-studio-card px-2 py-1 text-[11px] font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/45 disabled:opacity-40"
+            title="В начало таймлайна"
+          >
+            <SkipBack className="h-3.5 w-3.5" />
+            В начало
+          </button>
+          <span>~{formatTime(timelineSec)}</span>
+        </div>
       </div>
+
+      {tracks.length > 0 && (
+        <div className="mt-3">
+          <TimelineScrubber
+            timelineSec={timelineSec}
+            playheadSec={playheadSec}
+            disabled={Boolean(recordingId)}
+            onSeekStart={onSeekStart}
+            onSeek={seekTo}
+            onSeekEnd={onSeekEnd}
+          />
+        </div>
+      )}
 
       <div className="mt-3 space-y-3">
         {tracks.map((track, index) => {
@@ -961,9 +1173,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                 <ClipLane
                   track={track}
                   timelineSec={timelineSec}
-                  playheadSec={
-                    monitored || recordingId || playing ? playheadSec : 0
-                  }
+                  playheadSec={playheadSec}
                   active={isSelected || monitored}
                   disabled={busy}
                   onChange={(patch) => patchTrack(track.id, patch)}
