@@ -23,6 +23,12 @@ import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
+const WEEKDAY_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
+
+function weekdayShort(date: Date) {
+  return WEEKDAY_SHORT[date.getDay()] ?? "—";
+}
+
 function statusBadge(status: Lesson["status"], hasStudent: boolean) {
   if (status === "completed") return <Badge variant="success">Завершён</Badge>;
   if (status === "cancelled") return <Badge variant="muted">Отменён</Badge>;
@@ -59,8 +65,11 @@ function ScheduleCard({
     <article className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border transition hover:ring-studio-accent/30">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent/10">
-            <CalendarDays className="h-5 w-5 text-studio-accent" />
+          <div
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-studio-accent/10 text-sm font-semibold text-studio-accent"
+            aria-label={weekdayShort(lessonDate)}
+          >
+            {weekdayShort(lessonDate)}
           </div>
           <div>
             <p className="font-medium">
