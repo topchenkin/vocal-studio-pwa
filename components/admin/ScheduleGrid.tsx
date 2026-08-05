@@ -16,6 +16,7 @@ import {
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import NumberInput from "@/components/ui/NumberInput";
 import MonthCalendar, {
   localDateKey,
 } from "@/components/calendar/MonthCalendar";
@@ -742,13 +743,12 @@ export default function ScheduleGrid() {
               <span className="mb-1.5 block text-xs font-medium text-studio-muted">
                 Сколько недель подряд
               </span>
-              <input
-                type="number"
+              <NumberInput
                 min={2}
                 max={52}
                 value={weeklyCount}
-                onChange={(event) => setWeeklyCount(Number(event.target.value))}
-                className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+                emptyValue={8}
+                onChange={setWeeklyCount}
               />
             </label>
           )}

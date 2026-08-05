@@ -15,6 +15,7 @@ import {
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import NumberInput from "@/components/ui/NumberInput";
 import HomeworkAssigner from "@/components/admin/HomeworkAssigner";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -363,20 +364,11 @@ function StudentEditor({
               value={draft.lesson_pay_type}
               onChange={(event) => {
                 const nextType = event.target.value as LessonPayType;
+                // Keep both prices in draft — zeroing the inactive one made
+                // the field stick at 0 after switching pay type.
                 setDraft((current) =>
                   current
-                    ? {
-                        ...current,
-                        lesson_pay_type: nextType,
-                        custom_lesson_price:
-                          nextType === "one_time"
-                            ? current.custom_lesson_price
-                            : 0,
-                        custom_abonement_price:
-                          nextType === "abonement"
-                            ? current.custom_abonement_price
-                            : 0,
-                      }
+                    ? { ...current, lesson_pay_type: nextType }
                     : current
                 );
               }}
@@ -388,7 +380,7 @@ function StudentEditor({
           </label>
         </div>
 
-        <NumberField
+        <NumberInput
           label={
             draft.lesson_pay_type === "abonement"
               ? "Стоимость абонемента, ₽"
@@ -414,7 +406,7 @@ function StudentEditor({
             <p className="mb-1.5 text-xs font-medium text-studio-muted">
               Остаток уроков
             </p>
-            <div className="flex items-center justify-between rounded-xl bg-studio-surface p-2 ring-1 ring-studio-border">
+            <div className="flex items-center gap-2 rounded-xl bg-studio-surface p-2 ring-1 ring-studio-border">
               <button
                 type="button"
                 onClick={() =>
@@ -423,23 +415,27 @@ function StudentEditor({
                     Math.max(0, draft.lessons_balance - 1)
                   )
                 }
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-studio-card text-studio-muted hover:text-studio-text"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-studio-card text-studio-muted hover:text-studio-text"
               >
                 <Minus className="h-4 w-4" />
               </button>
-              <span className="text-lg font-semibold">{draft.lessons_balance}</span>
+              <NumberInput
+                value={draft.lessons_balance}
+                onChange={(value) => updateDraft("lessons_balance", value)}
+                className="w-full rounded-lg bg-studio-bg px-2 py-2 text-center text-lg font-semibold tabular-nums ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+              />
               <button
                 type="button"
                 onClick={() =>
                   updateDraft("lessons_balance", draft.lessons_balance + 1)
                 }
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-studio-accent/20 text-studio-accent hover:bg-studio-accent/30"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-studio-accent/20 text-studio-accent hover:bg-studio-accent/30"
               >
                 <Plus className="h-4 w-4" />
               </button>
             </div>
           </div>
-          <NumberField
+          <NumberInput
             label="Задолженность, ₽"
             value={draft.debt_amount}
             onChange={(value) => updateDraft("debt_amount", value)}
@@ -460,32 +456,6 @@ function StudentEditor({
         </div>
       </div>
     </Modal>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label>
-      <span className="mb-1.5 block text-xs font-medium text-studio-muted">
-        {label}
-      </span>
-      <input
-        type="number"
-        min={0}
-        step="1"
-        value={value}
-        onChange={(event) => onChange(Math.max(0, Number(event.target.value)))}
-        className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
-      />
-    </label>
   );
 }
 
