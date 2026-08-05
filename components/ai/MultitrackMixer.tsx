@@ -15,7 +15,12 @@ import {
   Trash2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { mixAudioBuffers } from "@/lib/wav-client";
+import {
+  audioBufferToWavBlob,
+  startContextPcmCapture,
+  type PcmCaptureSession,
+} from "@/lib/pcm-capture";
+import { mixAudioBuffersWithOffsets } from "@/lib/wav-client";
 
 const MAX_TRACKS = 10;
 const PEAK_BUCKETS = 120;
@@ -29,17 +34,11 @@ type Track = {
   peaks: number[];
   /** Pre-decoded for zero-lag overdub start */
   buffer: AudioBuffer;
+  /** Position on the shared timeline (seconds) */
+  offsetSec: number;
 };
 
 type Props = { locked?: boolean };
-
-async function decodeWithContext(
-  ctx: AudioContext,
-  blob: Blob
-): Promise<AudioBuffer> {
-  const arrayBuf = await blob.arrayBuffer();
-  return ctx.decodeAudioData(arrayBuf.slice(0));
-}
 
 function buildPeaks(buffer: AudioBuffer, buckets = PEAK_BUCKETS): number[] {
   const channel = buffer.getChannelData(0);
@@ -69,6 +68,7 @@ function formatTime(sec: number) {
 function WaveformLane({
   peaks,
   durationSec,
+  offsetSec = 0,
   timelineSec,
   playheadSec,
   tone = "accent",
@@ -76,13 +76,18 @@ function WaveformLane({
 }: {
   peaks: number[];
   durationSec: number;
+  offsetSec?: number;
   timelineSec: number;
   playheadSec: number;
   tone?: "accent" | "rec" | "mix";
   live?: boolean;
 }) {
   const span = Math.max(timelineSec, 0.001);
-  const widthPct = Math.min(100, (Math.max(durationSec, 0.05) / span) * 100);
+  const leftPct = Math.min(100, (Math.max(0, offsetSec) / span) * 100);
+  const widthPct = Math.min(
+    100 - leftPct,
+    (Math.max(durationSec, 0.05) / span) * 100
+  );
   const playheadPct = Math.min(100, (playheadSec / span) * 100);
   const activeClass =
     tone === "rec"
@@ -96,11 +101,13 @@ function WaveformLane({
   return (
     <div className="relative h-14 overflow-hidden rounded-xl bg-studio-bg ring-1 ring-studio-border">
       <div
-        className="absolute inset-y-0 left-0 flex items-end gap-px px-1.5 py-1.5"
-        style={{ width: `${widthPct}%` }}
+        className="absolute inset-y-0 flex items-end gap-px px-1.5 py-1.5"
+        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
       >
         {peaks.map((peak, index) => {
-          const t = (index / Math.max(1, peaks.length - 1)) * durationSec;
+          const t =
+            offsetSec +
+            (index / Math.max(1, peaks.length - 1)) * durationSec;
           const played = live || t <= playheadSec;
           return (
             <span
@@ -134,8 +141,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const [error, setError] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const pcmSessionRef = useRef<PcmCaptureSession | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const playStartedAtRef = useRef(0);
@@ -143,8 +149,10 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const playRafRef = useRef<number | null>(null);
   const meterRafRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recordingIdRef = useRef<string | null>(null);
   const tracksRef = useRef<Track[]>([]);
+  const stoppingRef = useRef(false);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -162,7 +170,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const timelineSec = useMemo(() => {
     const longest = Math.max(
       0,
-      ...tracks.map((track) => track.durationSec),
+      ...tracks.map((track) => track.offsetSec + track.durationSec),
       playheadSec
     );
     return Math.max(longest, 4);
@@ -192,28 +200,35 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const releaseMic = () => {
     stopMeter();
+    pcmSessionRef.current?.abort();
+    pcmSessionRef.current = null;
+    try {
+      micSourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    micSourceRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    recorderRef.current = null;
     setRecordingId(null);
   };
 
   /** End take but keep mic stream warm for next overdub (no getUserMedia lag). */
-  const endRecorderKeepMic = () => {
+  const endCaptureKeepMic = () => {
     stopMeter();
-    recorderRef.current = null;
+    pcmSessionRef.current = null;
+    try {
+      micSourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    micSourceRef.current = null;
     setRecordingId(null);
   };
 
   useEffect(
     () => () => {
-      if (recorderRef.current?.state === "recording") {
-        try {
-          recorderRef.current.stop();
-        } catch {
-          /* ignore */
-        }
-      }
+      pcmSessionRef.current?.abort();
       releaseMic();
       stopPlayback();
       void audioCtxRef.current?.close();
@@ -277,15 +292,19 @@ export default function MultitrackMixer({ locked = false }: Props) {
     playRafRef.current = requestAnimationFrame(tick);
   };
 
-  /** Instant — uses pre-decoded AudioBuffers, no await decode. */
+  /** Instant — uses pre-decoded buffers; honors timeline offsetSec. */
   const playMonitorTracks = (ctx: AudioContext, list: Track[], when: number) => {
     if (list.length === 0) return 0;
-    const duration = Math.max(...list.map((t) => t.buffer.duration), 0.1);
+    const duration = Math.max(
+      ...list.map((t) => t.offsetSec + t.buffer.duration),
+      0.1
+    );
     sourcesRef.current = list.map((track) => {
       const source = ctx.createBufferSource();
       source.buffer = track.buffer;
       source.connect(ctx.destination);
-      source.start(when);
+      // Place each lane on the shared timeline (Reaper-style)
+      source.start(when + Math.max(0, track.offsetSec));
       return source;
     });
     return duration;
@@ -293,7 +312,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const startInputMeter = (ctx: AudioContext, stream: MediaStream) => {
     stopMeter();
+    try {
+      micSourceRef.current?.disconnect();
+    } catch {
+      /* ignore */
+    }
     const source = ctx.createMediaStreamSource(stream);
+    micSourceRef.current = source;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     source.connect(analyser);
@@ -339,82 +364,23 @@ export default function MultitrackMixer({ locked = false }: Props) {
     }
   };
 
-  /** Reaper-style overdub: play armed tracks + record new lane in the same sample. */
+  /** Overdub on one AudioContext clock — PCM capture aligned to monitor timeline. */
   const startOverdub = async () => {
-    if (tracks.length >= MAX_TRACKS || recordingId) return;
+    if (tracks.length >= MAX_TRACKS || recordingId || stoppingRef.current) return;
     setError("");
     stopPlayback();
 
     try {
       const ctx = await ensureAudioCtx();
-      // Mic is usually already warm after armEngine / previous take
       const stream = await ensureMicStream();
-      chunksRef.current = [];
       const id = crypto.randomUUID();
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "";
-      const recorder = new MediaRecorder(
-        stream,
-        mime ? { mimeType: mime } : undefined
-      );
-      recorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        void (async () => {
-          const recordedSec =
-            audioCtxRef.current && playStartedAtRef.current
-              ? Math.max(
-                  0.05,
-                  audioCtxRef.current.currentTime - playStartedAtRef.current
-                )
-              : playheadSec;
-          stopPlayback();
-          endRecorderKeepMic();
 
-          const blob = new Blob(chunksRef.current, {
-            type: recorder.mimeType || "audio/webm",
-          });
-          const url = URL.createObjectURL(blob);
-          let peaks = Array.from({ length: 64 }, () => 0.15);
-          let durationSec = recordedSec;
-          let buffer: AudioBuffer;
-          try {
-            buffer = await decodeWithContext(ctx, blob);
-            peaks = buildPeaks(buffer);
-            durationSec = buffer.duration || recordedSec;
-          } catch {
-            // Fallback empty buffer so track stays playable-shaped
-            buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * recordedSec)), ctx.sampleRate);
-          }
-          setTracks((current) => {
-            const next = [
-              ...current,
-              {
-                id,
-                name: `Дорожка ${current.length + 1}`,
-                blob,
-                url,
-                durationSec,
-                peaks,
-                buffer,
-              },
-            ];
-            setMonitorIds((selected) => [...selected, id]);
-            return next;
-          });
-          setPlayheadSec(0);
-        })();
-      };
-
-      // Same clock: monitor + record start together — no artificial delay
+      // Schedule monitor + capture against the same timelineStart
       const t0 = ctx.currentTime;
       const monitorDuration = playMonitorTracks(ctx, monitorTracks, t0);
-      recorder.start(50);
+      const capture = startContextPcmCapture(ctx, stream, t0);
+      pcmSessionRef.current = capture;
+
       setRecordingId(id);
       startInputMeter(ctx, stream);
       startPlayhead(ctx, Math.max(monitorDuration, 3600), t0);
@@ -426,8 +392,49 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const stopAll = () => {
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
+    if (pcmSessionRef.current && recordingIdRef.current) {
+      if (stoppingRef.current) return;
+      stoppingRef.current = true;
+      const session = pcmSessionRef.current;
+      const id = recordingIdRef.current;
+      void (async () => {
+        try {
+          const buffer = await session.stop();
+          stopPlayback();
+          endCaptureKeepMic();
+
+          const blob = audioBufferToWavBlob(buffer);
+          const url = URL.createObjectURL(blob);
+          const peaks = buildPeaks(buffer);
+          setTracks((current) => {
+            const next = [
+              ...current,
+              {
+                id,
+                name: `Дорожка ${current.length + 1}`,
+                blob,
+                url,
+                durationSec: buffer.duration,
+                peaks,
+                buffer,
+                // Anchored to session t0 — same timeline as monitor lanes
+                offsetSec: 0,
+              },
+            ];
+            setMonitorIds((selected) => [...selected, id]);
+            return next;
+          });
+          setPlayheadSec(0);
+        } catch (err) {
+          setError(
+            err instanceof Error ? err.message : "Не удалось сохранить запись"
+          );
+          stopPlayback();
+          endCaptureKeepMic();
+        } finally {
+          stoppingRef.current = false;
+        }
+      })();
       return;
     }
     stopPlayback();
@@ -444,8 +451,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const resetAll = () => {
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
+    if (pcmSessionRef.current) {
+      pcmSessionRef.current.abort();
+      pcmSessionRef.current = null;
     }
     stopPlayback();
     releaseMic();
@@ -468,9 +476,15 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setMixing(true);
     setError("");
     try {
-      const mixed = await mixAudioBuffers(tracks.map((track) => track.buffer));
+      const mixed = await mixAudioBuffersWithOffsets(
+        tracks.map((track) => ({
+          buffer: track.buffer,
+          offsetSec: track.offsetSec,
+        }))
+      );
       const ctx = await ensureAudioCtx();
-      const mixBuffer = await decodeWithContext(ctx, mixed);
+      const arrayBuf = await mixed.arrayBuffer();
+      const mixBuffer = await ctx.decodeAudioData(arrayBuf.slice(0));
       if (mixUrl) URL.revokeObjectURL(mixUrl);
       setMixUrl(URL.createObjectURL(mixed));
       setMixPeaks(buildPeaks(mixBuffer, 140));
@@ -510,9 +524,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Сведение дорожек
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Как в Reaper: отметьте дорожки для прослушки → «Запись с
-            прослушкой» одновременно играет их и пишет новую. Смотрите волны и
-            playhead, чтобы вовремя вступить.
+            Как в Reaper: прослушка и запись идут на одном таймлайне (PCM в Web
+            Audio). Новая партия ложится ровно туда, где вы пели поверх
+            предыдущих — сведение без рассинхрона.
           </p>
         </div>
       </div>
@@ -671,6 +685,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
               <WaveformLane
                 peaks={track.peaks}
                 durationSec={track.durationSec}
+                offsetSec={track.offsetSec}
                 timelineSec={timelineSec}
                 playheadSec={
                   monitored || recordingId || playing ? playheadSec : 0

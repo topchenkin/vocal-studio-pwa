@@ -8,34 +8,35 @@ export type PcmCaptureSession = {
   abort: () => void;
 };
 
-export async function startPcmCapture(
-  stream: MediaStream
-): Promise<PcmCaptureSession> {
-  const AudioCtx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext: typeof AudioContext })
-      .webkitAudioContext;
-  const ctx = new AudioCtx();
-  if (ctx.state === "suspended") {
-    await ctx.resume();
-  }
+type TimedChunk = { startTime: number; data: Float32Array };
 
+/**
+ * Capture on an EXISTING AudioContext so overdub lines up with BufferSource
+ * playback on the same clock (MediaRecorder cannot do this).
+ *
+ * `timelineStart` = ctx.currentTime when monitor playback was scheduled.
+ * Resulting buffer is anchored to that timeline (leading silence if needed).
+ */
+export function startContextPcmCapture(
+  ctx: AudioContext,
+  stream: MediaStream,
+  timelineStart: number
+): PcmCaptureSession {
   const source = ctx.createMediaStreamSource(stream);
-  // ScriptProcessor is deprecated but universal; mute so we don't monitor mic.
-  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const processor = ctx.createScriptProcessor(1024, 1, 1);
   const mute = ctx.createGain();
   mute.gain.value = 0;
 
-  const chunks: Float32Array[] = [];
-  let total = 0;
+  const chunks: TimedChunk[] = [];
   let ended = false;
   let bufferResult: AudioBuffer | null = null;
 
   processor.onaudioprocess = (event) => {
     if (ended) return;
     const input = event.inputBuffer.getChannelData(0);
-    chunks.push(new Float32Array(input));
-    total += input.length;
+    // Buffer covers roughly [currentTime - duration, currentTime]
+    const startTime = ctx.currentTime - event.inputBuffer.duration;
+    chunks.push({ startTime, data: new Float32Array(input) });
   };
 
   source.connect(processor);
@@ -45,6 +46,7 @@ export async function startPcmCapture(
   const finish = async (): Promise<AudioBuffer> => {
     if (bufferResult) return bufferResult;
     ended = true;
+    const stopTime = ctx.currentTime;
     processor.onaudioprocess = null;
     try {
       source.disconnect();
@@ -55,18 +57,38 @@ export async function startPcmCapture(
     }
 
     const sampleRate = ctx.sampleRate;
-    const merged = new Float32Array(Math.max(1, total));
-    let offset = 0;
-    for (const c of chunks) {
-      merged.set(c, offset);
-      offset += c.length;
+    const durationSec = Math.max(0.05, stopTime - timelineStart);
+    const length = Math.max(1, Math.ceil(durationSec * sampleRate));
+    const merged = new Float32Array(length);
+
+    for (const chunk of chunks) {
+      const offsetSamples = Math.round(
+        (chunk.startTime - timelineStart) * sampleRate
+      );
+      for (let i = 0; i < chunk.data.length; i += 1) {
+        const dest = offsetSamples + i;
+        if (dest >= 0 && dest < merged.length) {
+          merged[dest] += chunk.data[i] ?? 0;
+        }
+      }
     }
     chunks.length = 0;
 
-    const buffer = ctx.createBuffer(1, merged.length, sampleRate);
-    buffer.getChannelData(0).set(merged);
+    // Compensate I/O latency: what you hear is late vs context time; voice
+    // lands late in the capture — shift recording earlier to match monitor.
+    const latencySec =
+      (typeof ctx.baseLatency === "number" ? ctx.baseLatency : 0) +
+      (typeof ctx.outputLatency === "number" ? ctx.outputLatency : 0);
+    const shift = Math.min(
+      merged.length - 1,
+      Math.max(0, Math.round(latencySec * sampleRate))
+    );
+    const compensated =
+      shift > 0 ? merged.subarray(shift) : merged;
+
+    const buffer = ctx.createBuffer(1, Math.max(1, compensated.length), sampleRate);
+    buffer.getChannelData(0).set(compensated);
     bufferResult = buffer;
-    await ctx.close().catch(() => undefined);
     return buffer;
   };
 
@@ -81,8 +103,34 @@ export async function startPcmCapture(
       } catch {
         /* ignore */
       }
-      void ctx.close().catch(() => undefined);
       chunks.length = 0;
+    },
+  };
+}
+
+export async function startPcmCapture(
+  stream: MediaStream
+): Promise<PcmCaptureSession> {
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext })
+      .webkitAudioContext;
+  const ctx = new AudioCtx();
+  if (ctx.state === "suspended") {
+    await ctx.resume();
+  }
+  const session = startContextPcmCapture(ctx, stream, ctx.currentTime);
+  const origStop = session.stop;
+  const origAbort = session.abort;
+  return {
+    stop: async () => {
+      const buffer = await origStop();
+      await ctx.close().catch(() => undefined);
+      return buffer;
+    },
+    abort: () => {
+      origAbort();
+      void ctx.close().catch(() => undefined);
     },
   };
 }

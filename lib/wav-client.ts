@@ -63,19 +63,39 @@ export async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> 
 export async function mixAudioBuffers(
   buffers: AudioBuffer[]
 ): Promise<Blob> {
-  if (buffers.length === 0) throw new Error("Нет дорожек для сведения");
-  const sampleRate = buffers[0]!.sampleRate;
-  const length = Math.max(...buffers.map((b) => b.length));
+  return mixAudioBuffersWithOffsets(
+    buffers.map((buffer) => ({ buffer, offsetSec: 0 }))
+  );
+}
+
+/** Mix lanes onto one timeline; each buffer starts at offsetSec. */
+export async function mixAudioBuffersWithOffsets(
+  lanes: Array<{ buffer: AudioBuffer; offsetSec: number }>
+): Promise<Blob> {
+  if (lanes.length === 0) throw new Error("Нет дорожек для сведения");
+  const sampleRate = lanes[0]!.buffer.sampleRate;
+  let endSample = 0;
+  for (const lane of lanes) {
+    const start = Math.max(0, Math.round(lane.offsetSec * sampleRate));
+    endSample = Math.max(endSample, start + lane.buffer.length);
+  }
+  const length = Math.max(1, endSample);
   const left = new Float32Array(length);
   const right = new Float32Array(length);
 
-  for (const buffer of buffers) {
+  for (const lane of lanes) {
+    const start = Math.max(0, Math.round(lane.offsetSec * sampleRate));
+    const buffer = lane.buffer;
     const l = buffer.getChannelData(0);
     const r =
-      buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : buffer.getChannelData(0);
+      buffer.numberOfChannels > 1
+        ? buffer.getChannelData(1)
+        : buffer.getChannelData(0);
     for (let i = 0; i < buffer.length; i += 1) {
-      left[i] = (left[i] ?? 0) + (l[i] ?? 0);
-      right[i] = (right[i] ?? 0) + (r[i] ?? 0);
+      const dest = start + i;
+      if (dest >= length) break;
+      left[dest] = (left[dest] ?? 0) + (l[i] ?? 0);
+      right[dest] = (right[dest] ?? 0) + (r[i] ?? 0);
     }
   }
 
