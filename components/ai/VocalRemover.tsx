@@ -19,9 +19,9 @@ import { getChatSessionToken } from "@/lib/chat-media";
 const MAX_BYTES = 10 * 1024 * 1024;
 
 const STEPS = [
-  "1. Отправка файла в нейросеть Demucs…",
-  "2. Разделение вокала и музыки на сервере…",
-  "3. Сведение дорожек…",
+  "1. Загружаем трек…",
+  "2. Отделяем вокал от музыки…",
+  "3. Готовим минусовку и вокал…",
 ] as const;
 
 type ResultTracks = {
@@ -150,16 +150,8 @@ export default function VocalRemover({ locked = false }: Props) {
           : "");
 
       if (!response.ok || !vocalUrl || !minusUrl) {
-        const detail = payload.detail ? `\n\nДетали: ${payload.detail}` : "";
-        const attempts =
-          payload.attempts?.length
-            ? `\n\nПопытки:\n- ${payload.attempts.join("\n- ")}`
-            : "";
         setError(
-          (payload.error ||
-            "Сервер нейросети Demucs временно перегружен. Попробуйте через 2 минуты или укажите HUGGINGFACE_API_KEY") +
-            detail +
-            attempts
+          "Сейчас обработка недоступна. Попробуйте через пару минут."
         );
         clearResult();
         return;
@@ -173,9 +165,7 @@ export default function VocalRemover({ locked = false }: Props) {
       });
       setStepIndex(STEPS.length - 1);
     } catch {
-      setError(
-        "Сервер нейросети Demucs временно перегружен. Попробуйте через 2 минуты или укажите HUGGINGFACE_API_KEY"
-      );
+      setError("Сейчас обработка недоступна. Попробуйте через пару минут.");
       clearResult();
     } finally {
       window.clearInterval(stepTimer);
@@ -221,8 +211,8 @@ export default function VocalRemover({ locked = false }: Props) {
             Удаление вокала
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Настоящее разделение через Meta Demucs v4 (HT-Demucs) на Hugging Face
-            Space. Без браузерных «фейковых» фильтров.
+            Загрузите трек — получите чистую минусовку и отдельно вокал для
+            практики.
           </p>
         </div>
       </div>
@@ -263,7 +253,7 @@ export default function VocalRemover({ locked = false }: Props) {
           {file ? file.name : "Перетащите MP3 / WAV сюда"}
         </span>
         <span className="mt-1 text-xs text-studio-muted">
-          До 10MB · реальная нейросеть Demucs
+          MP3 или WAV · до 10 МБ
         </span>
       </button>
 
@@ -299,7 +289,7 @@ export default function VocalRemover({ locked = false }: Props) {
                 </div>
               ))}
               <p className="text-[11px] text-studio-muted">
-                Обработка на GPU Space может занять 1–3 минуты.
+                Обычно занимает 1–3 минуты — не закрывайте страницу.
               </p>
             </div>
           )}
@@ -310,7 +300,7 @@ export default function VocalRemover({ locked = false }: Props) {
             onClick={() => void processAudio()}
           >
             <WandSparkles className="h-5 w-5" />
-            {processing ? "Demucs работает…" : "Разделить нейросетью Demucs"}
+            {processing ? "Обрабатываем…" : "Разделить на минус и вокал"}
           </Button>
         </div>
       )}
@@ -329,9 +319,6 @@ export default function VocalRemover({ locked = false }: Props) {
             src={result.vocalUrl}
             filename={`vocal-${file.name.replace(/\.\w+$/, "")}.wav`}
           />
-          <p className="text-center text-[11px] text-studio-muted">
-            Модель: {result.model}
-          </p>
           <button
             type="button"
             className="w-full text-sm text-studio-accent hover:underline"

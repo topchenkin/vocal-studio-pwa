@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Cat,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Lock,
   Mic,
   Send,
+  Shuffle,
   Square,
   Target,
   Waves,
@@ -23,6 +26,7 @@ import {
   frequencyFromMidi,
   midiFromNoteLabel,
   pickPracticeNote,
+  PRACTICE_NOTES,
 } from "@/lib/pitch";
 import {
   buildVocalReport,
@@ -40,6 +44,7 @@ type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 const TEST_MS = 10_000;
 const SAMPLE_MS = 100;
 const IN_TUNE_CENTS = 25;
+const SCALE_STEPS = ["C4", "E4", "G4"] as const;
 
 export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) {
   const { user, profile } = useAuth();
@@ -52,6 +57,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const [zone, setZone] = useState<TuneZone>("silent");
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
   const [targetNote, setTargetNote] = useState("G4");
+  const [liveTargetNote, setLiveTargetNote] = useState("G4");
   const [testProgress, setTestProgress] = useState(0);
   const [report, setReport] = useState<VocalReport | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -269,6 +275,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       recorder.start();
 
       testStartRef.current = performance.now();
+      setLiveTargetNote(
+        testModeRef.current === "note" ? targetNoteRef.current : "C4"
+      );
       setTesting(true);
 
       sampleTimerRef.current = window.setInterval(() => {
@@ -279,6 +288,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           TEST_MS,
           targetNoteRef.current
         );
+        setLiveTargetNote(target);
         const timeData = new Float32Array(analyser.fftSize);
         // getFloatTimeDomainData is widely supported; fallback to byte convert
         if (analyser.getFloatTimeDomainData) {
@@ -413,6 +423,14 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     ? mentorFeedback(report.overallScore, profile?.cat_level)
     : "";
 
+  const cycleTargetNote = (dir: -1 | 1) => {
+    const list = PRACTICE_NOTES as readonly string[];
+    const idx = list.indexOf(targetNote);
+    const base = idx >= 0 ? idx : 0;
+    const next = list[(base + dir + list.length) % list.length] ?? "G4";
+    setTargetNote(next);
+  };
+
   if (locked) {
     return (
       <section className="relative overflow-hidden rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border sm:p-6">
@@ -446,8 +464,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         <div>
           <h2 className="font-display text-2xl font-semibold">ИИ-тюнер нот</h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Живой тюнер + профессиональный 10-секундный вокальный тест с реальными
-            метриками.
+            Живой тюнер и короткий тест точности — видно, насколько чисто вы
+            держите ноту.
           </p>
         </div>
       </div>
@@ -540,60 +558,161 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              10 секунд записи. Собираем frequency / cents / dB каждые 100 мс и
-              считаем честные метрики.
+              10 секунд: спойте целевую ноту или гамму — получите оценку точности
+              и стабильности.
             </p>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <button
             type="button"
             disabled={testing}
-            onClick={() => {
-              setTestMode("note");
-              setTargetNote(pickPracticeNote(targetNote));
-            }}
-            className={`rounded-xl px-3 py-3 text-left text-sm ring-1 transition ${
+            onClick={() => setTestMode("note")}
+            className={`rounded-xl px-3 py-3 text-sm font-medium ring-1 transition ${
               testMode === "note"
-                ? "bg-studio-accent/15 ring-studio-accent/40"
-                : "bg-studio-card ring-studio-border"
+                ? "bg-studio-accent/15 text-studio-text ring-studio-accent/40"
+                : "bg-studio-card text-studio-muted ring-studio-border"
             }`}
           >
-            <span className="font-medium">Целевая нота</span>
-            <p className="mt-1 text-xs text-studio-muted">
-              {targetNote} · {describeNote(targetNote)} · ~
-              {Math.round(liveTargetHz)} Hz
-            </p>
+            Одна нота
           </button>
           <button
             type="button"
             disabled={testing}
             onClick={() => setTestMode("scale")}
-            className={`rounded-xl px-3 py-3 text-left text-sm ring-1 transition ${
+            className={`rounded-xl px-3 py-3 text-sm font-medium ring-1 transition ${
               testMode === "scale"
-                ? "bg-studio-accent/15 ring-studio-accent/40"
-                : "bg-studio-card ring-studio-border"
+                ? "bg-studio-accent/15 text-studio-text ring-studio-accent/40"
+                : "bg-studio-card text-studio-muted ring-studio-border"
             }`}
           >
-            <span className="font-medium">Гамма C4–E4–G4</span>
-            <p className="mt-1 text-xs text-studio-muted">
-              По ~3.3 сек на каждую ступень
-            </p>
+            Гамма
           </button>
         </div>
 
-        {testing && (
-          <div className="mt-4">
-            <div className="mb-1 flex justify-between text-xs text-studio-muted">
-              <span>Идёт запись теста…</span>
-              <span>{Math.round(testProgress)}%</span>
+        {testMode === "note" ? (
+          <div className="mt-4 rounded-xl bg-studio-card p-4 ring-1 ring-studio-border">
+            <p className="text-center text-xs uppercase tracking-wide text-studio-muted">
+              Целевая нота
+            </p>
+            <div className="mt-2 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                disabled={testing}
+                onClick={() => cycleTargetNote(-1)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-studio-bg ring-1 ring-studio-border transition hover:ring-studio-accent/50 disabled:opacity-40"
+                aria-label="Предыдущая нота"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <div className="min-w-[7rem] text-center">
+                <p className="font-display text-4xl font-semibold">{targetNote}</p>
+                <p className="mt-1 text-xs text-studio-muted">
+                  {describeNote(targetNote)} · ~{Math.round(liveTargetHz)} Hz
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={testing}
+                onClick={() => cycleTargetNote(1)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-studio-bg ring-1 ring-studio-border transition hover:ring-studio-accent/50 disabled:opacity-40"
+                aria-label="Следующая нота"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-studio-card">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-studio-accent to-amber-400 transition-all"
-                style={{ width: `${testProgress}%` }}
-              />
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              {PRACTICE_NOTES.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={testing}
+                  onClick={() => setTargetNote(n)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition disabled:opacity-40 ${
+                    targetNote === n
+                      ? "bg-studio-accent/20 text-studio-accent-light ring-studio-accent/40"
+                      : "bg-studio-bg text-studio-muted ring-studio-border hover:text-studio-text"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={testing}
+              onClick={() => setTargetNote(pickPracticeNote(targetNote))}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text disabled:opacity-40"
+            >
+              <Shuffle className="h-4 w-4" />
+              Случайная нота
+            </button>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl bg-studio-card p-4 ring-1 ring-studio-border">
+            <p className="text-center text-xs uppercase tracking-wide text-studio-muted">
+              Гамма · по ~3 секунды на ступень
+            </p>
+            <div className="mt-3 flex items-center justify-center gap-2 sm:gap-3">
+              {SCALE_STEPS.map((step, index) => {
+                const active =
+                  testing && liveTargetNote === step
+                    ? true
+                    : !testing && index === 0;
+                return (
+                  <div key={step} className="flex items-center gap-2 sm:gap-3">
+                    {index > 0 && (
+                      <span className="text-studio-muted" aria-hidden>
+                        →
+                      </span>
+                    )}
+                    <div
+                      className={`min-w-[3.5rem] rounded-xl px-3 py-2 text-center ring-1 transition ${
+                        active
+                          ? "bg-studio-accent/20 ring-studio-accent/50"
+                          : "bg-studio-bg ring-studio-border"
+                      }`}
+                    >
+                      <p className="font-display text-2xl font-semibold">{step}</p>
+                      <p className="text-[10px] text-studio-muted">
+                        {describeNote(step)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-center text-xs text-studio-muted">
+              Спойте по очереди: до → ми → соль
+            </p>
+          </div>
+        )}
+
+        {testing && (
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl bg-amber-500/10 px-4 py-3 text-center ring-1 ring-amber-400/30">
+              <p className="text-xs uppercase tracking-wide text-amber-200/80">
+                Сейчас спойте
+              </p>
+              <p className="mt-1 font-display text-3xl font-semibold text-amber-100">
+                {liveTargetNote}
+              </p>
+              <p className="mt-0.5 text-xs text-studio-muted">
+                {describeNote(liveTargetNote)}
+              </p>
+            </div>
+            <div>
+              <div className="mb-1 flex justify-between text-xs text-studio-muted">
+                <span>Идёт запись…</span>
+                <span>{Math.round(testProgress)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-studio-card">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-studio-accent to-amber-400 transition-all"
+                  style={{ width: `${testProgress}%` }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -606,7 +725,11 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           onClick={() => void startProfessionalTest()}
         >
           <Target className="h-4 w-4" />
-          {testing ? "Запись 10 секунд…" : "Начать профессиональный тест"}
+          {testing
+            ? "Запись 10 секунд…"
+            : testMode === "note"
+              ? `Начать тест · нота ${targetNote}`
+              : "Начать тест · гамма C–E–G"}
         </Button>
       </div>
 

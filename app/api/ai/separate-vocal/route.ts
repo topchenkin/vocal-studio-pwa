@@ -14,7 +14,7 @@ export const maxDuration = 300;
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const HONEST_OVERLOAD =
-  "Сервер нейросети Demucs временно перегружен или Space спит. Откройте Space в браузере на 20–30 секунд, подождите 2 минуты и повторите. Проверьте HUGGINGFACE_API_KEY в Vercel.";
+  "Сейчас обработка недоступна. Попробуйте через пару минут.";
 
 type SpaceConfig = {
   id: string;
@@ -309,8 +309,7 @@ function humanizeError(error: unknown, attempts: string[] = []) {
   if (/HUGGINGFACE_API_KEY/i.test(detail)) {
     return {
       code: "missing_hf_key",
-      error:
-        "Не задан HUGGINGFACE_API_KEY. Добавьте токен в Vercel → Settings → Environment Variables (Production) и сделайте redeploy.",
+      error: "Сейчас обработка недоступна. Попробуйте позже.",
       detail,
       attempts,
     };

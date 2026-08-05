@@ -194,8 +194,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Сведение дорожек
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Запишите до {MAX_TRACKS} аудиодорожек с микрофона и сведите в один
-            файл одной кнопкой (как простой Reaper).
+            Запишите до {MAX_TRACKS} партий и сведите их в один трек одной
+            кнопкой.
           </p>
         </div>
       </div>

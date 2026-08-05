@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, Sparkles, Square, Stars } from "lucide-react";
 import Button from "@/components/ui/Button";
 import {
-  ARTIST_DB_STATS,
   boostRecognizedArtist,
   matchVoiceByGenres,
   type TimbreMatch,
@@ -106,7 +105,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
     setError("");
     setRecognizedTrack("");
     setGenderDebug("");
-    setStatus("Проверяем, что в записи есть голос…");
+    setStatus("Слушаем запись…");
     try {
       if (audioBuffer.duration < 0.8 || audioBuffer.length < 8000) {
         throw new Error("Запись слишком короткая — спойте ещё раз");
@@ -123,7 +122,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       const localGender = classifySingingGender(channel, audioBuffer.sampleRate);
       setGenderDebug(localGender.debug);
 
-      setStatus("Строим 64-D эмбеддинг голоса…");
+      setStatus("Изучаем тембр голоса…");
       let embedding = await extractVoiceEmbedding(audioBuffer);
       if (isStale(analysisId)) return;
 
@@ -148,7 +147,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         };
       }
 
-      setStatus("Определяем пол и готовим WAV…");
+      setStatus("Подбираем похожих исполнителей…");
       const wav = audioBufferToMonoWav16k(audioBuffer);
       const token = await getChatSessionToken();
       let recognizedArtist = "";
@@ -238,7 +237,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       let usedNeural = false;
 
       if (token) {
-        setStatus("Нейросеть Resemblyzer сравнивает с базой знаменитостей…");
+        setStatus("Сравниваем со звёздами…");
         const nnForm = new FormData();
         nnForm.append(
           "file",
@@ -299,7 +298,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       }
 
       if (!usedNeural) {
-        setStatus(`Запасной алгоритм · база ${ARTIST_DB_STATS.total}…`);
+        setStatus("Сравниваем со звёздами…");
         next = matchVoiceByGenres(embedding, 5);
       }
 
@@ -433,6 +432,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
         timersRef.current.forEach((id) => window.clearInterval(id));
         timersRef.current = [];
         setRecording(false);
+        setProgress(100);
+        setAnalyzing(true);
+        setStatus("Готовим запись к анализу…");
         try {
           const buffer = await capture.stop();
           stream.getTracks().forEach((t) => t.stop());
@@ -443,6 +445,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
           setError("Не удалось сохранить запись");
           busyRef.current = false;
           setAnalyzing(false);
+          setStatus("");
         }
       };
 
@@ -487,23 +490,27 @@ export default function TimbreMatcher({ locked = false }: Props) {
             На кого похож твой тембр?
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            10 секунд в микрофон → нейросеть Resemblyzer сравнивает тембр с
-            базой знаменитостей (VoxCeleb + ваши референсы), затем раскладывает
-            по поп / рок / рэп / K‑POP.
+            Спойте 10 секунд — узнаете, на кого из звёзд похож ваш тембр в попе,
+            роке, рэпе и K‑POP.
           </p>
         </div>
       </div>
 
       <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-        {!recording ? (
-          <Button fullWidth size="lg" disabled={analyzing} onClick={() => void start()}>
+        {!recording && !analyzing ? (
+          <Button fullWidth size="lg" onClick={() => void start()}>
             <Mic className="h-5 w-5" />
-            {analyzing ? "Анализируем…" : "Спеть 10 секунд"}
+            Спеть 10 секунд
           </Button>
-        ) : (
+        ) : recording ? (
           <Button fullWidth size="lg" variant="danger" onClick={stopEarly}>
             <Square className="h-4 w-4 fill-current" />
             Стоп · {Math.round(progress)}%
+          </Button>
+        ) : (
+          <Button fullWidth size="lg" disabled>
+            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
+            Анализируем…
           </Button>
         )}
       </div>
@@ -517,14 +524,20 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
       )}
 
-      {(analyzing || status) && (
-        <p className="mt-4 flex items-center gap-2 text-sm text-studio-muted">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
-          {status || "Анализ…"}
-        </p>
+      {analyzing && (
+        <div className="mt-5 flex flex-col items-center gap-3 rounded-2xl bg-studio-bg/80 px-4 py-8 text-center ring-1 ring-studio-border">
+          <span
+            className="h-12 w-12 animate-spin rounded-full border-[3px] border-pink-400/30 border-t-pink-400"
+            aria-hidden
+          />
+          <p className="font-medium text-studio-text">Анализируем ваш голос</p>
+          <p className="max-w-xs text-sm text-studio-muted">
+            {status || "Это может занять несколько секунд — не закрывайте страницу."}
+          </p>
+        </div>
       )}
 
-      {hasResults && (
+      {hasResults && !analyzing && (
         <div className="mt-6 space-y-6">
           {recognizedTrack && (
             <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-center text-sm text-emerald-200 ring-1 ring-emerald-500/30">
@@ -536,29 +549,13 @@ export default function TimbreMatcher({ locked = false }: Props) {
             <p className="rounded-xl bg-studio-bg px-3 py-2 text-center text-sm text-studio-text ring-1 ring-studio-border">
               Определён пол:{" "}
               <span className="font-semibold text-pink-300">{genderHint}</span>
-              {genderConfidence && (
-                <span className="mt-0.5 block text-xs text-studio-muted">
-                  {genderConfidence}
-                  {genderSource ? ` · ${genderSource}` : ""}
-                </span>
-              )}
-              {matchEngine && (
-                <span className="mt-0.5 block text-xs text-sky-300/90">
-                  Движок: {matchEngine}
-                </span>
-              )}
-              {genderDebug && (
-                <span className="mt-0.5 block font-mono text-[11px] text-studio-muted">
-                  {genderDebug}
-                </span>
-              )}
             </p>
           )}
 
           {rawTop.length > 0 && (
             <div className="rounded-xl bg-studio-card px-3 py-3 ring-1 ring-studio-border">
               <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-studio-muted">
-                Топ нейросети (без жанрового фильтра)
+                Общий топ совпадений
               </p>
               <ol className="space-y-1 text-sm">
                 {rawTop.slice(0, 8).map((row, i) => (

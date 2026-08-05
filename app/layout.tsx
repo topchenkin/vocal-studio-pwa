@@ -65,7 +65,7 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("uvs-theme");if(t!=="dark"&&t!=="light"){t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.classList.toggle("light",t==="light");document.documentElement.style.colorScheme=t}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem("uvs-theme");if(t!=="dark"&&t!=="light"){t="dark"}document.documentElement.classList.toggle("light",t==="light");document.documentElement.style.colorScheme=t}catch(e){document.documentElement.classList.remove("light");document.documentElement.style.colorScheme="dark"}})();`,
           }}
         />
       </head>

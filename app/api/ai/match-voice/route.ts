@@ -51,8 +51,7 @@ export async function POST(request: NextRequest) {
     if (!spaceId) {
       return NextResponse.json(
         {
-          error:
-            "Не задан VOICE_MATCH_HF_SPACE. Задеплойте spaces/voice-twin на Hugging Face и укажите id Space в Vercel.",
+          error: "Сравнение временно недоступно. Попробуйте позже.",
           code: "space_not_configured",
         },
         { status: 503 }
@@ -61,7 +60,7 @@ export async function POST(request: NextRequest) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error: "Не задан HUGGINGFACE_API_KEY",
+          error: "Сравнение временно недоступно. Попробуйте позже.",
           code: "hf_key_missing",
         },
         { status: 503 }

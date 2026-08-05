@@ -84,7 +84,7 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="AI-вокал"
-      subtitle="Тюнер, Demucs, тембр знаменитостей и сведение дорожек"
+      subtitle="Тюнер, минусовка, похожий тембр и сведение дорожек"
     >
       <StudentNav />
 
