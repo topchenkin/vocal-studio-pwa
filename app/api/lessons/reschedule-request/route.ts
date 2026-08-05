@@ -90,7 +90,15 @@ export async function POST(request: NextRequest) {
       .eq("role", "admin");
     const adminIds = (admins ?? []).map((item) => item.id);
 
-    await auth.admin.from("notifications").insert(
+    const notificationRows: Array<{
+      recipient_id: string | null;
+      recipient_role: "admin";
+      title: string;
+      message: string;
+      kind: "lesson";
+      action_url: string;
+      email_fallback_at: string;
+    }> =
       adminIds.length > 0
         ? adminIds.map((recipientId) => ({
             recipient_id: recipientId,
@@ -111,8 +119,9 @@ export async function POST(request: NextRequest) {
               action_url: "/dashboard/admin?tab=schedule",
               email_fallback_at: new Date(Date.now() + 5 * 60_000).toISOString(),
             },
-          ]
-    );
+          ];
+
+    await auth.admin.from("notifications").insert(notificationRows);
 
     const push = await sendWebPush(adminIds, {
       title: ADMIN_DISPLAY_NAME,

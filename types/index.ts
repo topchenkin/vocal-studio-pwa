@@ -239,8 +239,11 @@ export interface Database {
           datetime: string;
           status?: LessonStatus;
           reschedule_request?: RescheduleRequest;
+          series_id?: string | null;
+          is_recurring?: boolean;
+          preferred_reschedule_at?: string | null;
         };
-        Update: Partial<Omit<Lesson, "id" | "student_id">>;
+        Update: Partial<Omit<Lesson, "id">>;
         Relationships: [];
       };
       exercises: {
@@ -377,8 +380,21 @@ export interface Database {
           media_path?: string | null;
           media_mime?: string | null;
           media_duration_sec?: number | null;
+          edited_at?: string | null;
+          deleted_at?: string | null;
         };
-        Update: never;
+        Update: Partial<
+          Pick<
+            ChatMessage,
+            | "message"
+            | "edited_at"
+            | "deleted_at"
+            | "message_type"
+            | "media_path"
+            | "media_mime"
+            | "media_duration_sec"
+          >
+        >;
         Relationships: [];
       };
       group_chats: {
@@ -415,8 +431,21 @@ export interface Database {
           media_path?: string | null;
           media_mime?: string | null;
           media_duration_sec?: number | null;
+          edited_at?: string | null;
+          deleted_at?: string | null;
         };
-        Update: never;
+        Update: Partial<
+          Pick<
+            GroupChatMessage,
+            | "message"
+            | "edited_at"
+            | "deleted_at"
+            | "message_type"
+            | "media_path"
+            | "media_mime"
+            | "media_duration_sec"
+          >
+        >;
         Relationships: [];
       };
       lesson_homework: {
