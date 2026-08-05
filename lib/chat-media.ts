@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
+import type { ChatMessage, GroupChatMessage } from "@/types";
 
 type MediaMessage = {
   id: string;
@@ -14,6 +15,9 @@ type MediaMessage = {
   edited_at?: string | null;
   deleted_at?: string | null;
 };
+
+type ChatTable = "chat_messages" | "group_chat_messages";
+type DbChatRow = ChatMessage | GroupChatMessage;
 
 export async function toLegacyChatMessages(
   records: MediaMessage[]
@@ -57,4 +61,101 @@ export async function getChatSessionToken() {
     session = data.session;
   }
   return session?.access_token ?? null;
+}
+
+/** Client-side edit — GitHub Pages has no Next API (PATCH → 405). */
+export async function editChatMessageDirect(
+  table: ChatTable,
+  messageId: string,
+  text: string
+): Promise<DbChatRow> {
+  const trimmed = text.trim();
+  if (!messageId || !trimmed || trimmed.length > 2000) {
+    throw new Error("Некорректный текст сообщения");
+  }
+
+  const { data: existing, error: loadError } = await supabase
+    .from(table)
+    .select("*")
+    .eq("id", messageId)
+    .maybeSingle();
+
+  if (loadError) throw new Error(loadError.message);
+  if (!existing) throw new Error("Сообщение не найдено");
+  if (existing.deleted_at) throw new Error("Сообщение удалено");
+  if (existing.message_type && existing.message_type !== "text") {
+    throw new Error("Можно редактировать только текстовые сообщения");
+  }
+
+  const now = new Date().toISOString();
+  const withEdited = await supabase
+    .from(table)
+    .update({ message: trimmed, edited_at: now })
+    .eq("id", messageId)
+    .select("*")
+    .single();
+
+  if (!withEdited.error && withEdited.data) return withEdited.data;
+
+  const fallback = await supabase
+    .from(table)
+    .update({ message: trimmed })
+    .eq("id", messageId)
+    .select("*")
+    .single();
+
+  if (fallback.error || !fallback.data) {
+    throw new Error(
+      fallback.error?.message ||
+        withEdited.error?.message ||
+        "Не удалось изменить сообщение. Выполните SQL из supabase-migrations."
+    );
+  }
+  return fallback.data;
+}
+
+/** Client-side soft/hard delete — GitHub Pages has no Next API (DELETE → 405). */
+export async function deleteChatMessageDirect(
+  table: ChatTable,
+  messageId: string
+): Promise<{ message?: DbChatRow; deleted?: boolean; messageId: string }> {
+  if (!messageId) throw new Error("messageId required");
+
+  const { data: existing, error: loadError } = await supabase
+    .from(table)
+    .select("*")
+    .eq("id", messageId)
+    .maybeSingle();
+
+  if (loadError) throw new Error(loadError.message);
+  if (!existing) throw new Error("Сообщение не найдено");
+
+  const now = new Date().toISOString();
+  const soft = await supabase
+    .from(table)
+    .update({
+      deleted_at: now,
+      message: "",
+      media_path: null,
+      media_mime: null,
+      media_duration_sec: null,
+      message_type: "text" as const,
+    })
+    .eq("id", messageId)
+    .select("*")
+    .single();
+
+  if (!soft.error && soft.data) {
+    return { message: soft.data, messageId };
+  }
+
+  const hard = await supabase.from(table).delete().eq("id", messageId);
+  if (hard.error) {
+    throw new Error(
+      hard.error.message ||
+        soft.error?.message ||
+        "Не удалось удалить сообщение. Выполните SQL из supabase-migrations."
+    );
+  }
+  return { deleted: true, messageId };
 }

@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { getChatSessionToken, toLegacyChatMessages } from "@/lib/chat-media";
+import {
+  deleteChatMessageDirect,
+  editChatMessageDirect,
+  getChatSessionToken,
+  toLegacyChatMessages,
+} from "@/lib/chat-media";
 import {
   coerceChatMime,
   extensionForChatMedia,
@@ -202,30 +207,13 @@ export function useChatMessages(studentId: string | null) {
       if (!studentId || !user) return;
       setError("");
       try {
-        const token = await getChatSessionToken();
-        if (!token) {
-          setError("Сессия истекла. Войдите повторно.");
-          return;
-        }
-        const response = await fetch("/api/chat/messages", {
-          method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messageId,
-            studentId,
-            message: text,
-          }),
-        });
-        const result = await parseJsonResponse(response);
-        if (!response.ok || !result.message) {
-          setError(result.error ?? "Не удалось изменить сообщение");
-          return;
-        }
+        const updated = await editChatMessageDirect(
+          "chat_messages",
+          messageId,
+          text
+        );
         const [mapped] = await toLegacyChatMessages([
-          { ...result.message, threadId: result.message.student_id },
+          { ...updated, threadId: studentId },
         ]);
         mergeLegacy(mapped);
       } catch (err) {
@@ -242,27 +230,13 @@ export function useChatMessages(studentId: string | null) {
       if (!studentId || !user) return;
       setError("");
       try {
-        const token = await getChatSessionToken();
-        if (!token) {
-          setError("Сессия истекла. Войдите повторно.");
-          return;
-        }
-        const response = await fetch("/api/chat/messages", {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ messageId, studentId }),
-        });
-        const result = await parseJsonResponse(response);
-        if (!response.ok) {
-          setError(result.error ?? "Не удалось удалить сообщение");
-          return;
-        }
+        const result = await deleteChatMessageDirect(
+          "chat_messages",
+          messageId
+        );
         if (result.message) {
           const [mapped] = await toLegacyChatMessages([
-            { ...result.message, threadId: result.message.student_id },
+            { ...result.message, threadId: studentId },
           ]);
           mergeLegacy(mapped);
         } else {
