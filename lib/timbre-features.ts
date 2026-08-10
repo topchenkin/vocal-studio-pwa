@@ -3,27 +3,47 @@
  *
  * The actual frame-by-frame extraction runs live via `Meyda.createMeydaAnalyzer`
  * inside `components/ai/TimbreMatcher.tsx` (it needs the live AudioContext/stream,
- * so it can't live in a pure lib function). This module owns the *pure* pieces:
- * accumulating frames into an averaged fingerprint, and deriving the 0-100 radar
- * axes from that fingerprint.
+ * so it can't live in a pure lib function) — Meyda extracts `mfcc` +
+ * `spectralCentroid` per frame, and (per the same frame's raw `buffer` feature)
+ * `pitchfinder`'s YIN detector (`createYinDetector` from `lib/pitch.ts`) extracts
+ * the fundamental frequency F0. This module owns the *pure* pieces: accumulating
+ * those per-frame values into a robust (median-based) fingerprint, deriving the
+ * 0-100 radar axes from it, and the pure gender-from-pitch classifier.
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/analyze-timbre/route.ts`,
  * `app/api/ai/match-voice/route.ts` and `lib/neural-voice-match.ts` (dead in
  * production since API routes don't exist in the static export, but still part
  * of the TS build) — keep this type stable even though the rest of this file
- * has been rewritten for the new Meyda pipeline.
+ * has been rewritten for the new Meyda + YIN pipeline.
  */
 
 export type TimbreGender = "female" | "male";
 
-/** Averaged MFCC + spectral-centroid signature captured during a live take. */
+/** Averaged (median-based) MFCC + spectral-centroid + F0 signature captured during a live take. */
 export type AcousticFingerprint = {
-  /** Mean of each MFCC coefficient across all voiced frames (Meyda default: 13 coefficients, c0..c12). */
+  /**
+   * Per-dimension MEDIAN of each MFCC coefficient across all voiced frames
+   * (Meyda default: 13 coefficients, c0..c12). Median — not mean — so a few
+   * momentarily louder/quieter syllables can't drag the whole fingerprint
+   * around (that was the root of the old "results jump around based on mic
+   * volume" complaint).
+   */
   mfcc: number[];
-  /** Mean spectral centroid (Hz) across all voiced frames — "center of mass" of the spectrum. */
+  /** Median spectral centroid (Hz) across all voiced frames — "center of mass" of the spectrum. */
   centroid: number;
-  /** Number of frames that passed the noise-floor gate and were used in the average. */
+  /**
+   * Median fundamental frequency (Hz), computed only from frames where the
+   * `pitchfinder` YIN detector actually found a pitch (a strict subset of the
+   * voiced/non-silent frames — some voiced frames are unpitched, e.g.
+   * breathy attacks). Feeds `detectGenderFromF0`. 0 if no frame yielded a
+   * usable pitch (shouldn't happen once `finalize()` has already required
+   * `MIN_PITCHED_FRAMES`).
+   */
+  medianF0: number;
+  /** Number of frames that passed the noise-floor gate and were used for the mfcc/centroid medians. */
   frameCount: number;
+  /** Number of those frames where YIN found an F0 — i.e. contributed to `medianF0`. */
+  pitchedFrameCount: number;
   /** Mean RMS (0..1 amplitude) across voiced frames — used for the breathiness heuristic. */
   rmsMean: number;
   /** Variance of RMS across voiced frames — loudness instability, also used for breathiness. */
@@ -33,72 +53,134 @@ export type AcousticFingerprint = {
 /**
  * Frames quieter than this (Meyda's `rms`, a 0..1 amplitude-domain value, roughly
  * the frame's RMS amplitude) are treated as silence/room-noise and skipped so they
- * don't dilute the averaged fingerprint. ~0.012 is roughly -38 dBFS — quiet room
+ * don't dilute the fingerprint. ~0.012 is roughly -38 dBFS — quiet room
  * noise / breathing on a typical mic gain, well below actual singing.
+ *
+ * This is the SAME silence gate applied uniformly to every statistic derived
+ * from a frame (MFCC median AND F0 median) — a frame either passes it and
+ * contributes to both, or it's skipped entirely (see `addFrame`).
  */
 export const RMS_NOISE_FLOOR = 0.012;
 
 /**
- * Minimum number of voiced frames required before we trust the averaged fingerprint.
- * With a 1024-sample analysis buffer at ~44.1kHz that's a new frame roughly every
- * ~23ms (~43 frames/sec), so 30 frames ≈ 0.7s of real, non-silent singing — enough
- * to smooth out short-term noise without demanding the whole 10s take be loud.
+ * Minimum number of voiced frames required before we trust the fingerprint.
+ * With the 2048-sample analysis buffer used in `TimbreMatcher` at ~44.1kHz
+ * that's a new frame roughly every ~46ms (~21 frames/sec), so 30 frames ≈
+ * 1.4s of real, non-silent singing — enough to compute a stable per-dimension
+ * median without demanding the whole 10s take be loud.
  */
 export const MIN_VOICED_FRAMES = 30;
 
 /**
- * Accumulates per-frame Meyda features (`mfcc`, `spectralCentroid`, `rms`) into a
- * running average, gating out near-silent frames via `RMS_NOISE_FLOOR`. Used live
- * during the 10s recording so no post-hoc re-analysis pass is needed.
+ * Minimum number of *pitched* frames (voiced frames where YIN additionally
+ * found an F0) required before we trust `medianF0` enough to run
+ * `detectGenderFromF0` on it. Deliberately smaller than `MIN_VOICED_FRAMES`
+ * since not every voiced frame carries a clean, YIN-detectable pitch (breath
+ * noise, consonants, etc.), but still enough (~1s of clearly pitched singing)
+ * to reject a take that's all noise/whisper with no real melodic content.
+ */
+export const MIN_PITCHED_FRAMES = 20;
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? (sorted[mid] ?? 0)
+    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+}
+
+/**
+ * Accumulates per-frame Meyda features (`mfcc`, `spectralCentroid`, `rms`) plus
+ * a per-frame `pitchfinder` YIN F0 reading into raw sample lists (not running
+ * sums), gating out near-silent frames via `RMS_NOISE_FLOOR`. `finalize()`
+ * then reduces those lists to per-dimension MEDIANS — see `AcousticFingerprint`
+ * for why median beats mean here. Used live during the 10s recording so no
+ * post-hoc re-analysis pass over raw audio is needed.
  */
 export class FingerprintAccumulator {
-  private mfccSum: number[] = [];
-  private centroidSum = 0;
+  private mfccFrames: number[][] = [];
+  private centroidFrames: number[] = [];
+  private f0Frames: number[] = [];
   private rmsSum = 0;
   private rmsSumSq = 0;
   private frames = 0;
 
-  /** Feed one Meyda callback frame. Silently ignores malformed/near-silent frames. */
+  /**
+   * Feed one analysis frame. `mfcc`/`centroid`/`rms` come from Meyda;
+   * `f0Hz` comes from running `createYinDetector`'s detector on the SAME
+   * frame's raw buffer (Meyda's `buffer` feature) — null/undefined when YIN
+   * didn't find a usable pitch in this frame. Silently ignores malformed
+   * frames; near-silent frames are excluded from EVERY statistic (MFCC
+   * median, centroid median, AND F0 median) — see `RMS_NOISE_FLOOR`.
+   */
   addFrame(
     mfcc: number[] | undefined,
     centroid: number | undefined,
-    rms: number | undefined
+    rms: number | undefined,
+    f0Hz?: number | null
   ): void {
     if (!Array.isArray(mfcc) || mfcc.length === 0) return;
     if (typeof rms !== "number" || !Number.isFinite(rms) || rms < RMS_NOISE_FLOOR) {
-      return; // silence guard — don't let quiet/no-signal frames pollute the average
+      return; // silence guard — excluded from ALL aggregation, not just MFCC
     }
     if (typeof centroid !== "number" || !Number.isFinite(centroid)) return;
 
-    if (this.mfccSum.length === 0) this.mfccSum = new Array(mfcc.length).fill(0);
-    const n = Math.min(mfcc.length, this.mfccSum.length);
-    for (let i = 0; i < n; i += 1) {
-      const v = mfcc[i];
-      this.mfccSum[i] += Number.isFinite(v) ? v : 0;
-    }
-    this.centroidSum += centroid;
+    this.mfccFrames.push(mfcc.map((v) => (Number.isFinite(v) ? v : 0)));
+    this.centroidFrames.push(centroid);
     this.rmsSum += rms;
     this.rmsSumSq += rms * rms;
     this.frames += 1;
+
+    if (typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0) {
+      this.f0Frames.push(f0Hz);
+    }
   }
 
   get frameCount(): number {
     return this.frames;
   }
 
-  /** Returns the averaged fingerprint, or null if too few voiced frames were captured. */
+  get pitchedFrameCount(): number {
+    return this.f0Frames.length;
+  }
+
+  /** Returns the median-based fingerprint, or null if too few voiced/pitched frames were captured. */
   finalize(): AcousticFingerprint | null {
-    if (this.frames < MIN_VOICED_FRAMES || this.mfccSum.length === 0) return null;
+    if (this.frames < MIN_VOICED_FRAMES || this.mfccFrames.length === 0) return null;
+    if (this.f0Frames.length < MIN_PITCHED_FRAMES) return null;
+
+    const dims = this.mfccFrames[0]?.length ?? 0;
+    const medianMfcc: number[] = [];
+    for (let i = 0; i < dims; i += 1) {
+      medianMfcc.push(median(this.mfccFrames.map((frame) => frame[i] ?? 0)));
+    }
+
     const rmsMean = this.rmsSum / this.frames;
     const rmsVariance = Math.max(0, this.rmsSumSq / this.frames - rmsMean * rmsMean);
+
     return {
-      mfcc: this.mfccSum.map((sum) => sum / this.frames),
-      centroid: this.centroidSum / this.frames,
+      mfcc: medianMfcc,
+      centroid: median(this.centroidFrames),
+      medianF0: median(this.f0Frames),
       frameCount: this.frames,
+      pitchedFrameCount: this.f0Frames.length,
       rmsMean,
       rmsVariance,
     };
   }
+}
+
+/**
+ * Automatic gender detection from the take's median fundamental frequency.
+ * EXACT rule as specified — deliberately no secondary signals (formants,
+ * brightness, etc.): a median F0 below 175Hz reads as a typical adult male
+ * chest/modal register, at or above it as typical adult female range. The
+ * student can always override this via the UI toggle if it's wrong for their
+ * voice — see `TimbreMatcher`'s gender-toggle state.
+ */
+export function detectGenderFromF0(medianF0Hz: number): TimbreGender {
+  return medianF0Hz < 175 ? "male" : "female";
 }
 
 export type RadarAxes = {

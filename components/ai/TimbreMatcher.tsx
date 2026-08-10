@@ -1,32 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Mic, Sparkles, Square, Stars } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Mic, RefreshCcw, Sparkles, Square, Stars } from "lucide-react";
 import Meyda, { type MeydaFeaturesObject } from "meyda";
 import Button from "@/components/ui/Button";
 import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
-  matchTopCelebrities,
+  CELEBRITY_GENRES,
+  groupMatchesByGenre,
+  rankCelebritiesByGender,
+  type CelebrityGenre,
   type CelebrityMatch,
 } from "@/lib/celebritiesDB";
 import {
   FingerprintAccumulator,
   computeRadarAxes,
+  detectGenderFromF0,
+  type AcousticFingerprint,
   type RadarAxes,
+  type TimbreGender,
 } from "@/lib/timbre-features";
-import { classifySingingGender } from "@/lib/singing-gender";
 import { assessVocalPresence } from "@/lib/vocal-presence";
+import { createYinDetector, type PitchDetectorFn } from "@/lib/pitch";
 import {
   startContextPcmCapture,
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
 
 const RECORD_MS = 10_000;
-/** Power-of-two analysis window Meyda requires. 1024 samples ≈ 23ms @44.1kHz —
- *  a good balance between frequency resolution (needed for stable MFCC/centroid
- *  estimates on a singing voice) and time resolution (fast enough to gate out
- *  short silences without smearing across syllables). */
-const MFCC_BUFFER_SIZE = 1024;
+/**
+ * Power-of-two analysis window shared by BOTH detectors running on every frame:
+ * Meyda (mfcc/spectralCentroid/rms) AND pitchfinder's YIN (fed the exact same
+ * frame via Meyda's `buffer` feature — see the analyzer callback below), per
+ * the "run both systems together on every frame" requirement. 2048 samples ≈
+ * 46ms @44.1kHz — still comfortably faster than the ~100ms target cadence,
+ * and (unlike the smaller 1024-sample window used before YIN was added to
+ * this pipeline) long enough to contain 2+ full periods even of a low male
+ * chest voice (~85Hz → ~520 samples/period), which YIN needs for a reliable
+ * F0 read, while still being short enough to gate out brief silences cleanly.
+ */
+const MFCC_BUFFER_SIZE = 2048;
 /** Meyda's own default MFCC coefficient count — matches the reference DB's vectors. */
 const MFCC_COEFFICIENTS = 13;
 
@@ -34,13 +47,25 @@ type Stage = "idle" | "recording" | "extracting" | "matching" | "done";
 
 type Props = { locked?: boolean };
 
+const GENRE_LABEL_RU: Record<CelebrityGenre, string> = {
+  Pop: "Поп",
+  Rock: "Рок",
+};
+
+const GENDER_LABEL_RU: Record<TimbreGender, string> = {
+  male: "Мужской",
+  female: "Женский",
+};
+
 export default function TimbreMatcher({ locked = false }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [axes, setAxes] = useState<RadarAxes | null>(null);
-  const [matches, setMatches] = useState<CelebrityMatch[]>([]);
-  const [genderLabel, setGenderLabel] = useState("");
+  const [fingerprint, setFingerprint] = useState<AcousticFingerprint | null>(null);
+  const [detectedGender, setDetectedGender] = useState<TimbreGender | null>(null);
+  const [selectedGender, setSelectedGender] = useState<TimbreGender | null>(null);
+  const [activeGenre, setActiveGenre] = useState<CelebrityGenre>("Pop");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -100,45 +125,51 @@ export default function TimbreMatcher({ locked = false }: Props) {
         throw new Error("Запись слишком короткая — спойте ещё раз");
       }
 
+      // Independent "is there a voice at all" guard — kept from the previous
+      // pipeline (see lib/vocal-presence.ts); the actual gender decision below
+      // no longer depends on it, only whether to accept the take at all.
       const presence = assessVocalPresence(audioBuffer);
       if (!presence.ok) {
         throw new Error(presence.reason || "Голос не обнаружен");
       }
       if (isStale(analysisId)) return;
 
-      // Primary silence guard: the live Meyda accumulator, not the post-hoc buffer check
-      // above — this is what actually backs the fingerprint used for matching.
-      const fingerprint = accumulator.finalize();
-      if (!fingerprint) {
+      // Median-based fingerprint from the live Meyda+YIN accumulator — see
+      // lib/timbre-features.ts for why median (not mean) and why frames with
+      // no detected pitch still contribute to the MFCC median but not to
+      // medianF0.
+      const fp = accumulator.finalize();
+      if (!fp) {
         throw new Error(
           "Звук не распознан, пойте громче — не хватило голосового сигнала для анализа тембра."
         );
       }
-
-      const channel = audioBuffer.getChannelData(0);
-      const genderResult = classifySingingGender(channel, audioBuffer.sampleRate);
       if (isStale(analysisId)) return;
 
       setStage("matching");
-      // Top-3 closest matches, pure deterministic Euclidean vector math (no randomness) —
-      // see `matchTopCelebrities` in lib/celebritiesDB.ts.
-      const ranked = matchTopCelebrities(fingerprint.mfcc, {
-        gender: genderResult.gender,
-        genderIsConfident: genderResult.confidence !== "low",
-      });
-      if (isStale(analysisId)) return;
 
-      setAxes(computeRadarAxes(fingerprint));
-      setMatches(ranked);
-      setGenderLabel(
-        genderResult.gender === "female" ? "женский голос" : "мужской голос"
-      );
+      // EXACT rule, no secondary heuristics: medianF0 < 175Hz → male, else female.
+      // Worked examples (traced end-to-end):
+      //  - male student, F0≈140Hz  → detectGenderFromF0 → "male"   → rankCelebritiesByGender only ever
+      //    scores/returns `gender: "male"` profiles → grouped by genre → top 5 Pop + top 5 Rock.
+      //  - female student, F0≈230Hz → "female" → only `gender: "female"` profiles considered, symmetric.
+      //  - borderline male, F0≈170Hz → still "male" (< 175) — if that's wrong for this voice, the
+      //    gender toggle below lets the student flip to "female" and instantly re-filters/re-ranks
+      //    the SAME median MFCC vector against the other-gender pool — no re-recording needed.
+      const detected = detectGenderFromF0(fp.medianF0);
+
+      setFingerprint(fp);
+      setAxes(computeRadarAxes(fp));
+      setDetectedGender(detected);
+      setSelectedGender(detected);
+      setActiveGenre("Pop");
       setStage("done");
     } catch (err) {
       if (isStale(analysisId)) return;
       setAxes(null);
-      setMatches([]);
-      setGenderLabel("");
+      setFingerprint(null);
+      setDetectedGender(null);
+      setSelectedGender(null);
       setError(
         err instanceof Error ? err.message : "Не удалось проанализировать запись"
       );
@@ -159,8 +190,10 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
     setError("");
     setAxes(null);
-    setMatches([]);
-    setGenderLabel("");
+    setFingerprint(null);
+    setDetectedGender(null);
+    setSelectedGender(null);
+    setActiveGenre("Pop");
     setProgress(0);
 
     if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -194,8 +227,10 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (ctx.state === "suspended") await ctx.resume();
       audioContextRef.current = ctx;
 
-      // Same-context PCM tap for the classic pitch-based gender detector +
-      // vocal-presence guard (both need raw samples, not Meyda's per-frame features).
+      // Same-context PCM tap, used only for the post-hoc "is there a voice at
+      // all" guard (assessVocalPresence) and duration checks — no longer feeds
+      // a second gender classifier (that now runs off medianF0 from the live
+      // Meyda+YIN accumulator below).
       const pcmSession = startContextPcmCapture(ctx, stream, ctx.currentTime);
       pcmSessionRef.current = pcmSession;
 
@@ -206,14 +241,27 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       const accumulator = new FingerprintAccumulator();
 
+      // Single YIN detector instance reused across the whole take — cheaper
+      // than constructing pitchfinder's internal state every frame, and this
+      // is the SAME tested primitive the pitch tuner uses (lib/pitch.ts).
+      const yinDetector: PitchDetectorFn = createYinDetector(ctx.sampleRate);
+
       const analyzer = Meyda.createMeydaAnalyzer({
         audioContext: ctx,
         source: meydaSource,
         bufferSize: MFCC_BUFFER_SIZE,
         numberOfMFCCCoefficients: MFCC_COEFFICIENTS,
-        featureExtractors: ["mfcc", "spectralCentroid", "rms"],
+        featureExtractors: ["mfcc", "spectralCentroid", "rms", "buffer"],
         callback: (features: Partial<MeydaFeaturesObject>) => {
-          accumulator.addFrame(features.mfcc, features.spectralCentroid, features.rms);
+          // Both detectors run on the exact same frame/buffer/sample-rate —
+          // Meyda's `buffer` feature is the raw (pre-FFT) time-domain signal
+          // for this analysis window, handed straight to YIN.
+          let f0: number | null = null;
+          const raw = features.buffer;
+          if (Array.isArray(raw) && raw.length > 0) {
+            f0 = yinDetector(Float32Array.from(raw));
+          }
+          accumulator.addFrame(features.mfcc, features.spectralCentroid, features.rms, f0);
         },
       });
       analyzerRef.current = analyzer;
@@ -279,6 +327,22 @@ export default function TimbreMatcher({ locked = false }: Props) {
     void endCaptureRef.current?.();
   };
 
+  // Instant recompute on gender toggle — no re-recording, no re-running DSP:
+  // just re-filter/re-rank the SAME median MFCC vector against the other
+  // gender's pool. STRICT gender filter lives entirely inside
+  // `rankCelebritiesByGender` (lib/celebritiesDB.ts): it only ever scores
+  // candidates whose `gender` field equals the `gender` argument passed here,
+  // so whichever of `detectedGender`/`selectedGender` we pass through is the
+  // one and only gender ever represented in `matches`/`grouped` below.
+  const matches: CelebrityMatch[] = useMemo(() => {
+    if (!fingerprint || !selectedGender) return [];
+    return rankCelebritiesByGender(fingerprint.mfcc, selectedGender);
+  }, [fingerprint, selectedGender]);
+
+  const grouped = useMemo(() => groupMatchesByGenre(matches, 5), [matches]);
+
+  const topMatch = matches[0];
+
   if (locked) {
     return (
       <LockedCard
@@ -287,8 +351,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
       />
     );
   }
-
-  const topMatch = matches[0];
 
   return (
     <section className="rounded-3xl bg-studio-surface p-4 ring-1 ring-studio-border sm:p-6">
@@ -302,8 +364,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Спойте 10 секунд — мы построим акустический отпечаток вашего голоса
-            (MFCC + спектральный центроид) и сравним его с базой из 100
-            известных голосов.
+            (медианные MFCC + спектральный центроид + YIN-высота тона) и
+            сравним его с базой из 100 известных голосов.
           </p>
         </div>
       </div>
@@ -353,81 +415,132 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
       )}
 
-      {stage === "done" && topMatch && (
+      {stage === "done" && selectedGender && (
         <div className="mt-6 space-y-6">
-          <div className="text-center">
-            <p className="text-lg leading-snug text-studio-text">
-              Главное совпадение:{" "}
-              <span className="font-semibold text-pink-300">
-                {topMatch.celebrity.name}
-              </span>{" "}
-              (
-              <span className="font-semibold text-pink-300">
-                {topMatch.percent}%
-              </span>{" "}
-              сходства)
-            </p>
-            {genderLabel && (
-              <p className="mt-1 text-sm text-studio-muted">
-                Определён {genderLabel}
-              </p>
-            )}
-          </div>
-
-          {axes && (
-            <div className="flex justify-center">
-              <VoiceRadarChart
-                axes={axes}
-                compare={{
-                  axes: {
-                    depth: topMatch.celebrity.acousticTraits.depth,
-                    brightness: topMatch.celebrity.acousticTraits.brightness,
-                    air: topMatch.celebrity.acousticTraits.airiness,
-                  },
-                  label: topMatch.celebrity.name,
-                }}
-                label="Ты"
-              />
-            </div>
-          )}
-
-          {(matches[1] || matches[2]) && (
-            <p className="text-center text-sm text-studio-muted">
-              Также в вашем голосе есть нотки:{" "}
-              <span className="font-medium text-studio-text">
-                {[matches[1]?.celebrity.name, matches[2]?.celebrity.name]
-                  .filter(Boolean)
-                  .join(" и ")}
+          {/* Gender toggle — shown together with results since matching is
+              instant; stays interactive the whole time so the student can
+              correct it before OR after trusting the results. */}
+          <div className="rounded-2xl bg-studio-bg/80 px-4 py-3 text-center ring-1 ring-studio-border">
+            <p className="text-sm leading-relaxed text-studio-text">
+              Ваш голос определён как:{" "}
+              <span className="font-semibold text-studio-accent-light">
+                {GENDER_LABEL_RU[selectedGender]}
               </span>
+              {detectedGender && selectedGender !== detectedGender && (
+                <span className="ml-1.5 text-xs text-amber-300">(вручную)</span>
+              )}
+              . Если это ошибка,{" "}
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedGender((g) => (g === "male" ? "female" : "male"))
+                }
+                className="inline-flex items-center gap-1 font-semibold text-pink-300 underline decoration-dotted underline-offset-4 transition hover:text-pink-200"
+              >
+                <RefreshCcw className="h-3 w-3" />
+                переключить на{" "}
+                {GENDER_LABEL_RU[selectedGender === "male" ? "female" : "male"]}
+              </button>
             </p>
-          )}
-
-          <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
-            <h3 className="mb-3 text-sm font-semibold text-studio-text">
-              Топ-3 совпадения
-            </h3>
-            <ul className="space-y-4">
-              {matches.map((m, i) => (
-                <li key={m.celebrity.id}>
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
-                      <span className="mr-1.5 text-studio-muted">{i + 1}.</span>
-                      {m.celebrity.name}
-                    </p>
-                    <span className="shrink-0 text-xs font-semibold tabular-nums text-studio-accent-light">
-                      {m.percent}%
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-studio-bg">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent"
-                      style={{ width: `${Math.max(4, m.percent)}%` }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
+
+          {topMatch && (
+            <>
+              <div className="text-center">
+                <p className="text-lg leading-snug text-studio-text">
+                  Абсолютный мэтч:{" "}
+                  <span className="font-semibold text-pink-300">
+                    {topMatch.celebrity.name}
+                  </span>{" "}
+                  (
+                  <span className="font-semibold text-pink-300">
+                    {topMatch.percent}%
+                  </span>
+                  )
+                </p>
+              </div>
+
+              {axes && (
+                <div className="flex justify-center">
+                  <VoiceRadarChart
+                    axes={axes}
+                    compare={{
+                      axes: {
+                        depth: topMatch.celebrity.acousticTraits.depth,
+                        brightness: topMatch.celebrity.acousticTraits.brightness,
+                        air: topMatch.celebrity.acousticTraits.airiness,
+                      },
+                      label: topMatch.celebrity.name,
+                    }}
+                    label="Ты"
+                  />
+                </div>
+              )}
+
+              <div>
+                <div className="mb-3 flex gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
+                  {CELEBRITY_GENRES.map((genre) => {
+                    const count = grouped[genre]?.length ?? 0;
+                    return (
+                      <button
+                        key={genre}
+                        type="button"
+                        onClick={() => setActiveGenre(genre)}
+                        className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                          activeGenre === genre
+                            ? "bg-studio-accent/20 text-studio-accent-light"
+                            : "text-studio-muted hover:text-studio-text"
+                        }`}
+                      >
+                        {GENRE_LABEL_RU[genre]}
+                        {count > 0 && (
+                          <span className="ml-1.5 tabular-nums opacity-70">
+                            ({count})
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {(grouped[activeGenre]?.length ?? 0) === 0 ? (
+                  <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
+                    В жанре «{GENRE_LABEL_RU[activeGenre]}» нет совпадений для
+                    выбранного пола.
+                  </p>
+                ) : (
+                  <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-studio-text">
+                      Топ совпадений — {GENRE_LABEL_RU[activeGenre]}
+                    </h3>
+                    <ul className="space-y-4">
+                      {(grouped[activeGenre] ?? []).map((m, i) => (
+                        <li key={m.celebrity.id}>
+                          <div className="mb-1.5 flex items-center justify-between gap-2">
+                            <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
+                              <span className="mr-1.5 text-studio-muted">
+                                {i + 1}.
+                              </span>
+                              {m.celebrity.name}
+                            </p>
+                            <span className="shrink-0 text-xs font-semibold tabular-nums text-studio-accent-light">
+                              {m.percent}% сходства
+                            </span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-studio-bg">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent"
+                              style={{ width: `${Math.max(4, m.percent)}%` }}
+                            />
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
