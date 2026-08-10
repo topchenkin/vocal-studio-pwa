@@ -1,61 +1,73 @@
 /**
- * "Вокальное ДНК" reference database — 100 well-known singers, each described by
- * 5 hand-authored acoustic traits (depth/brightness/airiness/raspiness/centroidHz)
- * rather than raw MFCC numbers. `generateTargetVector()` below turns those traits
- * into a deterministic 13-coefficient pseudo-MFCC vector (matching Meyda's default
- * coefficient count) so every profile can be compared against the student's live
- * fingerprint.
+ * Reference database of 100 well-known singers for the "Vocal Fach + Timbre
+ * Weight" celebrity matcher.
  *
- * Matching (see `rankCelebritiesByGender` below) uses COSINE SIMILARITY with
- * MFCC[0] excluded from both sides — this makes the score invariant to overall
- * loudness/gain (mic volume), which is exactly the previous version's bug
- * (Euclidean distance on raw-scale vectors let loudness dominate the metric).
+ * ARCHITECTURE (replaces the previous synthetic-MFCC / cosine-similarity model
+ * that this file used to implement): a voice is described by exactly two
+ * professionally meaningful, independently measurable properties —
  *
- * IMPORTANT: like the file this replaces (`lib/celebrity-timbre-db.ts`, now
- * deleted), these vectors are illustrative/approximate — there's no licensed
- * reference-audio corpus in this project to run through the real Meyda pipeline.
- * The 5 traits per artist are a plausible, clearly-differentiated summary of each
- * artist's real vocal character; `generateTargetVector` is a documented, pure
- * (no randomness) function so the mapping is stable and reproducible.
+ *   1. `vocalFach`     — the singer's tessitura bucket (where their voice
+ *                        actually LIVES, not their extreme range). Derived on
+ *                        the student's side from the take's MEDIAN F0, which
+ *                        is a direct physical measurement of the vocal folds
+ *                        and is essentially immune to microphone colouration.
+ *   2. `timbreWeight`  — 0-100 tonal weight/brightness: 0 = very dark, heavy,
+ *                        muffled (Barry White), 100 = very bright, ringing,
+ *                        light (Монеточка). Derived on the student's side from
+ *                        the median spectral centroid.
+ *
+ * Matching is a STRICT filter on (gender × vocalFach) followed by a
+ * nearest-neighbour ranking on `timbreWeight`. A bass can therefore never be
+ * matched against a tenor — which was the headline defect of the old MFCC
+ * model, where mic distortion routinely turned basses into Justin Bieber.
+ *
+ * The per-artist fach/weight values are hand-authored from each singer's real,
+ * documented vocal character (there is no licensed reference-audio corpus in
+ * this project to measure them from), but unlike the deleted pseudo-MFCC
+ * vectors they are directly interpretable and directly comparable to a real
+ * measurement taken from the student's microphone.
  */
 
 export type CelebrityGender = "male" | "female";
 
 /**
- * Simple 2-value genre taxonomy used to group results in the UI. Every one of
- * the 100 profiles below is assigned exactly one of these two based on their
- * real primary musical style; genres that don't map cleanly onto either
+ * Simple 2-value genre taxonomy used to group results in the UI (unchanged
+ * from the previous model). Genres that don't map cleanly onto either
  * (rap/hip-hop, jazz/soul, classic Russian estrada/chanson, etc.) are folded
- * into whichever bucket is the closer fit — `Pop` is the sensible default for
- * anything that isn't clearly rock-oriented (raspy/distorted, guitar-driven
- * rock/metal/punk bands and rock-and-roll/rock-icon solo artists → `Rock`).
+ * into whichever bucket fits better; `Pop` is the default for anything that
+ * isn't clearly rock-oriented (guitar-driven rock/metal/punk and rock-icon
+ * solo artists → `Rock`).
  */
 export type CelebrityGenre = "Pop" | "Rock";
 
 export const CELEBRITY_GENRES: CelebrityGenre[] = ["Pop", "Rock"];
 
-export interface AcousticTraits {
-  /** 0-100: chest-voice weight / low-end richness. Higher = darker, heavier voice. */
-  depth: number;
-  /** 0-100: perceived brilliance/forwardness of the tone. */
-  brightness: number;
-  /** 0-100: breathiness / non-tonal "air" mixed into the tone. */
-  airiness: number;
-  /** 0-100: hoarseness / vocal-fry / distortion in the tone. */
-  raspiness: number;
-  /** Mean spectral centroid in Hz — roughly, the voice's overall register/color. */
-  centroidHz: number;
-}
+/**
+ * Tessitura bucket. Two per gender — deliberately coarse, because a single
+ * median-F0 measurement from a 10-second phone-mic take cannot honestly
+ * resolve finer distinctions (lyric vs dramatic, soprano vs mezzo, etc.).
+ */
+export type VocalFach =
+  | "bass_baritone"
+  | "tenor"
+  | "contralto"
+  | "mezzo_soprano";
+
+export const VOCAL_FACH_LABEL_RU: Record<VocalFach, string> = {
+  bass_baritone: "Бас-баритон",
+  tenor: "Тенор",
+  contralto: "Контральто",
+  mezzo_soprano: "Меццо-сопрано",
+};
 
 export interface CelebrityProfile {
   id: string;
   name: string;
   gender: CelebrityGender;
+  vocalFach: VocalFach;
+  /** 0-100: 0 = very dark/heavy/muffled, 100 = very bright/ringing/light. */
+  timbreWeight: number;
   genre: CelebrityGenre;
-  nationality: "western" | "russian" | string;
-  acousticTraits: AcousticTraits;
-  /** 13-coefficient pseudo-MFCC vector, derived once via `generateTargetVector()` at module load. */
-  mfccVector?: number[];
 }
 
 /** Cyrillic → Latin transliteration used to build stable, readable, ASCII slug ids. */
@@ -74,202 +86,128 @@ function slugify(name: string): string {
   return translit.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-type RawEntry = {
-  name: string;
-  gender: CelebrityGender;
-  genre: CelebrityGenre;
-  nationality: "western" | "russian";
-  acousticTraits: AcousticTraits;
-};
+type RawEntry = Omit<CelebrityProfile, "id">;
 
 // prettier-ignore
 const RAW_ENTRIES: RawEntry[] = [
-  // ЗАРУБЕЖНЫЕ ЖЕНЩИНЫ (western, female)
-  { name: "Adele", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 85, brightness: 60, airiness: 40, raspiness: 20, centroidHz: 320 } },
-  { name: "Billie Eilish", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 30, brightness: 40, airiness: 95, raspiness: 10, centroidHz: 280 } },
-  { name: "Ariana Grande", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 40, brightness: 95, airiness: 60, raspiness: 0, centroidHz: 450 } },
-  { name: "Whitney Houston", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 80, brightness: 90, airiness: 20, raspiness: 10, centroidHz: 400 } },
-  { name: "Amy Winehouse", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 85, brightness: 40, airiness: 30, raspiness: 80, centroidHz: 250 } },
-  { name: "Beyonce", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 75, brightness: 85, airiness: 25, raspiness: 30, centroidHz: 350 } },
-  { name: "Lady Gaga", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 70, brightness: 80, airiness: 20, raspiness: 40, centroidHz: 340 } },
-  { name: "Mariah Carey", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 95, airiness: 50, raspiness: 0, centroidHz: 420 } },
-  { name: "Celine Dion", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 70, brightness: 90, airiness: 15, raspiness: 5, centroidHz: 380 } },
-  { name: "Sia", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 65, brightness: 85, airiness: 30, raspiness: 70, centroidHz: 360 } },
-  { name: "Taylor Swift", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 50, brightness: 70, airiness: 40, raspiness: 5, centroidHz: 330 } },
-  { name: "Dua Lipa", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 75, brightness: 65, airiness: 35, raspiness: 20, centroidHz: 290 } },
-  { name: "Lana Del Rey", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 85, brightness: 30, airiness: 60, raspiness: 10, centroidHz: 230 } },
-  { name: "Shakira", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 75, airiness: 20, raspiness: 50, centroidHz: 310 } },
-  { name: "Miley Cyrus", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 80, brightness: 60, airiness: 20, raspiness: 85, centroidHz: 260 } },
-  { name: "Rihanna", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 75, brightness: 70, airiness: 30, raspiness: 40, centroidHz: 300 } },
-  { name: "Janis Joplin", gender: "female", genre: "Rock", nationality: "western", acousticTraits: { depth: 70, brightness: 60, airiness: 10, raspiness: 100, centroidHz: 310 } },
-  { name: "Cher", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 95, brightness: 40, airiness: 10, raspiness: 20, centroidHz: 210 } },
-  { name: "Tina Turner", gender: "female", genre: "Rock", nationality: "western", acousticTraits: { depth: 90, brightness: 50, airiness: 10, raspiness: 80, centroidHz: 220 } },
-  { name: "Katy Perry", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 70, brightness: 75, airiness: 20, raspiness: 30, centroidHz: 280 } },
+  // ЗАРУБЕЖНЫЕ ЖЕНЩИНЫ
+  { name: "Adele",              gender: "female", vocalFach: "contralto",     timbreWeight: 35,  genre: "Pop"  },
+  { name: "Billie Eilish",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 85,  genre: "Pop"  },
+  { name: "Ariana Grande",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 95,  genre: "Pop"  },
+  { name: "Whitney Houston",    gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 88,  genre: "Pop"  },
+  { name: "Amy Winehouse",      gender: "female", vocalFach: "contralto",     timbreWeight: 30,  genre: "Pop"  },
+  { name: "Beyonce",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 75,  genre: "Pop"  },
+  { name: "Lady Gaga",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 65,  genre: "Pop"  },
+  { name: "Mariah Carey",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 92,  genre: "Pop"  },
+  { name: "Celine Dion",        gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 82,  genre: "Pop"  },
+  { name: "Sia",                gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 78,  genre: "Pop"  },
+  { name: "Taylor Swift",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 70,  genre: "Pop"  },
+  { name: "Dua Lipa",           gender: "female", vocalFach: "contralto",     timbreWeight: 45,  genre: "Pop"  },
+  { name: "Lana Del Rey",       gender: "female", vocalFach: "contralto",     timbreWeight: 22,  genre: "Pop"  },
+  { name: "Shakira",            gender: "female", vocalFach: "contralto",     timbreWeight: 50,  genre: "Pop"  },
+  { name: "Miley Cyrus",        gender: "female", vocalFach: "contralto",     timbreWeight: 38,  genre: "Rock" },
+  { name: "Rihanna",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 60,  genre: "Pop"  },
+  { name: "Janis Joplin",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 58,  genre: "Rock" },
+  { name: "Cher",               gender: "female", vocalFach: "contralto",     timbreWeight: 20,  genre: "Pop"  },
+  { name: "Tina Turner",        gender: "female", vocalFach: "contralto",     timbreWeight: 35,  genre: "Rock" },
+  { name: "Katy Perry",         gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 68,  genre: "Pop"  },
 
-  // РОССИЙСКИЕ ЖЕНЩИНЫ (russian, female)
-  { name: "Полина Гагарина", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 95, airiness: 20, raspiness: 30, centroidHz: 390 } },
-  { name: "Zivert", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 80, brightness: 60, airiness: 30, raspiness: 40, centroidHz: 260 } },
-  { name: "Anna Asti", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 70, airiness: 40, raspiness: 50, centroidHz: 280 } },
-  { name: "Земфира", gender: "female", genre: "Rock", nationality: "russian", acousticTraits: { depth: 70, brightness: 50, airiness: 45, raspiness: 30, centroidHz: 270 } },
-  { name: "Алла Пугачева", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 90, brightness: 60, airiness: 20, raspiness: 60, centroidHz: 240 } },
-  { name: "Пелагея", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 90, airiness: 15, raspiness: 0, centroidHz: 400 } },
-  { name: "Лолита", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 85, brightness: 55, airiness: 20, raspiness: 50, centroidHz: 250 } },
-  { name: "Монеточка", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 20, brightness: 90, airiness: 70, raspiness: 0, centroidHz: 430 } },
-  { name: "Слава", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 90, brightness: 50, airiness: 10, raspiness: 70, centroidHz: 230 } },
-  { name: "МакSим", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 40, brightness: 80, airiness: 60, raspiness: 5, centroidHz: 350 } },
-  { name: "Нюша", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 35, brightness: 85, airiness: 50, raspiness: 0, centroidHz: 380 } },
-  { name: "Клава Кока", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 25, brightness: 85, airiness: 65, raspiness: 0, centroidHz: 410 } },
-  { name: "Ёлка", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 80, airiness: 30, raspiness: 10, centroidHz: 340 } },
-  { name: "Лариса Долина", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 80, brightness: 85, airiness: 15, raspiness: 40, centroidHz: 310 } },
-  { name: "Любовь Успенская", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 85, brightness: 70, airiness: 10, raspiness: 50, centroidHz: 260 } },
-  { name: "Темникова", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 60, airiness: 50, raspiness: 20, centroidHz: 290 } },
-  { name: "Mary Gu", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 70, brightness: 65, airiness: 40, raspiness: 30, centroidHz: 280 } },
-  { name: "Диана Арбенина", gender: "female", genre: "Rock", nationality: "russian", acousticTraits: { depth: 80, brightness: 50, airiness: 20, raspiness: 60, centroidHz: 250 } },
-  { name: "Instasamka", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 40, brightness: 70, airiness: 50, raspiness: 20, centroidHz: 320 } },
-  { name: "Валерия", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 85, airiness: 15, raspiness: 30, centroidHz: 350 } },
+  // РОССИЙСКИЕ ЖЕНЩИНЫ
+  { name: "Полина Гагарина",    gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 80,  genre: "Pop"  },
+  { name: "Zivert",             gender: "female", vocalFach: "contralto",     timbreWeight: 48,  genre: "Pop"  },
+  { name: "Anna Asti",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 58,  genre: "Pop"  },
+  { name: "Земфира",            gender: "female", vocalFach: "contralto",     timbreWeight: 40,  genre: "Rock" },
+  { name: "Алла Пугачева",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 55,  genre: "Pop"  },
+  { name: "Пелагея",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 78,  genre: "Rock" },
+  { name: "Лолита",             gender: "female", vocalFach: "contralto",     timbreWeight: 25,  genre: "Pop"  },
+  { name: "Монеточка",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 100, genre: "Pop"  },
+  { name: "Слава",              gender: "female", vocalFach: "contralto",     timbreWeight: 32,  genre: "Pop"  },
+  { name: "МакSим",             gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 87,  genre: "Pop"  },
+  { name: "Нюша",               gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 89,  genre: "Pop"  },
+  { name: "Клава Кока",         gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 93,  genre: "Pop"  },
+  { name: "Ёлка",               gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 72,  genre: "Pop"  },
+  { name: "Лариса Долина",      gender: "female", vocalFach: "contralto",     timbreWeight: 42,  genre: "Pop"  },
+  { name: "Любовь Успенская",   gender: "female", vocalFach: "contralto",     timbreWeight: 28,  genre: "Pop"  },
+  { name: "Темникова",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 66,  genre: "Pop"  },
+  { name: "Mary Gu",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 84,  genre: "Pop"  },
+  { name: "Диана Арбенина",     gender: "female", vocalFach: "contralto",     timbreWeight: 30,  genre: "Rock" },
+  { name: "Юлия Чичерина",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 72,  genre: "Rock" },
+  { name: "Валерия",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 76,  genre: "Pop"  },
 
-  // ЗАРУБЕЖНЫЕ МУЖЧИНЫ (western, male)
-  { name: "Freddie Mercury", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 75, brightness: 90, airiness: 10, raspiness: 40, centroidHz: 250 } },
-  { name: "Frank Sinatra", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 85, brightness: 60, airiness: 20, raspiness: 10, centroidHz: 160 } },
-  { name: "Elvis Presley", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 80, brightness: 65, airiness: 15, raspiness: 20, centroidHz: 180 } },
-  { name: "Michael Jackson", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 30, brightness: 95, airiness: 40, raspiness: 15, centroidHz: 320 } },
-  { name: "Bruno Mars", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 50, brightness: 90, airiness: 20, raspiness: 30, centroidHz: 280 } },
-  { name: "Ed Sheeran", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 70, airiness: 40, raspiness: 15, centroidHz: 200 } },
-  { name: "The Weeknd", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 40, brightness: 90, airiness: 50, raspiness: 10, centroidHz: 290 } },
-  { name: "Kurt Cobain", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 70, brightness: 60, airiness: 10, raspiness: 100, centroidHz: 220 } },
-  { name: "Chester Bennington", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 65, brightness: 85, airiness: 10, raspiness: 95, centroidHz: 260 } },
-  { name: "Louis Armstrong", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 95, brightness: 30, airiness: 20, raspiness: 100, centroidHz: 110 } },
-  { name: "Andrea Bocelli", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 85, brightness: 80, airiness: 10, raspiness: 0, centroidHz: 210 } },
-  { name: "Barry White", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 100, brightness: 20, airiness: 30, raspiness: 60, centroidHz: 80 } },
-  { name: "Eminem", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 75, airiness: 10, raspiness: 40, centroidHz: 230 } },
-  { name: "Sam Smith", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 50, brightness: 85, airiness: 45, raspiness: 5, centroidHz: 270 } },
-  { name: "Hozier", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 80, brightness: 60, airiness: 20, raspiness: 30, centroidHz: 150 } },
-  { name: "Elton John", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 75, brightness: 70, airiness: 15, raspiness: 40, centroidHz: 180 } },
-  { name: "Steven Tyler", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 80, brightness: 75, airiness: 10, raspiness: 95, centroidHz: 240 } },
-  { name: "Paul McCartney", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 70, brightness: 65, airiness: 20, raspiness: 25, centroidHz: 190 } },
-  { name: "David Bowie", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 65, brightness: 70, airiness: 25, raspiness: 35, centroidHz: 210 } },
-  { name: "Mick Jagger", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 70, brightness: 75, airiness: 20, raspiness: 40, centroidHz: 200 } },
+  // ЗАРУБЕЖНЫЕ МУЖЧИНЫ
+  { name: "Freddie Mercury",    gender: "male",   vocalFach: "tenor",         timbreWeight: 75,  genre: "Rock" },
+  { name: "Frank Sinatra",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 30,  genre: "Pop"  },
+  { name: "Elvis Presley",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 40,  genre: "Rock" },
+  { name: "Michael Jackson",    gender: "male",   vocalFach: "tenor",         timbreWeight: 95,  genre: "Pop"  },
+  { name: "Bruno Mars",         gender: "male",   vocalFach: "tenor",         timbreWeight: 88,  genre: "Pop"  },
+  { name: "Ed Sheeran",         gender: "male",   vocalFach: "tenor",         timbreWeight: 70,  genre: "Pop"  },
+  { name: "The Weeknd",         gender: "male",   vocalFach: "tenor",         timbreWeight: 89,  genre: "Pop"  },
+  { name: "Kurt Cobain",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 45,  genre: "Rock" },
+  { name: "Chester Bennington", gender: "male",   vocalFach: "bass_baritone", timbreWeight: 55,  genre: "Rock" },
+  { name: "Louis Armstrong",    gender: "male",   vocalFach: "bass_baritone", timbreWeight: 15,  genre: "Pop"  },
+  { name: "Andrea Bocelli",     gender: "male",   vocalFach: "tenor",         timbreWeight: 65,  genre: "Pop"  },
+  { name: "Barry White",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 10,  genre: "Pop"  },
+  { name: "Eminem",             gender: "male",   vocalFach: "tenor",         timbreWeight: 72,  genre: "Pop"  },
+  { name: "Sam Smith",          gender: "male",   vocalFach: "tenor",         timbreWeight: 81,  genre: "Pop"  },
+  { name: "Hozier",             gender: "male",   vocalFach: "bass_baritone", timbreWeight: 35,  genre: "Rock" },
+  { name: "Elton John",         gender: "male",   vocalFach: "tenor",         timbreWeight: 60,  genre: "Pop"  },
+  { name: "Steven Tyler",       gender: "male",   vocalFach: "tenor",         timbreWeight: 85,  genre: "Rock" },
+  { name: "Paul McCartney",     gender: "male",   vocalFach: "tenor",         timbreWeight: 68,  genre: "Rock" },
+  { name: "David Bowie",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 50,  genre: "Rock" },
+  { name: "Mick Jagger",        gender: "male",   vocalFach: "tenor",         timbreWeight: 74,  genre: "Rock" },
 
-  // РОССИЙСКИЕ МУЖЧИНЫ (russian, male)
-  { name: "Муслим Магомаев", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 95, brightness: 80, airiness: 5, raspiness: 0, centroidHz: 140 } },
-  { name: "Дмитрий Хворостовский", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 100, brightness: 70, airiness: 5, raspiness: 0, centroidHz: 120 } },
-  { name: "Григорий Лепс", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 80, brightness: 85, airiness: 10, raspiness: 95, centroidHz: 240 } },
-  { name: "Дима Билан", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 85, airiness: 30, raspiness: 20, centroidHz: 260 } },
-  { name: "Сергей Лазарев", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 55, brightness: 90, airiness: 25, raspiness: 15, centroidHz: 270 } },
-  { name: "Баста", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 85, brightness: 50, airiness: 20, raspiness: 60, centroidHz: 160 } },
-  { name: "Леонид Агутин", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 65, airiness: 30, raspiness: 40, centroidHz: 190 } },
-  { name: "Валерий Меладзе", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 80, brightness: 75, airiness: 15, raspiness: 30, centroidHz: 180 } },
-  { name: "Niletto", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 70, airiness: 40, raspiness: 20, centroidHz: 220 } },
-  { name: "Владимир Пресняков", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 40, brightness: 95, airiness: 20, raspiness: 15, centroidHz: 300 } },
-  { name: "Николай Басков", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 70, brightness: 85, airiness: 10, raspiness: 0, centroidHz: 240 } },
-  { name: "Филипп Киркоров", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 80, airiness: 15, raspiness: 10, centroidHz: 210 } },
-  { name: "Валерий Кипелов", gender: "male", genre: "Rock", nationality: "russian", acousticTraits: { depth: 75, brightness: 95, airiness: 5, raspiness: 70, centroidHz: 280 } },
-  { name: "Михаил Горшенев (Король и Шут)", gender: "male", genre: "Rock", nationality: "russian", acousticTraits: { depth: 85, brightness: 60, airiness: 10, raspiness: 85, centroidHz: 170 } },
-  { name: "Shaman", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 90, airiness: 15, raspiness: 50, centroidHz: 270 } },
-  { name: "Macan", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 55, airiness: 30, raspiness: 60, centroidHz: 180 } },
-  { name: "Feduk", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 70, airiness: 45, raspiness: 10, centroidHz: 210 } },
-  { name: "Jony", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 75, airiness: 40, raspiness: 15, centroidHz: 230 } },
-  { name: "Александр Градский", gender: "male", genre: "Rock", nationality: "russian", acousticTraits: { depth: 80, brightness: 85, airiness: 10, raspiness: 30, centroidHz: 200 } },
-  { name: "Скриптонит", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 80, brightness: 40, airiness: 40, raspiness: 80, centroidHz: 150 } },
+  // РОССИЙСКИЕ МУЖЧИНЫ
+  { name: "Муслим Магомаев",                gender: "male", vocalFach: "bass_baritone", timbreWeight: 20, genre: "Pop"  },
+  { name: "Дмитрий Хворостовский",          gender: "male", vocalFach: "bass_baritone", timbreWeight: 12, genre: "Pop"  },
+  { name: "Григорий Лепс",                  gender: "male", vocalFach: "bass_baritone", timbreWeight: 40, genre: "Pop"  },
+  { name: "Дима Билан",                     gender: "male", vocalFach: "tenor",         timbreWeight: 80, genre: "Pop"  },
+  { name: "Сергей Лазарев",                 gender: "male", vocalFach: "tenor",         timbreWeight: 85, genre: "Pop"  },
+  { name: "Баста",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 25, genre: "Pop"  },
+  { name: "Леонид Агутин",                  gender: "male", vocalFach: "bass_baritone", timbreWeight: 45, genre: "Pop"  },
+  { name: "Валерий Меладзе",                gender: "male", vocalFach: "tenor",         timbreWeight: 71, genre: "Pop"  },
+  { name: "Niletto",                        gender: "male", vocalFach: "tenor",         timbreWeight: 78, genre: "Pop"  },
+  { name: "Владимир Пресняков",             gender: "male", vocalFach: "tenor",         timbreWeight: 92, genre: "Pop"  },
+  { name: "Николай Басков",                 gender: "male", vocalFach: "tenor",         timbreWeight: 68, genre: "Pop"  },
+  { name: "Филипп Киркоров",                gender: "male", vocalFach: "tenor",         timbreWeight: 62, genre: "Pop"  },
+  { name: "Валерий Кипелов",                gender: "male", vocalFach: "tenor",         timbreWeight: 88, genre: "Rock" },
+  { name: "Михаил Горшенев (Король и Шут)", gender: "male", vocalFach: "bass_baritone", timbreWeight: 25, genre: "Rock" },
+  { name: "Shaman",                         gender: "male", vocalFach: "tenor",         timbreWeight: 82, genre: "Pop"  },
+  { name: "Macan",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 42, genre: "Pop"  },
+  { name: "Feduk",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 48, genre: "Pop"  },
+  { name: "Jony",                           gender: "male", vocalFach: "tenor",         timbreWeight: 76, genre: "Pop"  },
+  { name: "Александр Градский",             gender: "male", vocalFach: "tenor",         timbreWeight: 80, genre: "Rock" },
+  { name: "Скриптонит",                     gender: "male", vocalFach: "bass_baritone", timbreWeight: 18, genre: "Pop"  },
 
-  // +20 more, chosen to round out the roster to exactly 100 with a mixed
-  // gender/nationality/genre spread (pop, rock, rap, R&B) not already covered above.
-  { name: "Christina Aguilera", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 65, brightness: 90, airiness: 25, raspiness: 30, centroidHz: 380 } },
-  { name: "Alicia Keys", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 70, brightness: 70, airiness: 20, raspiness: 15, centroidHz: 290 } },
-  { name: "Doja Cat", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 55, brightness: 80, airiness: 35, raspiness: 25, centroidHz: 320 } },
-  { name: "Camila Cabello", gender: "female", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 75, airiness: 30, raspiness: 15, centroidHz: 310 } },
-  { name: "Stevie Wonder", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 65, brightness: 80, airiness: 20, raspiness: 15, centroidHz: 260 } },
-  { name: "Bob Dylan", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 55, brightness: 55, airiness: 15, raspiness: 90, centroidHz: 190 } },
-  { name: "Bruce Springsteen", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 70, brightness: 65, airiness: 15, raspiness: 55, centroidHz: 200 } },
-  { name: "Axl Rose", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 55, brightness: 90, airiness: 15, raspiness: 75, centroidHz: 310 } },
-  { name: "Adam Levine", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 40, brightness: 85, airiness: 45, raspiness: 20, centroidHz: 300 } },
-  { name: "Justin Bieber", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 45, brightness: 80, airiness: 35, raspiness: 15, centroidHz: 280 } },
-  { name: "Drake", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 55, brightness: 60, airiness: 25, raspiness: 25, centroidHz: 200 } },
-  { name: "Post Malone", gender: "male", genre: "Pop", nationality: "western", acousticTraits: { depth: 60, brightness: 55, airiness: 30, raspiness: 45, centroidHz: 210 } },
-  { name: "Ozzy Osbourne", gender: "male", genre: "Rock", nationality: "western", acousticTraits: { depth: 65, brightness: 70, airiness: 15, raspiness: 65, centroidHz: 220 } },
-  { name: "Юрий Шатунов", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 55, brightness: 80, airiness: 30, raspiness: 15, centroidHz: 260 } },
-  { name: "Вячеслав Бутусов", gender: "male", genre: "Rock", nationality: "russian", acousticTraits: { depth: 75, brightness: 55, airiness: 15, raspiness: 45, centroidHz: 170 } },
-  { name: "Гарик Сукачёв", gender: "male", genre: "Rock", nationality: "russian", acousticTraits: { depth: 75, brightness: 50, airiness: 15, raspiness: 70, centroidHz: 160 } },
-  { name: "Тимати", gender: "male", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 60, airiness: 20, raspiness: 40, centroidHz: 190 } },
-  { name: "Ирина Аллегрова", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 75, brightness: 75, airiness: 15, raspiness: 35, centroidHz: 300 } },
-  { name: "Юта", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 60, brightness: 80, airiness: 25, raspiness: 20, centroidHz: 330 } },
-  { name: "Ани Лорак", gender: "female", genre: "Pop", nationality: "russian", acousticTraits: { depth: 65, brightness: 85, airiness: 20, raspiness: 15, centroidHz: 360 } },
+  // СМЕШАННЫЙ БЛОК — добирает ростер ровно до 100 (поп/рок, м/ж, RU/EN)
+  { name: "Christina Aguilera", gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 90, genre: "Pop"  },
+  { name: "Alicia Keys",        gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 52, genre: "Pop"  },
+  { name: "Avril Lavigne",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 82, genre: "Rock" },
+  { name: "Camila Cabello",     gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 74, genre: "Pop"  },
+  { name: "Stevie Wonder",      gender: "male",   vocalFach: "tenor",         timbreWeight: 79, genre: "Pop"  },
+  { name: "Bob Dylan",          gender: "male",   vocalFach: "bass_baritone", timbreWeight: 38, genre: "Rock" },
+  { name: "Bruce Springsteen",  gender: "male",   vocalFach: "bass_baritone", timbreWeight: 32, genre: "Rock" },
+  { name: "Axl Rose",           gender: "male",   vocalFach: "tenor",         timbreWeight: 96, genre: "Rock" },
+  { name: "Adam Levine",        gender: "male",   vocalFach: "tenor",         timbreWeight: 91, genre: "Pop"  },
+  { name: "Justin Bieber",      gender: "male",   vocalFach: "tenor",         timbreWeight: 90, genre: "Pop"  },
+  { name: "Drake",              gender: "male",   vocalFach: "bass_baritone", timbreWeight: 50, genre: "Pop"  },
+  { name: "Post Malone",        gender: "male",   vocalFach: "tenor",         timbreWeight: 66, genre: "Pop"  },
+  { name: "Ozzy Osbourne",      gender: "male",   vocalFach: "tenor",         timbreWeight: 73, genre: "Rock" },
+  { name: "Юрий Шатунов",       gender: "male",   vocalFach: "tenor",         timbreWeight: 86, genre: "Pop"  },
+  { name: "Вячеслав Бутусов",   gender: "male",   vocalFach: "bass_baritone", timbreWeight: 28, genre: "Rock" },
+  { name: "Гарик Сукачёв",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 22, genre: "Rock" },
+  { name: "Тимати",             gender: "male",   vocalFach: "bass_baritone", timbreWeight: 35, genre: "Pop"  },
+  { name: "Ирина Аллегрова",    gender: "female", vocalFach: "contralto",     timbreWeight: 38, genre: "Pop"  },
+  { name: "Юта",                gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 69, genre: "Pop"  },
+  { name: "Ани Лорак",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 83, genre: "Pop"  },
 ];
-
-/**
- * Deterministic traits → 13-coefficient pseudo-MFCC mapping (Meyda's default
- * coefficient count, c0..c12). Pure function of the 5 acoustic traits — no
- * randomness — so two similar trait profiles always land close together in
- * cosine-similarity space and two dissimilar ones always land far apart.
- *
- * This is an approximation of how these traits *would* shape a real MFCC
- * envelope, not a physically-modeled vocoder — there's no reference-audio
- * corpus in this project to derive real coefficients from (same caveat as
- * the rest of this file).
- *
- *  - c0  (overall level)     = centroidHz / 10 — real MFCC c0 tracks log-energy/
- *    overall spectral level, and a higher-register voice reads as "louder"
- *    at the top of the band, so we key it off the centroid. NOTE: c0 is
- *    always excluded before comparison (see `rankCelebritiesByGender`), so
- *    this coefficient's absolute scale never actually influences matching.
- *  - c1  (spectral balance)  = brightness − depth — this is literally the
- *    coarsest tilt of the spectrum (energy shifted up vs down), which is
- *    exactly what real c1 captures.
- *  - c2  (air/breath noise)  = airiness × 0.5 — breath noise shows up as
- *    broadband energy that first perturbs the early-mid coefficients.
- *  - c3..c12 (10 coefficients, order k = 1..10): each coefficient combines
- *    four terms that mirror how real cepstral envelopes behave:
- *      1. `alternatingSign * decayMagnitude` — real MFCC envelopes decay in
- *         magnitude as order increases and typically alternate in sign;
- *         `depth` (chest-voice weight) scales the decay's starting magnitude
- *         since darker voices carry more low-order spectral energy.
- *      2. `raspinessRipple` — hoarseness/vocal-fry breaks up the harmonic
- *         structure, which we model as a mid-band oscillation (a few periods
- *         of sine across k=1..10) scaled by `raspiness`.
- *      3. `airHighOrderBoost` — breathy/airy voices carry more broadband
- *         energy at *higher*-order (finer spectral detail) coefficients, so
- *         this term grows linearly with k, scaled by `airiness`.
- *      4. `brightnessMidBoost` — a bright, forward tone sharpens mid-order
- *         formant detail, modeled as a bump centered near k=5, scaled by how
- *         far `brightness` sits from a neutral 50.
- */
-export function generateTargetVector(traits: AcousticTraits): number[] {
-  const { depth, brightness, airiness, raspiness, centroidHz } = traits;
-
-  const vector: number[] = [
-    centroidHz / 10,
-    brightness - depth,
-    airiness * 0.5,
-  ];
-
-  for (let k = 1; k <= 10; k += 1) {
-    const alternatingSign = k % 2 === 1 ? 1 : -1;
-    const decayMagnitude = (depth / 10) * (1 / k);
-    const raspinessRipple = (raspiness / 100) * 6 * Math.sin((k / 10) * Math.PI * 3);
-    const airHighOrderBoost = (airiness / 100) * 4 * (k / 10);
-    const brightnessMidBoost =
-      ((brightness - 50) / 100) * 3 * Math.exp(-Math.abs(k - 5) / 4);
-
-    vector.push(
-      alternatingSign * decayMagnitude +
-        raspinessRipple +
-        airHighOrderBoost +
-        brightnessMidBoost
-    );
-  }
-
-  return vector;
-}
 
 export const CELEBRITIES_DB: CelebrityProfile[] = RAW_ENTRIES.map((entry) => ({
   id: slugify(entry.name),
-  name: entry.name,
-  gender: entry.gender,
-  genre: entry.genre,
-  nationality: entry.nationality,
-  acousticTraits: entry.acousticTraits,
-  mfccVector: generateTargetVector(entry.acousticTraits),
+  ...entry,
 }));
+
+const MALE_FACHES: VocalFach[] = ["bass_baritone", "tenor"];
+const FEMALE_FACHES: VocalFach[] = ["contralto", "mezzo_soprano"];
 
 if (process.env.NODE_ENV !== "production") {
   const ids = new Set(CELEBRITIES_DB.map((c) => c.id));
@@ -279,114 +217,112 @@ if (process.env.NODE_ENV !== "production") {
   if (CELEBRITIES_DB.length !== 100) {
     throw new Error(`celebritiesDB: expected 100 entries, got ${CELEBRITIES_DB.length}`);
   }
-}
-
-/**
- * Standard cosine similarity: dot(a,b) / (||a|| * ||b||), in roughly [-1, 1].
- * Guards against a zero-magnitude vector (e.g. a silent/degenerate input) by
- * returning 0 instead of dividing by zero / producing NaN.
- */
-export function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  const n = Math.min(vecA.length, vecB.length);
-  let dot = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < n; i += 1) {
-    const a = vecA[i] ?? 0;
-    const b = vecB[i] ?? 0;
-    dot += a * b;
-    magA += a * a;
-    magB += b * b;
+  for (const c of CELEBRITIES_DB) {
+    const allowed = c.gender === "male" ? MALE_FACHES : FEMALE_FACHES;
+    if (!allowed.includes(c.vocalFach)) {
+      throw new Error(`celebritiesDB: ${c.name} has fach ${c.vocalFach} incompatible with gender ${c.gender}`);
+    }
+    if (!Number.isFinite(c.timbreWeight) || c.timbreWeight < 0 || c.timbreWeight > 100) {
+      throw new Error(`celebritiesDB: ${c.name} has out-of-range timbreWeight ${c.timbreWeight}`);
+    }
   }
-  const denom = Math.sqrt(magA) * Math.sqrt(magB);
-  if (denom < 1e-9) return 0;
-  return dot / denom;
 }
 
 /**
- * Drop MFCC[0] (overall energy/loudness) before comparison — see the
- * "CRITICAL" note in `rankCelebritiesByGender` for why.
- */
-function dropC0(vector: number[]): number[] {
-  return vector.slice(1);
-}
-
-/**
- * Cosine similarity → 0-100 display percentage.
+ * Median-F0 → Vocal Fach thresholds. Deliberately hard cut-offs with no fuzzy
+ * zone: a single number in, a single bucket out, so the result is fully
+ * explainable to the student ("115 Hz < 165 Hz ⇒ баритон").
  *
- * Mapping choice: `percent = round(clamp((cos+1)/2, 0, 1) * 100)`, i.e. the
- * full [-1, 1] range is spread across [0, 100] rather than clamping negative
- * similarities to 0. Reasoning: these are 12-dimensional vectors (MFCC[1..12])
- * whose components routinely take BOTH signs (e.g. coefficient c1 = brightness
- * − depth ranges roughly −100..+100, and the higher-order coefficients
- * alternate sign by construction — see `generateTargetVector`). Two voices
- * with opposite spectral tilt (one very bright/light, one very dark/heavy)
- * can legitimately produce a negative cosine similarity, not just "low but
- * positive" similarity. Clamping those to 0 would collapse a real, informative
- * part of the similarity range and make the whole 100-star pool look
- * artificially bunched near the bottom. The (cos+1)/2 mapping keeps the
- * output well-spread across the full 0-100 scale for typical inputs.
+ * 165 Hz ≈ E3 — the classic baritone/tenor tessitura divide for adult male
+ * voices. 220 Hz = A3 — the corresponding contralto/mezzo divide for adult
+ * female voices.
  */
-function similarityToPercent(cosineSim: number): number {
-  const clamped = Math.max(-1, Math.min(1, cosineSim));
-  const normalized01 = Math.max(0, Math.min(1, (clamped + 1) / 2));
-  return Math.round(normalized01 * 100);
+export const MALE_FACH_SPLIT_HZ = 165;
+export const FEMALE_FACH_SPLIT_HZ = 220;
+
+/**
+ * Classifies the take's median F0 into a Vocal Fach, using the gender the
+ * student EXPLICITLY selected in the UI (never an auto-detected one — F0-based
+ * auto gender detection is exactly what used to mislabel low male voices).
+ */
+export function classifyVocalFach(
+  gender: CelebrityGender,
+  medianHz: number
+): VocalFach {
+  if (gender === "male") {
+    return medianHz < MALE_FACH_SPLIT_HZ ? "bass_baritone" : "tenor";
+  }
+  return medianHz < FEMALE_FACH_SPLIT_HZ ? "contralto" : "mezzo_soprano";
 }
 
 export type CelebrityMatch = {
   celebrity: CelebrityProfile;
-  /** Raw cosine similarity of the MFCC[1..12] vectors, roughly in [-1, 1]. */
-  similarity: number;
-  /** 0-100 display score, see `similarityToPercent`. */
+  /** |userWeight − celebrity.timbreWeight|, 0-100. Smaller = better match. */
+  weightDiff: number;
+  /** 0-100 display score, see `weightDiffToPercent`. */
   percent: number;
 };
 
 /**
- * Ranks the ENTIRE gender-matching subset of the 100-star DB against the
- * student's median MFCC vector, using cosine similarity with MFCC[0]
- * excluded from both sides.
- *
- * 1. Gender filter (STRICT): only candidates whose `gender` field equals the
- *    `gender` argument are ever scored/returned — there is no fallback to the
- *    full pool. Callers (the UI) pass either the auto-detected gender
- *    (`detectGenderFromF0`) or the student's manual override.
- * 2. MFCC[0] exclusion: both the student vector and every candidate's
- *    `mfccVector` are sliced to indices [1..12] (`dropC0`) before computing
- *    similarity — MFCC[0] tracks overall energy/loudness and must never
- *    influence the score (this is what makes the match robust to mic gain).
- * 3. Cosine similarity is inherently scale-invariant per vector (that's the
- *    whole point of using it here instead of Euclidean distance), so no
- *    additional z-score/normalization step against reference stats is
- *    needed the way the old Euclidean matcher required.
- *
- * Returns ALL matching candidates (not just top-N), sorted by descending
- * similarity — the caller decides how to slice/group (see
- * `groupMatchesByGenre` for the genre-bucketed top-5 UI requirement, or just
- * take `[0]` for the single best "Абсолютный мэтч").
+ * Worst possible displayed similarity. Everyone in the returned list already
+ * passed the STRICT gender+fach filter, i.e. they genuinely share the
+ * student's tessitura, so even the tonally furthest member of that pool is a
+ * real (if not ideal) match and shouldn't be shown as "0% similar".
  */
-export function rankCelebritiesByGender(
-  studentMedianMfcc: number[],
-  gender: CelebrityGender
-): CelebrityMatch[] {
-  const pool = CELEBRITIES_DB.filter((c) => c.gender === gender);
-  const studentTrimmed = dropC0(studentMedianMfcc);
+const MIN_MATCH_PERCENT = 40;
 
-  return pool
-    .map((celebrity) => {
-      const refTrimmed = dropC0(celebrity.mfccVector ?? []);
-      const similarity = cosineSimilarity(studentTrimmed, refTrimmed);
-      return { celebrity, similarity, percent: similarityToPercent(similarity) };
-    })
-    .sort((a, b) => b.similarity - a.similarity);
+/**
+ * Timbre-weight distance → display percentage.
+ *
+ * Linear and strictly monotonic: `diff = 0 → 100%`, `diff = 100 → 40%`
+ * (i.e. `percent = 100 − 0.6 × diff`). Chosen over the naive `100 − diff`
+ * because the pool is already fach-filtered (see `MIN_MATCH_PERCENT`), and
+ * over a steeper/exponential curve because a linear map keeps the displayed
+ * number literally interpretable: 10 points of timbre-weight distance always
+ * costs exactly 6 percentage points, anywhere on the scale. Fully
+ * deterministic — no randomness anywhere in this module.
+ */
+function weightDiffToPercent(diff: number): number {
+  const clamped = Math.max(0, Math.min(100, diff));
+  return Math.round(MIN_MATCH_PERCENT + (100 - MIN_MATCH_PERCENT) * (1 - clamped / 100));
 }
 
 /**
- * Groups an already gender-filtered, similarity-ranked match list by
- * `celebrity.genre`, keeping only the top `perGenreLimit` (default 5) per
- * genre. Input order is assumed already descending by similarity (as
- * returned by `rankCelebritiesByGender`), so grouping preserves rank order.
- * Genres with zero matches after the gender filter are simply absent from
- * the returned record (never padded with fakes).
+ * The one and only matcher.
+ *
+ * 1. STRICT filter: only profiles whose `gender` AND `vocalFach` both exactly
+ *    equal the student's selected gender / classified fach are ever
+ *    considered. There is NO fallback to the unfiltered pool — a bass is
+ *    physically incapable of being matched to a tenor here, by construction.
+ * 2. Ranking inside that pool is by absolute timbre-weight distance, ascending
+ *    (ties broken by `id` so the order is stable and reproducible).
+ *
+ * Returns the whole filtered pool ranked; the caller slices/groups it (see
+ * `groupMatchesByGenre`).
+ */
+export function matchCelebrities(
+  gender: CelebrityGender,
+  fach: VocalFach,
+  userWeight: number
+): CelebrityMatch[] {
+  return CELEBRITIES_DB.filter((c) => c.gender === gender && c.vocalFach === fach)
+    .map((celebrity) => {
+      const weightDiff = Math.abs(userWeight - celebrity.timbreWeight);
+      return { celebrity, weightDiff, percent: weightDiffToPercent(weightDiff) };
+    })
+    .sort((a, b) =>
+      a.weightDiff === b.weightDiff
+        ? a.celebrity.id.localeCompare(b.celebrity.id)
+        : a.weightDiff - b.weightDiff
+    );
+}
+
+/**
+ * Groups an already filtered + ranked match list by `celebrity.genre`, keeping
+ * only the top `perGenreLimit` (default 5) per genre. Input order is assumed
+ * ascending by `weightDiff` (as returned by `matchCelebrities`), so grouping
+ * preserves rank order. Buckets with fewer than the limit are simply shorter —
+ * never padded, never topped up from outside the filtered pool.
  */
 export function groupMatchesByGenre(
   matches: CelebrityMatch[],
