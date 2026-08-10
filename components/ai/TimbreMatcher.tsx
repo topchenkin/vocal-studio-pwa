@@ -6,9 +6,9 @@ import Meyda, { type MeydaFeaturesObject } from "meyda";
 import Button from "@/components/ui/Button";
 import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
-  matchCelebrities,
+  matchTopCelebrities,
   type CelebrityMatch,
-} from "@/lib/celebrity-timbre-db";
+} from "@/lib/celebritiesDB";
 import {
   FingerprintAccumulator,
   computeRadarAxes,
@@ -120,7 +120,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
 
       setStage("matching");
-      const ranked = matchCelebrities(fingerprint, {
+      // Top-3 closest matches, pure deterministic Euclidean vector math (no randomness) —
+      // see `matchTopCelebrities` in lib/celebritiesDB.ts.
+      const ranked = matchTopCelebrities(fingerprint.mfcc, {
         gender: genderResult.gender,
         genderIsConfident: genderResult.confidence !== "low",
       });
@@ -300,8 +302,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Спойте 10 секунд — мы построим акустический отпечаток вашего голоса
-            (MFCC + спектральный центроид) и сравним его с базой известных
-            голосов.
+            (MFCC + спектральный центроид) и сравним его с базой из 100
+            известных голосов.
           </p>
         </div>
       </div>
@@ -355,14 +357,15 @@ export default function TimbreMatcher({ locked = false }: Props) {
         <div className="mt-6 space-y-6">
           <div className="text-center">
             <p className="text-lg leading-snug text-studio-text">
-              Ваш тембральный отпечаток на{" "}
+              Главное совпадение:{" "}
+              <span className="font-semibold text-pink-300">
+                {topMatch.celebrity.name}
+              </span>{" "}
+              (
               <span className="font-semibold text-pink-300">
                 {topMatch.percent}%
               </span>{" "}
-              совпадает с{" "}
-              <span className="font-semibold text-pink-300">
-                {topMatch.celebrity.name}
-              </span>
+              сходства)
             </p>
             {genderLabel && (
               <p className="mt-1 text-sm text-studio-muted">
@@ -373,16 +376,38 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
           {axes && (
             <div className="flex justify-center">
-              <VoiceRadarChart axes={axes} />
+              <VoiceRadarChart
+                axes={axes}
+                compare={{
+                  axes: {
+                    depth: topMatch.celebrity.acousticTraits.depth,
+                    brightness: topMatch.celebrity.acousticTraits.brightness,
+                    air: topMatch.celebrity.acousticTraits.airiness,
+                  },
+                  label: topMatch.celebrity.name,
+                }}
+                label="Ты"
+              />
             </div>
+          )}
+
+          {(matches[1] || matches[2]) && (
+            <p className="text-center text-sm text-studio-muted">
+              Также в вашем голосе есть нотки:{" "}
+              <span className="font-medium text-studio-text">
+                {[matches[1]?.celebrity.name, matches[2]?.celebrity.name]
+                  .filter(Boolean)
+                  .join(" и ")}
+              </span>
+            </p>
           )}
 
           <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
             <h3 className="mb-3 text-sm font-semibold text-studio-text">
-              Топ совпадений
+              Топ-3 совпадения
             </h3>
             <ul className="space-y-4">
-              {matches.slice(0, 8).map((m, i) => (
+              {matches.map((m, i) => (
                 <li key={m.celebrity.id}>
                   <div className="mb-1.5 flex items-center justify-between gap-2">
                     <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
