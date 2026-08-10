@@ -29,15 +29,17 @@ import {
 
 const RECORD_MS = 10_000;
 /**
- * Power-of-two analysis window shared by BOTH detectors running on every frame:
- * Meyda (mfcc/spectralCentroid/rms) AND pitchfinder's YIN (fed the exact same
- * frame via Meyda's `buffer` feature — see the analyzer callback below), per
- * the "run both systems together on every frame" requirement. 2048 samples ≈
- * 46ms @44.1kHz — still comfortably faster than the ~100ms target cadence,
- * and (unlike the smaller 1024-sample window used before YIN was added to
- * this pipeline) long enough to contain 2+ full periods even of a low male
- * chest voice (~85Hz → ~520 samples/period), which YIN needs for a reliable
- * F0 read, while still being short enough to gate out brief silences cleanly.
+ * Power-of-two analysis window shared by BOTH detectors running on every
+ * frame: Meyda (mfcc/spectralCentroid/rms) AND pitchfinder's YIN (fed raw PCM
+ * tapped from a parallel AnalyserNode of the same size — see the analyzer
+ * callback below; YIN deliberately does NOT use Meyda's own `buffer` feature,
+ * which is the *windowed*, not raw, signal and badly degrades YIN's pitch
+ * detection). 2048 samples ≈ 46ms @44.1kHz — still comfortably faster than
+ * the ~100ms target cadence, and (unlike the smaller 1024-sample window used
+ * before YIN was added to this pipeline) long enough to contain 2+ full
+ * periods even of a low male chest voice (~85Hz → ~520 samples/period), which
+ * YIN needs for a reliable F0 read, while still being short enough to gate
+ * out brief silences cleanly.
  */
 const MFCC_BUFFER_SIZE = 2048;
 /** Meyda's own default MFCC coefficient count — matches the reference DB's vectors. */
@@ -246,21 +248,36 @@ export default function TimbreMatcher({ locked = false }: Props) {
       // is the SAME tested primitive the pitch tuner uses (lib/pitch.ts).
       const yinDetector: PitchDetectorFn = createYinDetector(ctx.sampleRate);
 
+      // Raw (non-windowed) time-domain tap for YIN, via a plain AnalyserNode
+      // on the SAME source. IMPORTANT: Meyda's `buffer` feature is NOT raw
+      // PCM — Meyda always applies its windowing function (Hanning by
+      // default) to every frame before computing ANY feature, including the
+      // `buffer` pseudo-feature, which just hands back that already-windowed
+      // signal (tapered to ~0 at both edges). Feeding a Hanning-windowed
+      // buffer into YIN's difference-function algorithm corrupts exactly the
+      // periodicity structure it depends on, which is what made YIN return
+      // null on almost every frame of real singing (confirmed with a
+      // synthetic harmonic+noise voice-like signal: raw buffer → correct F0
+      // on every frame, Hanning-windowed buffer → null on every frame).
+      // AnalyserNode.getFloatTimeDomainData() returns genuine unprocessed
+      // samples, decoupled from whatever Meyda does internally.
+      const pitchAnalyser = ctx.createAnalyser();
+      pitchAnalyser.fftSize = MFCC_BUFFER_SIZE;
+      meydaSource.connect(pitchAnalyser);
+      const rawTimeDomain = new Float32Array(MFCC_BUFFER_SIZE);
+
       const analyzer = Meyda.createMeydaAnalyzer({
         audioContext: ctx,
         source: meydaSource,
         bufferSize: MFCC_BUFFER_SIZE,
         numberOfMFCCCoefficients: MFCC_COEFFICIENTS,
-        featureExtractors: ["mfcc", "spectralCentroid", "rms", "buffer"],
+        featureExtractors: ["mfcc", "spectralCentroid", "rms"],
         callback: (features: Partial<MeydaFeaturesObject>) => {
-          // Both detectors run on the exact same frame/buffer/sample-rate —
-          // Meyda's `buffer` feature is the raw (pre-FFT) time-domain signal
-          // for this analysis window, handed straight to YIN.
-          let f0: number | null = null;
-          const raw = features.buffer;
-          if (Array.isArray(raw) && raw.length > 0) {
-            f0 = yinDetector(Float32Array.from(raw));
-          }
+          // YIN runs on raw PCM tapped straight from the AnalyserNode above —
+          // NOT on Meyda's (windowed) features — for roughly the same time
+          // window as this Meyda callback.
+          pitchAnalyser.getFloatTimeDomainData(rawTimeDomain);
+          const f0 = yinDetector(rawTimeDomain);
           accumulator.addFrame(features.mfcc, features.spectralCentroid, features.rms, f0);
         },
       });

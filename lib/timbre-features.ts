@@ -4,7 +4,9 @@
  * The actual frame-by-frame extraction runs live via `Meyda.createMeydaAnalyzer`
  * inside `components/ai/TimbreMatcher.tsx` (it needs the live AudioContext/stream,
  * so it can't live in a pure lib function) — Meyda extracts `mfcc` +
- * `spectralCentroid` per frame, and (per the same frame's raw `buffer` feature)
+ * `spectralCentroid` per frame, and (from raw PCM tapped via a parallel
+ * `AnalyserNode` on the same source — deliberately NOT Meyda's own `buffer`
+ * feature, which is the windowed, not raw, signal and breaks pitch detection)
  * `pitchfinder`'s YIN detector (`createYinDetector` from `lib/pitch.ts`) extracts
  * the fundamental frequency F0. This module owns the *pure* pieces: accumulating
  * those per-frame values into a robust (median-based) fingerprint, deriving the
@@ -108,11 +110,12 @@ export class FingerprintAccumulator {
 
   /**
    * Feed one analysis frame. `mfcc`/`centroid`/`rms` come from Meyda;
-   * `f0Hz` comes from running `createYinDetector`'s detector on the SAME
-   * frame's raw buffer (Meyda's `buffer` feature) — null/undefined when YIN
-   * didn't find a usable pitch in this frame. Silently ignores malformed
-   * frames; near-silent frames are excluded from EVERY statistic (MFCC
-   * median, centroid median, AND F0 median) — see `RMS_NOISE_FLOOR`.
+   * `f0Hz` comes from running `createYinDetector`'s detector on raw PCM for
+   * roughly the same time window (tapped separately from Meyda's own
+   * windowed buffer — see `TimbreMatcher`) — null/undefined when YIN didn't
+   * find a usable pitch in this frame. Silently ignores malformed frames;
+   * near-silent frames are excluded from EVERY statistic (MFCC median,
+   * centroid median, AND F0 median) — see `RMS_NOISE_FLOOR`.
    */
   addFrame(
     mfcc: number[] | undefined,
