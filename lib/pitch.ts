@@ -1,4 +1,6 @@
-/** Musical pitch helpers + autocorrelation detector (client-safe). */
+/** Musical pitch helpers + pitch detectors (client-safe). */
+
+import Pitchfinder from "pitchfinder";
 
 export const NOTE_NAMES = [
   "C",
@@ -45,15 +47,6 @@ export type DetectedPitch = {
  * forgiving for learners, still tighter than a full semitone (100¢).
  */
 export const STUDENT_IN_TUNE_CENTS = 45;
-
-/**
- * Hysteresis for live note label — enough to stop flicker, not so wide
- * that neighboring notes stick incorrectly.
- */
-export const NOTE_HOLD_CENTS = 40;
-
-/** EMA for live Hz — responsive enough to track real pitch changes. */
-export const PITCH_SMOOTH_ALPHA = 0.38;
 
 /** Absolute Hz band around a target for “close enough” hints (mid register). */
 export function hzToleranceForMidi(midi: number, cents = STUDENT_IN_TUNE_CENTS): number {
@@ -291,54 +284,76 @@ export function analyzeFrequency(frequency: number): DetectedPitch | null {
 }
 
 /**
- * Stable live note for learners: smooth Hz + hold current note until
- * pitch clearly leaves its hysteresis band.
+ * Real-time YIN pitch detector (via `pitchfinder`) — replaces the previous
+ * naive autocorrelation detector for the live tuner / professional test.
+ * YIN is far more robust against octave errors and noise than plain
+ * autocorrelation, which is exactly what this detector is used for.
+ *
+ * Frequencies outside a generous human-voice range are rejected so a stray
+ * detection never turns into a bogus note/cents reading.
  */
-export function stabilizeLivePitch(
-  rawHz: number,
-  previousSmoothedHz: number | null,
-  heldMidi: number | null
-): {
-  smoothedHz: number;
-  pitch: DetectedPitch;
-  heldMidi: number;
-} | null {
-  if (!Number.isFinite(rawHz) || rawHz <= 0) return null;
+export const MIN_VOICE_HZ = 70;
+export const MAX_VOICE_HZ = 1100;
 
-  let hz = rawHz;
-  if (previousSmoothedHz && previousSmoothedHz > 0) {
-    hz = snapToNearbyOctave(hz, previousSmoothedHz);
-    hz =
-      previousSmoothedHz * (1 - PITCH_SMOOTH_ALPHA) + hz * PITCH_SMOOTH_ALPHA;
+export type PitchDetectorFn = (buffer: Float32Array) => number | null;
+
+export function createYinDetector(sampleRate: number): PitchDetectorFn {
+  let detect: PitchDetectorFn;
+  try {
+    detect = Pitchfinder.YIN({ sampleRate, threshold: 0.1, probabilityThreshold: 0.1 });
+  } catch {
+    // Defensive fallback in case YIN ever throws in an unexpected runtime —
+    // AMDF is a much simpler algorithm and covers the same buffer shape.
+    detect = Pitchfinder.AMDF({
+      sampleRate,
+      minFrequency: MIN_VOICE_HZ,
+      maxFrequency: MAX_VOICE_HZ,
+    });
   }
-
-  const midiExact = midiFromFrequency(hz);
-  let midi = Math.round(midiExact);
-
-  if (heldMidi !== null) {
-    const centsFromHeld = (midiExact - heldMidi) * 100;
-    if (Math.abs(centsFromHeld) < NOTE_HOLD_CENTS) {
-      midi = heldMidi;
+  return (buffer: Float32Array) => {
+    const hz = detect(buffer);
+    if (hz === null || !Number.isFinite(hz) || hz < MIN_VOICE_HZ || hz > MAX_VOICE_HZ) {
+      return null;
     }
-  }
-
-  const cents = Math.round((midiExact - midi) * 100);
-  const noteIndex = ((midi % 12) + 12) % 12;
-  const octave = Math.floor(midi / 12) - 1;
-
-  return {
-    smoothedHz: hz,
-    heldMidi: midi,
-    pitch: {
-      frequency: hz,
-      note: `${NOTE_NAMES[noteIndex]}${octave}`,
-      noteIndex,
-      octave,
-      midi,
-      cents,
-    },
+    return hz;
   };
 }
+
+/** Root-mean-square amplitude (0..1) of a time-domain buffer. */
+export function computeRms(buffer: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const v = buffer[i] ?? 0;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / Math.max(1, buffer.length));
+}
+
+/** RMS amplitude (0..1) → dBFS, floored so silence never yields -Infinity/NaN. */
+export function dbFromRms(rms: number, floorDb = -100): number {
+  if (!Number.isFinite(rms) || rms <= 0) return floorDb;
+  const db = 20 * Math.log10(rms);
+  return Number.isFinite(db) ? Math.max(floorDb, db) : floorDb;
+}
+
+/**
+ * One analysed audio frame — the basic unit produced by `useVocalAnalyzer`
+ * for both the live tuner and the professional test capture.
+ */
+export type PitchFrame = {
+  /** Milliseconds since the take/listening session started. */
+  tMs: number;
+  /** Detected fundamental frequency in Hz, or null when unvoiced/too quiet. */
+  frequencyHz: number | null;
+  /** Loudness in dBFS (floored, never -Infinity/NaN). */
+  db: number;
+  /** Deviation in cents from the nearest equal-tempered note (A4 = 440Hz). */
+  cents: number | null;
+  /** Nearest note label, e.g. "G4". */
+  note: string | null;
+  midi: number | null;
+  voiced: boolean;
+};
 
 export function centsBetween(frequency: number, targetMidi: number): number {
   return (midiFromFrequency(frequency) - targetMidi) * 100;

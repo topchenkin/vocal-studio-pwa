@@ -1,249 +1,169 @@
-/** Timbre fingerprint extraction from PCM (client-safe). */
-
-import { detectPitchHz, midiFromFrequency } from "@/lib/pitch";
-import { estimateGenderFromFormants } from "@/lib/formant-gender";
+/**
+ * Timbre acoustic-fingerprint types + extraction helpers (client-safe).
+ *
+ * The actual frame-by-frame extraction runs live via `Meyda.createMeydaAnalyzer`
+ * inside `components/ai/TimbreMatcher.tsx` (it needs the live AudioContext/stream,
+ * so it can't live in a pure lib function). This module owns the *pure* pieces:
+ * accumulating frames into an averaged fingerprint, and deriving the 0-100 radar
+ * axes from that fingerprint.
+ *
+ * NOTE: `TimbreGender` is also imported by `app/api/ai/analyze-timbre/route.ts`,
+ * `app/api/ai/match-voice/route.ts` and `lib/neural-voice-match.ts` (dead in
+ * production since API routes don't exist in the static export, but still part
+ * of the TS build) — keep this type stable even though the rest of this file
+ * has been rewritten for the new Meyda pipeline.
+ */
 
 export type TimbreGender = "female" | "male";
 
-export type TimbreFeatures = {
-  /** 12-dim vector, values roughly 0..1 */
-  vector: number[];
-  pitchMeanMidi: number;
-  pitchMedianMidi: number;
-  pitchStd: number;
+/** Averaged MFCC + spectral-centroid signature captured during a live take. */
+export type AcousticFingerprint = {
+  /** Mean of each MFCC coefficient across all voiced frames (Meyda default: 13 coefficients, c0..c12). */
+  mfcc: number[];
+  /** Mean spectral centroid (Hz) across all voiced frames — "center of mass" of the spectrum. */
   centroid: number;
-  /** Always resolved to male/female for matching. */
-  gender: TimbreGender;
-  genderConfidence: "high" | "medium" | "low";
-  genderSource: "formants" | "pitch" | "api";
-  /** @deprecated use `gender` */
-  genderHint: TimbreGender | "ambiguous";
+  /** Number of frames that passed the noise-floor gate and were used in the average. */
+  frameCount: number;
+  /** Mean RMS (0..1 amplitude) across voiced frames — used for the breathiness heuristic. */
+  rmsMean: number;
+  /** Variance of RMS across voiced frames — loudness instability, also used for breathiness. */
+  rmsVariance: number;
 };
 
-function mean(values: number[]) {
-  if (values.length === 0) return 0;
-  return values.reduce((a, b) => a + b, 0) / values.length;
-}
+/**
+ * Frames quieter than this (Meyda's `rms`, a 0..1 amplitude-domain value, roughly
+ * the frame's RMS amplitude) are treated as silence/room-noise and skipped so they
+ * don't dilute the averaged fingerprint. ~0.012 is roughly -38 dBFS — quiet room
+ * noise / breathing on a typical mic gain, well below actual singing.
+ */
+export const RMS_NOISE_FLOOR = 0.012;
 
-function median(values: number[]) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 0) {
-    return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+/**
+ * Minimum number of voiced frames required before we trust the averaged fingerprint.
+ * With a 1024-sample analysis buffer at ~44.1kHz that's a new frame roughly every
+ * ~23ms (~43 frames/sec), so 30 frames ≈ 0.7s of real, non-silent singing — enough
+ * to smooth out short-term noise without demanding the whole 10s take be loud.
+ */
+export const MIN_VOICED_FRAMES = 30;
+
+/**
+ * Accumulates per-frame Meyda features (`mfcc`, `spectralCentroid`, `rms`) into a
+ * running average, gating out near-silent frames via `RMS_NOISE_FLOOR`. Used live
+ * during the 10s recording so no post-hoc re-analysis pass is needed.
+ */
+export class FingerprintAccumulator {
+  private mfccSum: number[] = [];
+  private centroidSum = 0;
+  private rmsSum = 0;
+  private rmsSumSq = 0;
+  private frames = 0;
+
+  /** Feed one Meyda callback frame. Silently ignores malformed/near-silent frames. */
+  addFrame(
+    mfcc: number[] | undefined,
+    centroid: number | undefined,
+    rms: number | undefined
+  ): void {
+    if (!Array.isArray(mfcc) || mfcc.length === 0) return;
+    if (typeof rms !== "number" || !Number.isFinite(rms) || rms < RMS_NOISE_FLOOR) {
+      return; // silence guard — don't let quiet/no-signal frames pollute the average
+    }
+    if (typeof centroid !== "number" || !Number.isFinite(centroid)) return;
+
+    if (this.mfccSum.length === 0) this.mfccSum = new Array(mfcc.length).fill(0);
+    const n = Math.min(mfcc.length, this.mfccSum.length);
+    for (let i = 0; i < n; i += 1) {
+      const v = mfcc[i];
+      this.mfccSum[i] += Number.isFinite(v) ? v : 0;
+    }
+    this.centroidSum += centroid;
+    this.rmsSum += rms;
+    this.rmsSumSq += rms * rms;
+    this.frames += 1;
   }
-  return sorted[mid] ?? 0;
+
+  get frameCount(): number {
+    return this.frames;
+  }
+
+  /** Returns the averaged fingerprint, or null if too few voiced frames were captured. */
+  finalize(): AcousticFingerprint | null {
+    if (this.frames < MIN_VOICED_FRAMES || this.mfccSum.length === 0) return null;
+    const rmsMean = this.rmsSum / this.frames;
+    const rmsVariance = Math.max(0, this.rmsSumSq / this.frames - rmsMean * rmsMean);
+    return {
+      mfcc: this.mfccSum.map((sum) => sum / this.frames),
+      centroid: this.centroidSum / this.frames,
+      frameCount: this.frames,
+      rmsMean,
+      rmsVariance,
+    };
+  }
 }
 
-function std(values: number[]) {
-  if (values.length < 2) return 0;
-  const m = mean(values);
-  return Math.sqrt(
-    values.reduce((a, b) => a + (b - m) ** 2, 0) / values.length
-  );
-}
+export type RadarAxes = {
+  /** 0-100: darker/lower voices score higher — inverse of normalized spectral centroid. */
+  depth: number;
+  /** 0-100: directly proportional to spectral centroid within a typical singing-voice range. */
+  brightness: number;
+  /** 0-100: breathiness/"air" — high-frequency MFCC energy + loudness variance across frames. */
+  air: number;
+};
 
-function clamp01(v: number) {
+/**
+ * Reasonable normalization range for a singing voice's spectral centroid, in Hz.
+ * Deep chest-voice male vocals sit near the low end; airy/bright female or
+ * falsetto vocals sit near the high end. There is no universal ground-truth
+ * calibration for this (no reference measurement corpus available), so these
+ * are documented, tunable constants rather than measured values.
+ */
+const CENTROID_FLOOR_HZ = 500;
+const CENTROID_CEIL_HZ = 4000;
+
+/**
+ * Higher-order cepstral coefficients (index >= this) capture fine, noise-like
+ * high-frequency spectral detail. We use the ratio of their magnitude vs the
+ * lower/mid coefficients (which capture the coarse formant/spectral envelope)
+ * as a proxy for breathiness: unvoiced "air" in the airstream shows up as
+ * broadband high-frequency energy rather than clean low-order harmonic shape.
+ */
+const AIR_MFCC_START_INDEX = 6;
+
+/** Loudness (RMS) coefficient-of-variation treated as the "very breathy/unstable" ceiling. */
+const AIR_LOUDNESS_CV_CEIL = 0.6;
+
+function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
 /**
- * Lightweight spectral + pitch fingerprint from AudioBuffer.
- * Gender prefers vocal-tract formants over F0 (falsetto-safe).
+ * Maps an Acoustic Fingerprint to the 3 radar-chart axes (Глубина / Яркость / Воздух),
+ * each on a 0-100 scale. See the constants above for the exact heuristic — there is no
+ * ground-truth calibration data available, so these are documented, reasonable proxies,
+ * not measured psychoacoustic constants.
  */
-export async function extractTimbreFeatures(
-  audioBuffer: AudioBuffer
-): Promise<TimbreFeatures> {
-  const channel = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  const frameSize = 2048;
-  const hop = 1024;
+export function computeRadarAxes(fp: AcousticFingerprint): RadarAxes {
+  const centroidNorm = clamp01(
+    (fp.centroid - CENTROID_FLOOR_HZ) / (CENTROID_CEIL_HZ - CENTROID_FLOOR_HZ)
+  );
+  const brightness = Math.round(centroidNorm * 100);
+  const depth = Math.round((1 - centroidNorm) * 100);
 
-  const pitchesHz: number[] = [];
-  const centroids: number[] = [];
-  const rolloffs: number[] = [];
-  const flatness: number[] = [];
-  const energies: number[] = [];
-  const zcrs: number[] = [];
-  const brightness: number[] = [];
+  const highCoeffs = fp.mfcc.slice(AIR_MFCC_START_INDEX);
+  const lowCoeffs = fp.mfcc.slice(1, AIR_MFCC_START_INDEX); // skip c0 (overall log-energy, not spectral shape)
+  const highEnergy = highCoeffs.length
+    ? highCoeffs.reduce((a, b) => a + Math.abs(b), 0) / highCoeffs.length
+    : 0;
+  const lowEnergy = lowCoeffs.length
+    ? lowCoeffs.reduce((a, b) => a + Math.abs(b), 0) / lowCoeffs.length
+    : 1;
+  // *2 stretches the typically-observed 0..~0.5 high/(low+high) ratio to roughly 0..1
+  const highRatio = clamp01((highEnergy / (lowEnergy + highEnergy + 1e-6)) * 2);
 
-  for (let start = 0; start + frameSize < channel.length; start += hop) {
-    const frame = channel.subarray(start, start + frameSize);
-    let energy = 0;
-    let zc = 0;
-    for (let i = 0; i < frame.length; i += 1) {
-      const s = frame[i] ?? 0;
-      energy += s * s;
-      if (i > 0) {
-        const prev = frame[i - 1] ?? 0;
-        if ((s >= 0 && prev < 0) || (s < 0 && prev >= 0)) zc += 1;
-      }
-    }
-    energy = Math.sqrt(energy / frame.length);
-    if (energy < 0.012) continue;
+  const loudnessCv = fp.rmsMean > 1e-6 ? Math.sqrt(fp.rmsVariance) / fp.rmsMean : 0;
+  const cvNorm = clamp01(loudnessCv / AIR_LOUDNESS_CV_CEIL);
 
-    energies.push(energy);
-    zcrs.push(zc / frame.length);
+  const air = Math.round(clamp01(0.65 * highRatio + 0.35 * cvNorm) * 100);
 
-    const mags: number[] = [];
-    for (let k = 1; k < frameSize / 2; k += 4) {
-      let re = 0;
-      let im = 0;
-      const w = (2 * Math.PI * k) / frameSize;
-      for (let n = 0; n < frame.length; n += 2) {
-        const s = frame[n] ?? 0;
-        re += s * Math.cos(w * n);
-        im -= s * Math.sin(w * n);
-      }
-      mags.push(Math.hypot(re, im));
-    }
-    const magSum = mags.reduce((a, b) => a + b, 0) || 1;
-    let cent = 0;
-    let geo = 0;
-    let arith = 0;
-    let high = 0;
-    let low = 0;
-    for (let i = 0; i < mags.length; i += 1) {
-      const mag = mags[i] ?? 0;
-      const freq = ((i * 4 + 1) * sampleRate) / frameSize;
-      cent += freq * mag;
-      arith += mag;
-      geo += Math.log(mag + 1e-9);
-      if (freq >= 2000) high += mag;
-      else low += mag;
-    }
-    centroids.push(cent / magSum);
-    brightness.push(high / (low + high + 1e-9));
-
-    const target = magSum * 0.85;
-    let roll = sampleRate / 4;
-    let cum = 0;
-    for (let i = 0; i < mags.length; i += 1) {
-      cum += mags[i] ?? 0;
-      if (cum >= target) {
-        roll = ((i * 4 + 1) * sampleRate) / frameSize;
-        break;
-      }
-    }
-    rolloffs.push(roll);
-    flatness.push(Math.exp(geo / mags.length) / (arith / mags.length + 1e-9));
-
-    const floatFrame = new Float32Array(frame);
-    const hz = detectPitchHz(floatFrame, sampleRate);
-    if (hz >= 70 && hz <= 500) pitchesHz.push(hz);
-  }
-
-  const pitchMidis = pitchesHz.map((hz) => midiFromFrequency(hz));
-  const pitchMeanMidi = mean(pitchMidis) || 55;
-  const pitchMedianMidi = median(pitchMidis) || pitchMeanMidi;
-  const pitchStdMidi = std(pitchMidis);
-  const centroid = mean(centroids) || 1500;
-  const rolloff = mean(rolloffs) || 3000;
-  const flat = mean(flatness) || 0.2;
-  const zcr = mean(zcrs) || 0.05;
-  const dyn = std(energies) / (mean(energies) + 1e-6);
-  const bright = mean(brightness) || 0.35;
-
-  let vibrato = 0;
-  if (pitchesHz.length > 8) {
-    const diffs = [];
-    for (let i = 1; i < pitchesHz.length; i += 1) {
-      diffs.push(Math.abs((pitchesHz[i] ?? 0) - (pitchesHz[i - 1] ?? 0)));
-    }
-    vibrato = mean(diffs) / (mean(pitchesHz) + 1e-6);
-  }
-
-  const formants = estimateGenderFromFormants(channel, sampleRate);
-  let gender: TimbreGender;
-  let genderConfidence: TimbreFeatures["genderConfidence"];
-  let genderSource: TimbreFeatures["genderSource"];
-
-  if (formants && formants.confidence !== "low") {
-    gender = formants.gender;
-    genderConfidence = formants.confidence;
-    genderSource = "formants";
-  } else if (formants) {
-    gender = formants.gender;
-    genderConfidence = "low";
-    genderSource = "formants";
-  } else {
-    gender = pitchMedianMidi >= 58 ? "female" : "male";
-    genderConfidence = "low";
-    genderSource = "pitch";
-  }
-
-  const genderAxis = gender === "female" ? 0.22 : 0.82;
-
-  const vector = [
-    clamp01(pitchMedianMidi / 90),
-    clamp01(pitchStdMidi / 10),
-    clamp01(centroid / 5000),
-    clamp01(rolloff / 8000),
-    clamp01(flat * 2.5),
-    clamp01(zcr * 10),
-    clamp01(dyn * 1.2),
-    clamp01(vibrato * 50),
-    genderAxis,
-    clamp01(mean(energies) * 3.5),
-    clamp01(bright),
-    clamp01((centroid - 900) / 3500),
-  ];
-
-  return {
-    vector,
-    pitchMeanMidi,
-    pitchMedianMidi,
-    pitchStd: pitchStdMidi,
-    centroid,
-    gender,
-    genderConfidence,
-    genderSource,
-    genderHint: genderConfidence === "low" ? "ambiguous" : gender,
-  };
-}
-
-export function pearsonSimilarity(a: number[], b: number[]): number {
-  const n = Math.min(a.length, b.length);
-  if (n === 0) return 0;
-  let meanA = 0;
-  let meanB = 0;
-  for (let i = 0; i < n; i += 1) {
-    meanA += a[i] ?? 0;
-    meanB += b[i] ?? 0;
-  }
-  meanA /= n;
-  meanB /= n;
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < n; i += 1) {
-    const da = (a[i] ?? 0) - meanA;
-    const db = (b[i] ?? 0) - meanB;
-    dot += da * db;
-    na += da * da;
-    nb += db * db;
-  }
-  if (na < 1e-12 || nb < 1e-12) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
-}
-
-export function featureDistance(a: number[], b: number[]): number {
-  const weights = [1.5, 0.9, 1.3, 1.0, 1.0, 0.7, 0.8, 1.1, 0, 0.6, 1.2, 1.0];
-  const n = Math.min(a.length, b.length, weights.length);
-  let sum = 0;
-  for (let i = 0; i < n; i += 1) {
-    const w = weights[i] ?? 1;
-    if (w <= 0) continue;
-    const d = (a[i] ?? 0) - (b[i] ?? 0);
-    sum += w * d * d;
-  }
-  return Math.sqrt(sum);
-}
-
-export function rawTimbreAffinity(a: number[], b: number[]): number {
-  const dist = featureDistance(a, b);
-  const pearson = pearsonSimilarity(a, b);
-  const fromDist = Math.exp(-dist * 2.4);
-  const fromCorr = (pearson + 1) / 2;
-  return 0.55 * fromDist + 0.45 * fromCorr;
+  return { depth, brightness, air };
 }

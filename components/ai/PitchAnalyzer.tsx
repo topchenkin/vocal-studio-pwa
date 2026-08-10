@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Cat,
   ChevronLeft,
@@ -21,339 +21,82 @@ import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
 import {
   describeNote,
-  detectPitchHz,
   frequencyFromMidi,
   hzToleranceForMidi,
   midiFromNoteLabel,
   pickPracticeNote,
   PRACTICE_NOTES,
-  stabilizeLivePitch,
   STUDENT_IN_TUNE_CENTS,
 } from "@/lib/pitch";
 import {
   buildVocalReport,
   formatReportChatMessage,
   mentorFeedback,
-  samplePitchFrame,
   targetNoteAtTime,
   TEST_IN_TUNE_CENTS,
   type VocalReport,
-  type VocalSample,
   type VocalTestMode,
 } from "@/lib/vocal-metrics";
+import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
 const TEST_MS = 10_000;
-const SAMPLE_MS = 100;
 const IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
 const SCALE_STEPS = ["C4", "E4", "G4"] as const;
 
 export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) {
   const { user, profile } = useAuth();
-  const [listening, setListening] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [error, setError] = useState("");
-  const [note, setNote] = useState("—");
-  const [hz, setHz] = useState(0);
-  const [cents, setCents] = useState(0);
-  const [zone, setZone] = useState<TuneZone>("silent");
+  const analyzer = useVocalAnalyzer();
+
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
   const [targetNote, setTargetNote] = useState("G4");
-  const [liveTargetNote, setLiveTargetNote] = useState("G4");
-  const [testProgress, setTestProgress] = useState(0);
   const [report, setReport] = useState<VocalReport | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [sendingReport, setSendingReport] = useState(false);
   const [sendNote, setSendNote] = useState("");
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const sampleTimerRef = useRef<number | null>(null);
-  const testTimerRef = useRef<number | null>(null);
-  const progressTimerRef = useRef<number | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const samplesRef = useRef<VocalSample[]>([]);
-  const testStartRef = useRef(0);
-  const testModeRef = useRef(testMode);
-  const targetNoteRef = useRef(targetNote);
-  const smoothedHzRef = useRef<number | null>(null);
-  const heldMidiRef = useRef<number | null>(null);
-  const missFramesRef = useRef(0);
 
-  useEffect(() => {
-    testModeRef.current = testMode;
-  }, [testMode]);
-  useEffect(() => {
-    targetNoteRef.current = targetNote;
-  }, [targetNote]);
+  const { listening, testing, testProgress, error, live } = analyzer;
 
-  const stopMic = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    if (sampleTimerRef.current) window.clearInterval(sampleTimerRef.current);
-    if (testTimerRef.current) window.clearTimeout(testTimerRef.current);
-    if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);
-    sampleTimerRef.current = null;
-    testTimerRef.current = null;
-    progressTimerRef.current = null;
-    if (recorderRef.current?.state === "recording") {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
-    recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    void audioContextRef.current?.close();
-    audioContextRef.current = null;
-    analyserRef.current = null;
-    setListening(false);
-    setTesting(false);
-    setZone("silent");
-    setNote("—");
-    setHz(0);
-    setTestProgress(0);
-    smoothedHzRef.current = null;
-    heldMidiRef.current = null;
-    missFramesRef.current = 0;
-  }, []);
+  const zone: TuneZone = !live.voiced
+    ? "silent"
+    : (live.cents ?? 0) < -IN_TUNE_CENTS
+      ? "flat"
+      : (live.cents ?? 0) > IN_TUNE_CENTS
+        ? "sharp"
+        : "in-tune";
+  const note = live.note ?? "—";
+  const hz = live.frequencyHz ? Math.round(live.frequencyHz * 10) / 10 : 0;
+  const cents = live.cents ?? 0;
 
-  useEffect(() => () => stopMic(), [stopMic]);
-
-  const drawWave = (timeData: Uint8Array) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const g = canvas.getContext("2d");
-    if (!g) return;
-    const { width, height } = canvas;
-    g.clearRect(0, 0, width, height);
-    const gradient = g.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, "#7c3aed");
-    gradient.addColorStop(0.5, "#c084fc");
-    gradient.addColorStop(1, "#fbbf24");
-    g.strokeStyle = gradient;
-    g.lineWidth = 2.5;
-    g.beginPath();
-    for (let i = 0; i < timeData.length; i += 1) {
-      const x = (i / (timeData.length - 1)) * width;
-      const y = ((timeData[i] ?? 128) / 255) * height;
-      if (i === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
-    }
-    g.stroke();
-  };
-
-  const tick = useCallback(() => {
-    const analyser = analyserRef.current;
-    const ctx = audioContextRef.current;
-    if (!analyser || !ctx) return;
-
-    const timeData = new Uint8Array(analyser.fftSize);
-    analyser.getByteTimeDomainData(timeData);
-    drawWave(timeData);
-
-    const floatBuf = new Float32Array(analyser.fftSize);
-    if (typeof analyser.getFloatTimeDomainData === "function") {
-      analyser.getFloatTimeDomainData(floatBuf);
-    } else {
-      for (let i = 0; i < timeData.length; i += 1) {
-        floatBuf[i] = ((timeData[i] ?? 128) - 128) / 128;
-      }
-    }
-
-    const frequency = detectPitchHz(floatBuf, ctx.sampleRate);
-    const stable =
-      frequency > 0
-        ? stabilizeLivePitch(
-            frequency,
-            smoothedHzRef.current,
-            heldMidiRef.current
-          )
-        : null;
-
-    if (stable) {
-      missFramesRef.current = 0;
-      smoothedHzRef.current = stable.smoothedHz;
-      heldMidiRef.current = stable.heldMidi;
-      const pitch = stable.pitch;
-      setNote(pitch.note);
-      setHz(Math.round(pitch.frequency * 10) / 10);
-      setCents(pitch.cents);
-      if (pitch.cents < -IN_TUNE_CENTS) setZone("flat");
-      else if (pitch.cents > IN_TUNE_CENTS) setZone("sharp");
-      else setZone("in-tune");
-    } else {
-      missFramesRef.current += 1;
-      // Drop lock after a few quiet frames — avoid sticky wrong notes.
-      if (missFramesRef.current >= 4) {
-        smoothedHzRef.current = null;
-        heldMidiRef.current = null;
-        setNote("—");
-        setHz(0);
-        setCents(0);
-        setZone("silent");
-      }
-    }
-
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const ensureMic = async () => {
-    if (streamRef.current && audioContextRef.current && analyserRef.current) {
-      return;
-    }
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Микрофон недоступен в этом браузере.");
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    });
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const audioContext = new AudioCtx();
-    if (audioContext.state === "suspended") await audioContext.resume();
-
-    const source = audioContext.createMediaStreamSource(stream);
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.75;
-    source.connect(analyser);
-
-    streamRef.current = stream;
-    audioContextRef.current = audioContext;
-    analyserRef.current = analyser;
-    setListening(true);
-    rafRef.current = requestAnimationFrame(tick);
-  };
-
-  const startMic = async () => {
-    setError("");
-    try {
-      await ensureMic();
-    } catch {
-      setError(
-        "Не удалось получить доступ к микрофону. Разрешите его в настройках браузера / PWA."
-      );
-      stopMic();
-    }
-  };
-
-  const finishTest = useCallback(() => {
-    if (sampleTimerRef.current) window.clearInterval(sampleTimerRef.current);
-    if (progressTimerRef.current) window.clearInterval(progressTimerRef.current);
-    sampleTimerRef.current = null;
-    progressTimerRef.current = null;
-    if (recorderRef.current?.state === "recording") {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
-    recorderRef.current = null;
-    setTesting(false);
-    setTestProgress(100);
-
-    const label =
-      testModeRef.current === "scale"
-        ? "C4–E4–G4"
-        : targetNoteRef.current;
-    const built = buildVocalReport(
-      samplesRef.current,
-      testModeRef.current,
-      label,
-      TEST_MS / 1000
-    );
-    setReport(built);
-    setReportOpen(true);
-    setSendNote("");
-  }, []);
+  // Which note the singer should be hitting *right now* during a test —
+  // derived purely from progress, no extra timers needed.
+  const liveTargetNote = useMemo(() => {
+    if (!testing) return testMode === "scale" ? "C4" : targetNote;
+    const tMs = (testProgress / 100) * TEST_MS;
+    return targetNoteAtTime(testMode, tMs, TEST_MS, targetNote);
+  }, [testing, testProgress, testMode, targetNote]);
 
   const startProfessionalTest = async () => {
-    setError("");
     setSendNote("");
     setReport(null);
-    samplesRef.current = [];
-    setTestProgress(0);
-
+    const modeAtStart = testMode;
+    const targetAtStart = targetNote;
     try {
-      await ensureMic();
-      const stream = streamRef.current;
-      const analyser = analyserRef.current;
-      const ctx = audioContextRef.current;
-      if (!stream || !analyser || !ctx) {
-        throw new Error("Audio pipeline not ready");
-      }
-
-      const mime = MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm"
-        : "";
-      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      recorderRef.current = recorder;
-      recorder.start();
-
-      testStartRef.current = performance.now();
-      setLiveTargetNote(
-        testModeRef.current === "note" ? targetNoteRef.current : "C4"
+      const result = await analyzer.startTest(TEST_MS);
+      const built = buildVocalReport(
+        result.frames,
+        result.tooQuiet,
+        modeAtStart,
+        targetAtStart,
+        TEST_MS / 1000
       );
-      setTesting(true);
-
-      sampleTimerRef.current = window.setInterval(() => {
-        const tMs = performance.now() - testStartRef.current;
-        const target = targetNoteAtTime(
-          testModeRef.current,
-          tMs,
-          TEST_MS,
-          targetNoteRef.current
-        );
-        setLiveTargetNote(target);
-        const timeData = new Float32Array(analyser.fftSize);
-        // getFloatTimeDomainData is widely supported; fallback to byte convert
-        if (analyser.getFloatTimeDomainData) {
-          analyser.getFloatTimeDomainData(timeData);
-        } else {
-          const bytes = new Uint8Array(analyser.fftSize);
-          analyser.getByteTimeDomainData(bytes);
-          for (let i = 0; i < bytes.length; i += 1) {
-            timeData[i] = ((bytes[i] ?? 128) - 128) / 128;
-          }
-        }
-        samplesRef.current.push(
-          samplePitchFrame(
-            timeData,
-            ctx.sampleRate,
-            tMs,
-            target,
-            samplesRef.current.at(-1)?.frequencyHz ?? null
-          )
-        );
-      }, SAMPLE_MS);
-
-      progressTimerRef.current = window.setInterval(() => {
-        const elapsed = performance.now() - testStartRef.current;
-        setTestProgress(Math.min(100, (elapsed / TEST_MS) * 100));
-      }, 100);
-
-      testTimerRef.current = window.setTimeout(finishTest, TEST_MS);
+      setReport(built);
+      setReportOpen(true);
     } catch {
-      setError(
-        "Не удалось запустить тест. Проверьте разрешение микрофона."
-      );
-      setTesting(false);
+      // analyzer surfaces a user-facing error via `analyzer.error`
     }
   };
 
@@ -382,7 +125,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     g.fillStyle = "rgba(52, 211, 153, 0.12)";
     g.fillRect(0, yTop, width, yBot - yTop);
 
-    const voiced = report.samples.filter((s) => s.centsFolded !== null);
+    const voiced = report.samples.filter((s) => s.centsToTarget !== null);
     if (voiced.length === 0) return;
 
     g.strokeStyle = "#c084fc";
@@ -390,7 +133,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     g.beginPath();
     voiced.forEach((sample, index) => {
       const x = (index / Math.max(1, voiced.length - 1)) * width;
-      const centsVal = Math.max(-60, Math.min(60, sample.centsFolded ?? 0));
+      const centsVal = Math.max(-60, Math.min(60, sample.centsToTarget ?? 0));
       const y = height / 2 - (centsVal / 60) * (height / 2);
       if (index === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
@@ -508,7 +251,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
       <div className="relative mt-5 overflow-hidden rounded-2xl bg-studio-bg p-3 ring-1 ring-studio-border">
         <canvas
-          ref={canvasRef}
+          ref={analyzer.attachWaveformCanvas}
           width={640}
           height={140}
           className="h-28 w-full sm:h-32"
@@ -546,6 +289,11 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             {zone === "flat" && `Ниже (Flat) · ${cents} ¢`}
             {zone === "silent" && "Тишина"}
           </p>
+          {listening && live.tooQuiet && (
+            <p className="mt-2 text-xs text-amber-300/80">
+              Слишком тихо — пойте увереннее для точного распознавания
+            </p>
+          )}
         </div>
 
         <div className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
@@ -569,7 +317,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         {!listening ? (
-          <Button fullWidth size="lg" onClick={() => void startMic()}>
+          <Button fullWidth size="lg" onClick={() => void analyzer.startListening()}>
             <Mic className="h-5 w-5" />
             Включить микрофон
           </Button>
@@ -578,7 +326,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             fullWidth
             size="lg"
             variant="danger"
-            onClick={stopMic}
+            onClick={analyzer.stopListening}
             disabled={testing}
           >
             <Square className="h-4 w-4 fill-current" />
@@ -595,8 +343,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              10 секунд: целевая нота или гамма. Допуск теста ±{TEST_IN_TUNE_CENTS}¢
-              (чуть строже живого тюнера) — чистый проход реально даёт 90+.
+              10 секунд: целевая нота или гамма. Зелёная зона теста ±{TEST_IN_TUNE_CENTS}¢
+              — строже живого тюнера, чистый проход реально даёт 90+.
             </p>
           </div>
         </div>
@@ -778,7 +526,24 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         title="Отчёт вокалиста"
         size="lg"
       >
-        {report && (
+        {report && report.tooQuiet && (
+          <div className="space-y-4 text-center">
+            <div className="rounded-2xl bg-amber-500/10 p-6 ring-1 ring-amber-400/30">
+              <p className="font-display text-xl font-semibold text-amber-100">
+                Звук не распознан
+              </p>
+              <p className="mt-2 text-sm text-studio-muted">
+                Пойте громче и увереннее, поднесите микрофон ближе — сигнал
+                оказался слишком тихим для честной оценки.
+              </p>
+            </div>
+            <Button fullWidth size="lg" onClick={() => setReportOpen(false)}>
+              Понятно, повторю тест
+            </Button>
+          </div>
+        )}
+
+        {report && !report.tooQuiet && (
           <div className="space-y-5">
             <div className="rounded-2xl bg-gradient-to-br from-studio-accent/20 via-studio-surface to-amber-500/10 p-5 text-center ring-1 ring-studio-border">
               <p className="text-xs uppercase tracking-wide text-studio-muted">
@@ -823,7 +588,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
                 />
               </div>
               <p className="mt-1 text-[11px] text-studio-muted">
-                Зелёная полоса — зона теста ±{TEST_IN_TUNE_CENTS}¢ (~±8–11 Гц)
+                Зелёная полоса — зона теста ±{TEST_IN_TUNE_CENTS}¢
               </p>
             </div>
 
