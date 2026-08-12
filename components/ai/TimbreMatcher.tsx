@@ -4,14 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Sparkles, Square, Stars } from "lucide-react";
 import Meyda, { type MeydaFeaturesObject } from "meyda";
 import Button from "@/components/ui/Button";
+import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
   CELEBRITY_GENRES,
   VOCAL_FACH_LABEL_RU,
   classifyVocalFach,
   groupMatchesByGenre,
   matchCelebrities,
-  type CelebrityGenre,
   type CelebrityMatch,
+  type Genre,
 } from "@/lib/celebritiesDB";
 import {
   VoiceMeasurementAccumulator,
@@ -28,14 +29,14 @@ import {
 const RECORD_MS = 10_000;
 /**
  * Power-of-two analysis window shared by BOTH detectors running on every
- * frame: Meyda (spectralCentroid/rms) AND pitchfinder's YIN (fed raw PCM
- * tapped from a parallel AnalyserNode of the same size — see the analyzer
- * callback below; YIN deliberately does NOT use Meyda's own `buffer` feature,
- * which is the *windowed*, not raw, signal and badly degrades pitch
- * detection). 2048 samples ≈ 46ms @44.1kHz — long enough to contain 2+ full
- * periods even of a low male chest voice (~85Hz → ~520 samples/period), which
- * YIN needs for a reliable F0 read, while still short enough to gate out
- * brief silences cleanly.
+ * frame: Meyda (spectralCentroid / spectralFlatness / zcr / rms) AND
+ * pitchfinder's YIN (fed raw PCM tapped from a parallel AnalyserNode — see
+ * the analyzer callback below; YIN deliberately does NOT use Meyda's own
+ * `buffer` feature, which is the *windowed*, not raw, signal and badly
+ * degrades pitch detection). 2048 samples ≈ 46ms @44.1kHz — long enough to
+ * contain 2+ full periods even of a low male chest voice (~85Hz → ~520
+ * samples/period), which YIN needs for a reliable F0 read, while still short
+ * enough to gate out brief silences cleanly.
  */
 const ANALYSIS_BUFFER_SIZE = 2048;
 /**
@@ -70,9 +71,12 @@ type Stage = "idle" | "recording" | "extracting" | "matching" | "done";
 
 type Props = { locked?: boolean };
 
-const GENRE_LABEL_RU: Record<CelebrityGenre, string> = {
+const GENRE_LABEL_RU: Record<Genre, string> = {
   Pop: "Поп",
   Rock: "Рок",
+  "Rap/Hip-Hop": "Рэп",
+  "Estrada/Chanson": "Шансон",
+  "Jazz/Soul": "Джаз",
 };
 
 const GENDERS: TimbreGender[] = ["male", "female"];
@@ -93,7 +97,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * mislabel low male voices and match them against tenors.
    */
   const [gender, setGender] = useState<TimbreGender | null>(null);
-  const [activeGenre, setActiveGenre] = useState<CelebrityGenre>("Pop");
+  const [activeGenre, setActiveGenre] = useState<Genre>("Pop");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -279,14 +283,20 @@ export default function TimbreMatcher({ locked = false }: Props) {
         audioContext: ctx,
         source: meydaSource,
         bufferSize: ANALYSIS_BUFFER_SIZE,
-        featureExtractors: ["spectralCentroid", "rms"],
+        featureExtractors: ["spectralCentroid", "spectralFlatness", "zcr", "rms"],
         callback: (features: Partial<MeydaFeaturesObject>) => {
           // YIN runs on raw PCM tapped straight from the AnalyserNode above —
           // NOT on Meyda's (windowed) features — over roughly the same time
           // window as this Meyda callback.
           pitchAnalyser.getFloatTimeDomainData(rawTimeDomain);
           const f0 = yinDetector(rawTimeDomain);
-          accumulator.addFrame(features.spectralCentroid, features.rms, f0);
+          accumulator.addFrame(
+            features.spectralCentroid,
+            features.rms,
+            f0,
+            features.spectralFlatness,
+            features.zcr
+          );
         },
       });
       analyzerRef.current = analyzer;
@@ -369,14 +379,27 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * STRICT (gender × vocalFach) filter lives entirely inside
    * `matchCelebrities` (lib/celebritiesDB.ts) — it only ever scores candidates
    * whose gender AND fach both equal the arguments passed here, with no
-   * fallback pool, so a bass can never surface a tenor.
+   * fallback pool, so a bass can never surface a tenor. Ranking is 3-D
+   * Euclidean distance on [timbreWeight, airiness, raspiness].
    */
   const matches: CelebrityMatch[] = useMemo(() => {
     if (!measurement || !gender || !fach) return [];
-    return matchCelebrities(gender, fach, measurement.userWeight);
+    return matchCelebrities(gender, fach, {
+      timbreWeight: measurement.userWeight,
+      airiness: measurement.userAiriness,
+      raspiness: measurement.userRaspiness,
+    });
   }, [measurement, gender, fach]);
 
   const grouped = useMemo(() => groupMatchesByGenre(matches, 5), [matches]);
+
+  const visibleGenres = useMemo(
+    () => CELEBRITY_GENRES.filter((genre) => (grouped[genre]?.length ?? 0) > 0),
+    [grouped]
+  );
+
+  const shownGenre: Genre =
+    visibleGenres.includes(activeGenre) ? activeGenre : (visibleGenres[0] ?? "Pop");
 
   const topMatch = matches[0];
   const isBusy = stage === "recording" || stage === "extracting" || stage === "matching";
@@ -401,9 +424,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
             На кого похож твой тембр?
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Спойте 10 секунд — мы измерим вашу тесситуру (медианная частота
-            основного тона по YIN) и вес тембра (спектральный центроид) и
-            подберём звёзд с тем же типом голоса из базы 100 исполнителей.
+            Спойте 10 секунд — мы измерим тесситуру (медианная F0), вес
+            тембра, воздух и расщепление и подберём звёзд с тем же типом
+            голоса из базы 100 исполнителей.
           </p>
         </div>
       </div>
@@ -502,15 +525,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
               .
             </p>
             <p className="mt-2 text-sm text-studio-muted">
-              Вес тембра:{" "}
-              <span className="font-semibold tabular-nums text-studio-text">
-                {measurement.userWeight}
-              </span>
-              /100 (спектральный центроид{" "}
-              <span className="tabular-nums">
-                {Math.round(measurement.medianCentroidHz)} Hz
-              </span>
-              ) — 0 тёмный и плотный, 100 светлый и звонкий.
+              Тембр {measurement.userWeight}/100 · Воздух{" "}
+              {measurement.userAiriness}/100 · Расщепление{" "}
+              {measurement.userRaspiness}/100
             </p>
             {topMatch && (
               <p className="mt-3 text-base text-studio-text">
@@ -527,44 +544,59 @@ export default function TimbreMatcher({ locked = false }: Props) {
             )}
           </div>
 
-          <div>
-            <div className="mb-3 flex gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
-              {CELEBRITY_GENRES.map((genre) => {
-                const count = grouped[genre]?.length ?? 0;
-                return (
-                  <button
-                    key={genre}
-                    type="button"
-                    onClick={() => setActiveGenre(genre)}
-                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                      activeGenre === genre
-                        ? "bg-studio-accent/20 text-studio-accent-light"
-                        : "text-studio-muted hover:text-studio-text"
-                    }`}
-                  >
-                    {GENRE_LABEL_RU[genre]}
-                    {count > 0 && (
+          <VoiceRadarChart
+            user={{
+              timbreWeight: measurement.userWeight,
+              airiness: measurement.userAiriness,
+              raspiness: measurement.userRaspiness,
+            }}
+            match={
+              topMatch
+                ? {
+                    name: topMatch.celebrity.name,
+                    timbreWeight: topMatch.celebrity.timbreWeight,
+                    airiness: topMatch.celebrity.airiness,
+                    raspiness: topMatch.celebrity.raspiness,
+                  }
+                : null
+            }
+          />
+
+          {visibleGenres.length === 0 ? (
+            <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
+              Нет исполнителей с типом голоса «{VOCAL_FACH_LABEL_RU[fach]}».
+            </p>
+          ) : (
+            <div>
+              <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
+                {visibleGenres.map((genre) => {
+                  const count = grouped[genre]?.length ?? 0;
+                  return (
+                    <button
+                      key={genre}
+                      type="button"
+                      onClick={() => setActiveGenre(genre)}
+                      className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                        shownGenre === genre
+                          ? "bg-studio-accent/20 text-studio-accent-light"
+                          : "text-studio-muted hover:text-studio-text"
+                      }`}
+                    >
+                      {GENRE_LABEL_RU[genre]}
                       <span className="ml-1.5 tabular-nums opacity-70">
                         ({count})
                       </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
 
-            {(grouped[activeGenre]?.length ?? 0) === 0 ? (
-              <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
-                В жанре «{GENRE_LABEL_RU[activeGenre]}» нет исполнителей с типом
-                голоса «{VOCAL_FACH_LABEL_RU[fach]}».
-              </p>
-            ) : (
               <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
                 <h3 className="mb-3 text-sm font-semibold text-studio-text">
-                  Топ совпадений — {GENRE_LABEL_RU[activeGenre]}
+                  Топ совпадений — {GENRE_LABEL_RU[shownGenre]}
                 </h3>
                 <ul className="space-y-4">
-                  {(grouped[activeGenre] ?? []).map((m, i) => (
+                  {(grouped[shownGenre] ?? []).map((m, i) => (
                     <li key={m.celebrity.id}>
                       <div className="mb-1.5 flex items-center justify-between gap-2">
                         <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
@@ -587,8 +619,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
                   ))}
                 </ul>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <p className="text-center text-xs text-studio-muted">
             Ошиблись с полом? Переключите его выше — результат пересчитается

@@ -1,19 +1,25 @@
 /**
- * Voice measurement primitives for the "Vocal Fach + Timbre Weight" celebrity
- * matcher (client-safe, pure — no DOM/AudioContext dependencies, so it is
+ * Voice measurement primitives for the 3-D Voice Celebrity Match
+ * (client-safe, pure — no DOM/AudioContext dependencies, so it is
  * directly unit-testable with synthetic signals).
  *
  * The live frame-by-frame extraction runs inside
  * `components/ai/TimbreMatcher.tsx` (it needs a live AudioContext/stream):
- * Meyda computes `spectralCentroid` + `rms` per frame, while `pitchfinder`'s
- * YIN detector computes F0 from RAW PCM tapped via a parallel `AnalyserNode`
- * on the same source — deliberately NOT Meyda's own `buffer` feature, which is
- * the Hanning-WINDOWED signal and destroys exactly the periodicity YIN needs
- * (that mistake made YIN return null on nearly every frame of real singing).
+ * Meyda computes `spectralCentroid` + `spectralFlatness` + `zcr` + `rms` per
+ * frame, while `pitchfinder`'s YIN detector computes F0 from RAW PCM tapped
+ * via a parallel `AnalyserNode` on the same source — deliberately NOT Meyda's
+ * own `buffer` feature, which is the Hanning-WINDOWED signal and destroys
+ * exactly the periodicity YIN needs (that mistake made YIN return null on
+ * nearly every frame of real singing).
  *
  * This module owns the pure part: gating out near-silent frames, accumulating
- * the two per-frame series, reducing them to medians, and converting the
- * median spectral centroid into the 0-100 timbre weight used for matching.
+ * the per-frame series, reducing them to medians, and converting raw Meyda
+ * values onto the same 0-100 axes the stars are authored on.
+ *
+ * Axes (all 0-100, FIXED calibration — never per-take min/max):
+ *   timbreWeight ← spectral centroid (Hz, log map)
+ *   airiness     ← zero-crossing rate
+ *   raspiness    ← spectral flatness
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/match-voice/route.ts`,
  * `lib/neural-voice-match.ts`, `lib/singing-gender.ts`, `lib/voice-embed.ts`
@@ -26,7 +32,8 @@ export type TimbreGender = "female" | "male";
  * Frames quieter than this (Meyda's `rms`, a 0..1 amplitude-domain value) are
  * treated as silence/room-noise and skipped so they don't drag the medians
  * around. ~0.012 is roughly -38 dBFS — quiet room noise / breathing on a
- * typical mic gain, well below actual singing.
+ * typical mic gain, well below actual singing. Do NOT raise this enough to
+ * reject normal (even quiet) singing.
  */
 export const RMS_NOISE_FLOOR = 0.012;
 
@@ -46,9 +53,9 @@ export const MIN_VOICED_FRAMES = 30;
  * but still ~1s of clearly pitched singing, which rejects an all-noise take.
  *
  * These two gates are DECOUPLED on purpose: a frame that is loud enough but
- * unpitched still contributes a spectral-centroid sample. Coupling them is
- * what used to produce the bogus "звук не распознан" rejection on perfectly
- * normal singing.
+ * unpitched still contributes centroid / flatness / zcr samples. Coupling
+ * them is what used to produce the bogus "звук не распознан" rejection on
+ * perfectly normal singing. F0 is accumulated ONLY from YIN-success frames.
  */
 export const MIN_PITCHED_FRAMES = 20;
 
@@ -69,7 +76,7 @@ export const MIN_PITCHED_FRAMES = 20;
  * rather than linear, because perceived brightness tracks octaves, not Hz —
  * and because a linear map would squash almost every real voice into the
  * bottom third of the scale. Sanity points on this curve:
- *   600 Hz → 37  (dark baritone — near Frank Sinatra's 30)
+ *   600 Hz → 37  (dark baritone — near Frank Sinatra's 20)
  *  1000 Hz → 53
  *  2000 Hz → 77
  *  3000 Hz → 90  (bright pop tenor — near Justin Bieber's 90)
@@ -77,24 +84,51 @@ export const MIN_PITCHED_FRAMES = 20;
  * KNOWN LIMITATION: the spectral centroid is amplitude-weighted over the FULL
  * band, so a thousand quiet high-frequency bins can outweigh a handful of loud
  * harmonic ones — meaning the microphone's broadband noise floor biases this
- * measurement upwards. Measured on a synthetic dark 120Hz voice at 48kHz, the
- * median centroid moves 860Hz → 1350Hz → 2240Hz as the noise floor goes
- * -74 → -62 → -54 dBFS. Bright and dark voices still separate cleanly at any
- * one noise level (which is what the ranking needs), but the absolute weight
- * of a quiet-mic take and a noisy-mic take are not directly comparable. Fixing
- * that properly would require band-limiting the centroid to the vocal range
- * rather than using Meyda's full-band figure.
+ * measurement upwards. Bright and dark voices still separate cleanly at any
+ * one noise level (which is what the ranking needs).
  */
 export const CENTROID_WEIGHT_MIN_HZ = 200;
 export const CENTROID_WEIGHT_MAX_HZ = 4000;
 
 /**
+ * Calibration range for Meyda `spectralFlatness` → `raspiness` (0-100).
+ *
+ * Meyda's flatness is geometricMean / arithmeticMean of the magnitude
+ * spectrum, theoretically 0 (pure tone) … 1 (white noise). Clean sung vowels
+ * sit ~0.001–0.03; light rasp ~0.04–0.08; heavy rasp / split / distortion
+ * ~0.10–0.25. The map is LOGARITHMIC because flatness is roughly log-
+ * distributed across real voices — a linear map would squash every clean
+ * singer into 0–10.
+ *
+ *   0.001 → 0    (pure, clean)
+ *   0.010 → 37
+ *   0.050 → 63
+ *   0.250 → 100  (noise-like rasp)
+ */
+export const FLATNESS_RASP_MIN = 0.001;
+export const FLATNESS_RASP_MAX = 0.25;
+
+/**
+ * Calibration range for zero-crossing RATE → `airiness` (0-100).
+ *
+ * Meyda 5.x `zcr` is a COUNT of sign changes in the analysis window, not a
+ * 0–1 rate. We convert with `count / bufferSize` (see `zcrToRate`). Dense
+ * chest voice typically lands ~0.015–0.05; breathy pop ~0.10–0.20; exposed
+ * sibilants / air noise higher still. LINEAR map — ZCR already tracks
+ * high-frequency energy roughly linearly for sung vowels.
+ *
+ *   0.015 → 0    (dense)
+ *   0.080 → 35
+ *   0.200 → 100  (very breathy)
+ */
+export const ZCR_AIR_MIN = 0.015;
+export const ZCR_AIR_MAX = 0.2;
+
+/**
  * Meyda's `spectralCentroid` is `mu(1, ampSpectrum)` — the amplitude-weighted
  * mean BIN INDEX of the amplitude spectrum, NOT a frequency in Hz. Bin `k` of
  * a `bufferSize`-point FFT sits at `k * sampleRate / bufferSize`, so that is
- * the conversion applied here. (The previous version of this file compared the
- * raw bin index against Hz-scaled constants, which silently made its
- * brightness axis meaningless.)
+ * the conversion applied here.
  */
 export function centroidBinToHz(
   binIndex: number,
@@ -105,12 +139,44 @@ export function centroidBinToHz(
   return (binIndex * sampleRate) / bufferSize;
 }
 
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
+}
+
+function logMap(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const span = Math.log(max / min);
+  return clamp01(Math.log(value / min) / span);
+}
+
+function linMap(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return clamp01((value - min) / (max - min));
+}
+
 /** Spectral centroid in Hz → 0-100 timbre weight. See the calibration note above. */
 export function centroidHzToWeight(centroidHz: number): number {
-  if (!Number.isFinite(centroidHz) || centroidHz <= 0) return 0;
-  const span = Math.log2(CENTROID_WEIGHT_MAX_HZ / CENTROID_WEIGHT_MIN_HZ);
-  const position = Math.log2(centroidHz / CENTROID_WEIGHT_MIN_HZ) / span;
-  return Math.round(Math.max(0, Math.min(1, position)) * 100);
+  return Math.round(logMap(centroidHz, CENTROID_WEIGHT_MIN_HZ, CENTROID_WEIGHT_MAX_HZ) * 100);
+}
+
+/** Meyda spectralFlatness (0–1) → 0-100 raspiness. */
+export function flatnessToRaspiness(flatness: number): number {
+  return Math.round(logMap(flatness, FLATNESS_RASP_MIN, FLATNESS_RASP_MAX) * 100);
+}
+
+/**
+ * Convert Meyda's `zcr` to a 0–1 rate. Meyda 5.x returns a raw crossing
+ * COUNT; if a future build already returns a rate (≤ 1) we leave it as-is.
+ */
+export function zcrToRate(zcr: number, bufferSize: number): number {
+  if (!Number.isFinite(zcr) || zcr < 0) return 0;
+  if (zcr > 1 && bufferSize > 0) return zcr / bufferSize;
+  return zcr;
+}
+
+/** Zero-crossing rate (0–1) → 0-100 airiness. */
+export function zcrRateToAiriness(zcrRate: number): number {
+  return Math.round(linMap(zcrRate, ZCR_AIR_MIN, ZCR_AIR_MAX) * 100);
 }
 
 /** Robust (median-based) summary of a single take. */
@@ -119,8 +185,16 @@ export type VoiceMeasurement = {
   medianHz: number;
   /** Median spectral centroid in Hz across non-silent frames. */
   medianCentroidHz: number;
+  /** Median Meyda spectralFlatness (0–1) across non-silent frames. */
+  medianFlatness: number;
+  /** Median zero-crossing rate (0–1) across non-silent frames. */
+  medianZcrRate: number;
   /** `medianCentroidHz` mapped onto the same 0-100 scale as the stars' `timbreWeight`. */
   userWeight: number;
+  /** ZCR mapped onto the same 0-100 scale as the stars' `airiness`. */
+  userAiriness: number;
+  /** Flatness mapped onto the same 0-100 scale as the stars' `raspiness`. */
+  userRaspiness: number;
   /** Frames that passed the noise-floor gate. */
   frameCount: number;
   /** Subset of those where YIN also found an F0. */
@@ -137,13 +211,18 @@ function median(values: number[]): number {
 }
 
 /**
- * Accumulates the two per-frame series (spectral centroid + YIN F0) captured
- * live during the take, gating out near-silent frames via `RMS_NOISE_FLOOR`,
- * and reduces them to medians. Median rather than mean so a couple of
- * momentarily louder/brighter syllables can't drag the whole result around.
+ * Accumulates the per-frame series captured live during the take, gating out
+ * near-silent frames via `RMS_NOISE_FLOOR`, and reduces them to medians.
+ * Median rather than mean so a couple of momentarily louder/brighter
+ * syllables can't drag the whole result around.
+ *
+ * Decoupling: centroid / flatness / zcr come from RMS-voiced frames; F0
+ * comes only from YIN-success frames.
  */
 export class VoiceMeasurementAccumulator {
   private centroidBins: number[] = [];
+  private flatness: number[] = [];
+  private zcrRates: number[] = [];
   private pitchHz: number[] = [];
   private frames = 0;
 
@@ -153,15 +232,18 @@ export class VoiceMeasurementAccumulator {
   ) {}
 
   /**
-   * Feed one analysis frame. `centroidBin` and `rms` come from Meyda;
-   * `f0Hz` comes from running YIN over raw PCM for roughly the same window
-   * (null when YIN found no usable pitch — such a frame STILL contributes its
-   * centroid, see `MIN_PITCHED_FRAMES`). Malformed values are ignored.
+   * Feed one analysis frame. `centroidBin`, `rms`, `spectralFlatness` and
+   * `zcr` come from Meyda; `f0Hz` comes from running YIN over raw PCM for
+   * roughly the same window (null when YIN found no usable pitch — such a
+   * frame STILL contributes its timbre features, see `MIN_PITCHED_FRAMES`).
+   * Malformed values are ignored.
    */
   addFrame(
     centroidBin: number | undefined,
     rms: number | undefined,
-    f0Hz?: number | null
+    f0Hz?: number | null,
+    spectralFlatness?: number,
+    zcr?: number
   ): void {
     if (typeof rms !== "number" || !Number.isFinite(rms) || rms < RMS_NOISE_FLOOR) {
       return; // silence gate
@@ -170,6 +252,12 @@ export class VoiceMeasurementAccumulator {
 
     if (typeof centroidBin === "number" && Number.isFinite(centroidBin) && centroidBin > 0) {
       this.centroidBins.push(centroidBin);
+    }
+    if (typeof spectralFlatness === "number" && Number.isFinite(spectralFlatness) && spectralFlatness >= 0) {
+      this.flatness.push(spectralFlatness);
+    }
+    if (typeof zcr === "number" && Number.isFinite(zcr) && zcr >= 0) {
+      this.zcrRates.push(zcrToRate(zcr, this.bufferSize));
     }
     if (typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0) {
       this.pitchHz.push(f0Hz);
@@ -184,22 +272,30 @@ export class VoiceMeasurementAccumulator {
     return this.pitchHz.length;
   }
 
-  /** Medians + derived weight, or null when the take carried too little usable signal. */
+  /** Medians + derived 3-D vector, or null when the take carried too little usable signal. */
   finalize(): VoiceMeasurement | null {
     if (this.frames < MIN_VOICED_FRAMES) return null;
     if (this.pitchHz.length < MIN_PITCHED_FRAMES) return null;
     if (this.centroidBins.length === 0) return null;
+    if (this.flatness.length === 0) return null;
+    if (this.zcrRates.length === 0) return null;
 
     const medianCentroidHz = centroidBinToHz(
       median(this.centroidBins),
       this.sampleRate,
       this.bufferSize
     );
+    const medianFlatness = median(this.flatness);
+    const medianZcrRate = median(this.zcrRates);
 
     return {
       medianHz: median(this.pitchHz),
       medianCentroidHz,
+      medianFlatness,
+      medianZcrRate,
       userWeight: centroidHzToWeight(medianCentroidHz),
+      userAiriness: zcrRateToAiriness(medianZcrRate),
+      userRaspiness: flatnessToRaspiness(medianFlatness),
       frameCount: this.frames,
       pitchedFrameCount: this.pitchHz.length,
     };

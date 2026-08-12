@@ -1,52 +1,44 @@
 /**
- * Reference database of 100 well-known singers for the "Vocal Fach + Timbre
- * Weight" celebrity matcher.
+ * Reference database of 100 well-known singers for the 3D Voice Celebrity
+ * Match (Vocal Fach + timbre weight / airiness / raspiness).
  *
- * ARCHITECTURE (replaces the previous synthetic-MFCC / cosine-similarity model
- * that this file used to implement): a voice is described by exactly two
- * professionally meaningful, independently measurable properties —
+ * ARCHITECTURE: a voice is described by a tessitura bucket plus a 3-D timbre
+ * vector that is independently measurable on the student's microphone —
  *
- *   1. `vocalFach`     — the singer's tessitura bucket (where their voice
- *                        actually LIVES, not their extreme range). Derived on
- *                        the student's side from the take's MEDIAN F0, which
- *                        is a direct physical measurement of the vocal folds
- *                        and is essentially immune to microphone colouration.
- *   2. `timbreWeight`  — 0-100 tonal weight/brightness: 0 = very dark, heavy,
- *                        muffled (Barry White), 100 = very bright, ringing,
- *                        light (Монеточка). Derived on the student's side from
- *                        the median spectral centroid.
+ *   1. `vocalFach`     — where the voice LIVES (median F0), not its extremes.
+ *   2. `timbreWeight`  — 0 dark/heavy … 100 bright/ringing (spectral centroid).
+ *   3. `airiness`      — 0 dense … 100 breathy (zero-crossing rate).
+ *   4. `raspiness`     — 0 clean … 100 rasp/split (spectral flatness).
  *
- * Matching is a STRICT filter on (gender × vocalFach) followed by a
- * nearest-neighbour ranking on `timbreWeight`. A bass can therefore never be
- * matched against a tenor — which was the headline defect of the old MFCC
- * model, where mic distortion routinely turned basses into Justin Bieber.
+ * Matching is a STRICT filter on (gender × vocalFach) followed by nearest-
+ * neighbour ranking on Euclidean distance in that 3-D cube. A bass can never
+ * be matched against a tenor.
  *
- * The per-artist fach/weight values are hand-authored from each singer's real,
- * documented vocal character (there is no licensed reference-audio corpus in
- * this project to measure them from), but unlike the deleted pseudo-MFCC
- * vectors they are directly interpretable and directly comparable to a real
- * measurement taken from the student's microphone.
+ * Per-artist values are hand-authored from each singer's documented vocal
+ * character (there is no licensed reference-audio corpus in this project).
  */
 
 export type CelebrityGender = "male" | "female";
 
-/**
- * Simple 2-value genre taxonomy used to group results in the UI (unchanged
- * from the previous model). Genres that don't map cleanly onto either
- * (rap/hip-hop, jazz/soul, classic Russian estrada/chanson, etc.) are folded
- * into whichever bucket fits better; `Pop` is the default for anything that
- * isn't clearly rock-oriented (guitar-driven rock/metal/punk and rock-icon
- * solo artists → `Rock`).
- */
-export type CelebrityGenre = "Pop" | "Rock";
+export type Genre =
+  | "Pop"
+  | "Rock"
+  | "Rap/Hip-Hop"
+  | "Jazz/Soul"
+  | "Estrada/Chanson";
 
-export const CELEBRITY_GENRES: CelebrityGenre[] = ["Pop", "Rock"];
+/** @deprecated Use `Genre`. Kept so older imports keep compiling. */
+export type CelebrityGenre = Genre;
 
-/**
- * Tessitura bucket. Two per gender — deliberately coarse, because a single
- * median-F0 measurement from a 10-second phone-mic take cannot honestly
- * resolve finer distinctions (lyric vs dramatic, soprano vs mezzo, etc.).
- */
+/** Display order: Поп, Рок, Рэп, Шансон, Джаз. */
+export const CELEBRITY_GENRES: Genre[] = [
+  "Pop",
+  "Rock",
+  "Rap/Hip-Hop",
+  "Estrada/Chanson",
+  "Jazz/Soul",
+];
+
 export type VocalFach =
   | "bass_baritone"
   | "tenor"
@@ -65,10 +57,20 @@ export interface CelebrityProfile {
   name: string;
   gender: CelebrityGender;
   vocalFach: VocalFach;
-  /** 0-100: 0 = very dark/heavy/muffled, 100 = very bright/ringing/light. */
+  genre: Genre;
+  /** 0 dark – 100 bright. */
   timbreWeight: number;
-  genre: CelebrityGenre;
+  /** 0 dense – 100 breathy. */
+  airiness: number;
+  /** 0 clean – 100 rasp/split. */
+  raspiness: number;
 }
+
+export type TimbreVector = {
+  timbreWeight: number;
+  airiness: number;
+  raspiness: number;
+};
 
 /** Cyrillic → Latin transliteration used to build stable, readable, ASCII slug ids. */
 const CYRILLIC_TO_LATIN: Record<string, string> = {
@@ -90,115 +92,113 @@ type RawEntry = Omit<CelebrityProfile, "id">;
 
 // prettier-ignore
 const RAW_ENTRIES: RawEntry[] = [
-  // ЗАРУБЕЖНЫЕ ЖЕНЩИНЫ
-  { name: "Adele",              gender: "female", vocalFach: "contralto",     timbreWeight: 35,  genre: "Pop"  },
-  { name: "Billie Eilish",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 85,  genre: "Pop"  },
-  { name: "Ariana Grande",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 95,  genre: "Pop"  },
-  { name: "Whitney Houston",    gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 88,  genre: "Pop"  },
-  { name: "Amy Winehouse",      gender: "female", vocalFach: "contralto",     timbreWeight: 30,  genre: "Pop"  },
-  { name: "Beyonce",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 75,  genre: "Pop"  },
-  { name: "Lady Gaga",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 65,  genre: "Pop"  },
-  { name: "Mariah Carey",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 92,  genre: "Pop"  },
-  { name: "Celine Dion",        gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 82,  genre: "Pop"  },
-  { name: "Sia",                gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 78,  genre: "Pop"  },
-  { name: "Taylor Swift",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 70,  genre: "Pop"  },
-  { name: "Dua Lipa",           gender: "female", vocalFach: "contralto",     timbreWeight: 45,  genre: "Pop"  },
-  { name: "Lana Del Rey",       gender: "female", vocalFach: "contralto",     timbreWeight: 22,  genre: "Pop"  },
-  { name: "Shakira",            gender: "female", vocalFach: "contralto",     timbreWeight: 50,  genre: "Pop"  },
-  { name: "Miley Cyrus",        gender: "female", vocalFach: "contralto",     timbreWeight: 38,  genre: "Rock" },
-  { name: "Rihanna",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 60,  genre: "Pop"  },
-  { name: "Janis Joplin",       gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 58,  genre: "Rock" },
-  { name: "Cher",               gender: "female", vocalFach: "contralto",     timbreWeight: 20,  genre: "Pop"  },
-  { name: "Tina Turner",        gender: "female", vocalFach: "contralto",     timbreWeight: 35,  genre: "Rock" },
-  { name: "Katy Perry",         gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 68,  genre: "Pop"  },
+  // WESTERN MEN (25)
+  { name: "Frank Sinatra",                    gender: "male", vocalFach: "bass_baritone", genre: "Jazz/Soul",        timbreWeight: 20, airiness: 15, raspiness: 5   },
+  { name: "Louis Armstrong",                  gender: "male", vocalFach: "bass_baritone", genre: "Jazz/Soul",        timbreWeight: 10, airiness: 30, raspiness: 100 },
+  { name: "Barry White",                      gender: "male", vocalFach: "bass_baritone", genre: "Jazz/Soul",        timbreWeight: 5,  airiness: 40, raspiness: 60  },
+  { name: "Elvis Presley",                    gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 35, airiness: 10, raspiness: 15  },
+  { name: "David Bowie",                      gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 40, airiness: 20, raspiness: 10  },
+  { name: "Kurt Cobain",                      gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 45, airiness: 15, raspiness: 95  },
+  { name: "Hozier",                           gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 30, airiness: 25, raspiness: 15  },
+  { name: "Snoop Dogg",                       gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 25, airiness: 40, raspiness: 30  },
+  { name: "50 Cent",                          gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 20, airiness: 10, raspiness: 40  },
+  { name: "Drake",                            gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 35, airiness: 20, raspiness: 5   },
+  { name: "Michael Jackson",                  gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 95, airiness: 40, raspiness: 10  },
+  { name: "Justin Bieber",                    gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 90, airiness: 50, raspiness: 0   },
+  { name: "Ed Sheeran",                       gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 75, airiness: 35, raspiness: 5   },
+  { name: "Bruno Mars",                       gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 85, airiness: 15, raspiness: 25  },
+  { name: "The Weeknd",                       gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 88, airiness: 45, raspiness: 5   },
+  { name: "Justin Timberlake",                gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 82, airiness: 30, raspiness: 0   },
+  { name: "Shawn Mendes",                     gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 78, airiness: 40, raspiness: 10  },
+  { name: "Adam Levine",                      gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 92, airiness: 20, raspiness: 15  },
+  { name: "Freddie Mercury",                  gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 70, airiness: 5,  raspiness: 40  },
+  { name: "Chester Bennington",               gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 65, airiness: 10, raspiness: 90  },
+  { name: "Paul McCartney",                   gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 75, airiness: 15, raspiness: 5   },
+  { name: "Mick Jagger",                      gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 60, airiness: 20, raspiness: 50  },
+  { name: "Dan Reynolds (Imagine Dragons)",   gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 68, airiness: 25, raspiness: 60  },
+  { name: "Eminem",                           gender: "male", vocalFach: "tenor",         genre: "Rap/Hip-Hop",      timbreWeight: 75, airiness: 10, raspiness: 40  },
+  { name: "Stevie Wonder",                    gender: "male", vocalFach: "tenor",         genre: "Jazz/Soul",        timbreWeight: 80, airiness: 15, raspiness: 20  },
 
-  // РОССИЙСКИЕ ЖЕНЩИНЫ
-  { name: "Полина Гагарина",    gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 80,  genre: "Pop"  },
-  { name: "Zivert",             gender: "female", vocalFach: "contralto",     timbreWeight: 48,  genre: "Pop"  },
-  { name: "Anna Asti",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 58,  genre: "Pop"  },
-  { name: "Земфира",            gender: "female", vocalFach: "contralto",     timbreWeight: 40,  genre: "Rock" },
-  { name: "Алла Пугачева",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 55,  genre: "Pop"  },
-  { name: "Пелагея",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 78,  genre: "Rock" },
-  { name: "Лолита",             gender: "female", vocalFach: "contralto",     timbreWeight: 25,  genre: "Pop"  },
-  { name: "Монеточка",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 100, genre: "Pop"  },
-  { name: "Слава",              gender: "female", vocalFach: "contralto",     timbreWeight: 32,  genre: "Pop"  },
-  { name: "МакSим",             gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 87,  genre: "Pop"  },
-  { name: "Нюша",               gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 89,  genre: "Pop"  },
-  { name: "Клава Кока",         gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 93,  genre: "Pop"  },
-  { name: "Ёлка",               gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 72,  genre: "Pop"  },
-  { name: "Лариса Долина",      gender: "female", vocalFach: "contralto",     timbreWeight: 42,  genre: "Pop"  },
-  { name: "Любовь Успенская",   gender: "female", vocalFach: "contralto",     timbreWeight: 28,  genre: "Pop"  },
-  { name: "Темникова",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 66,  genre: "Pop"  },
-  { name: "Mary Gu",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 84,  genre: "Pop"  },
-  { name: "Диана Арбенина",     gender: "female", vocalFach: "contralto",     timbreWeight: 30,  genre: "Rock" },
-  { name: "Юлия Чичерина",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 72,  genre: "Rock" },
-  { name: "Валерия",            gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 76,  genre: "Pop"  },
+  // RUSSIAN MEN (25)
+  { name: "Григорий Лепс",                    gender: "male", vocalFach: "bass_baritone", genre: "Estrada/Chanson",  timbreWeight: 35, airiness: 10, raspiness: 95  },
+  { name: "Михаил Круг",                      gender: "male", vocalFach: "bass_baritone", genre: "Estrada/Chanson",  timbreWeight: 25, airiness: 15, raspiness: 40  },
+  { name: "Муслим Магомаев",                  gender: "male", vocalFach: "bass_baritone", genre: "Estrada/Chanson",  timbreWeight: 20, airiness: 5,  raspiness: 0   },
+  { name: "Филипп Киркоров",                  gender: "male", vocalFach: "bass_baritone", genre: "Pop",              timbreWeight: 40, airiness: 10, raspiness: 5   },
+  { name: "Леонид Агутин",                    gender: "male", vocalFach: "bass_baritone", genre: "Pop",              timbreWeight: 45, airiness: 30, raspiness: 35  },
+  { name: "Баста",                            gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 30, airiness: 20, raspiness: 60  },
+  { name: "Скриптонит",                       gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 25, airiness: 50, raspiness: 85  },
+  { name: "Oxxxymiron",                       gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 40, airiness: 15, raspiness: 30  },
+  { name: "Macan",                            gender: "male", vocalFach: "bass_baritone", genre: "Rap/Hip-Hop",      timbreWeight: 35, airiness: 40, raspiness: 20  },
+  { name: "Михаил Горшенев (КиШ)",            gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 25, airiness: 5,  raspiness: 80  },
+  { name: "Виктор Цой",                       gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 30, airiness: 10, raspiness: 15  },
+  { name: "Вячеслав Бутусов",                 gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 28, airiness: 20, raspiness: 10  },
+  { name: "Илья Лагутенко",                   gender: "male", vocalFach: "bass_baritone", genre: "Rock",             timbreWeight: 48, airiness: 60, raspiness: 20  },
+  { name: "Дима Билан",                       gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 80, airiness: 35, raspiness: 15  },
+  { name: "Сергей Лазарев",                   gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 85, airiness: 10, raspiness: 5   },
+  { name: "Валерий Меладзе",                  gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 65, airiness: 15, raspiness: 25  },
+  { name: "Николай Басков",                   gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 75, airiness: 5,  raspiness: 0   },
+  { name: "Shaman",                           gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 82, airiness: 15, raspiness: 40  },
+  { name: "Jony",                             gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 78, airiness: 50, raspiness: 10  },
+  { name: "Niletto",                          gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 70, airiness: 40, raspiness: 5   },
+  { name: "Владимир Пресняков",               gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 92, airiness: 30, raspiness: 10  },
+  { name: "Сергей Жуков (Руки Вверх)",        gender: "male", vocalFach: "tenor",         genre: "Pop",              timbreWeight: 72, airiness: 10, raspiness: 0   },
+  { name: "Miyagi",                           gender: "male", vocalFach: "tenor",         genre: "Rap/Hip-Hop",      timbreWeight: 68, airiness: 45, raspiness: 30  },
+  { name: "Валерий Кипелов",                  gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 88, airiness: 5,  raspiness: 60  },
+  { name: "Александр Градский",               gender: "male", vocalFach: "tenor",         genre: "Rock",             timbreWeight: 80, airiness: 5,  raspiness: 15  },
 
-  // ЗАРУБЕЖНЫЕ МУЖЧИНЫ
-  { name: "Freddie Mercury",    gender: "male",   vocalFach: "tenor",         timbreWeight: 75,  genre: "Rock" },
-  { name: "Frank Sinatra",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 30,  genre: "Pop"  },
-  { name: "Elvis Presley",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 40,  genre: "Rock" },
-  { name: "Michael Jackson",    gender: "male",   vocalFach: "tenor",         timbreWeight: 95,  genre: "Pop"  },
-  { name: "Bruno Mars",         gender: "male",   vocalFach: "tenor",         timbreWeight: 88,  genre: "Pop"  },
-  { name: "Ed Sheeran",         gender: "male",   vocalFach: "tenor",         timbreWeight: 70,  genre: "Pop"  },
-  { name: "The Weeknd",         gender: "male",   vocalFach: "tenor",         timbreWeight: 89,  genre: "Pop"  },
-  { name: "Kurt Cobain",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 45,  genre: "Rock" },
-  { name: "Chester Bennington", gender: "male",   vocalFach: "bass_baritone", timbreWeight: 55,  genre: "Rock" },
-  { name: "Louis Armstrong",    gender: "male",   vocalFach: "bass_baritone", timbreWeight: 15,  genre: "Pop"  },
-  { name: "Andrea Bocelli",     gender: "male",   vocalFach: "tenor",         timbreWeight: 65,  genre: "Pop"  },
-  { name: "Barry White",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 10,  genre: "Pop"  },
-  { name: "Eminem",             gender: "male",   vocalFach: "tenor",         timbreWeight: 72,  genre: "Pop"  },
-  { name: "Sam Smith",          gender: "male",   vocalFach: "tenor",         timbreWeight: 81,  genre: "Pop"  },
-  { name: "Hozier",             gender: "male",   vocalFach: "bass_baritone", timbreWeight: 35,  genre: "Rock" },
-  { name: "Elton John",         gender: "male",   vocalFach: "tenor",         timbreWeight: 60,  genre: "Pop"  },
-  { name: "Steven Tyler",       gender: "male",   vocalFach: "tenor",         timbreWeight: 85,  genre: "Rock" },
-  { name: "Paul McCartney",     gender: "male",   vocalFach: "tenor",         timbreWeight: 68,  genre: "Rock" },
-  { name: "David Bowie",        gender: "male",   vocalFach: "bass_baritone", timbreWeight: 50,  genre: "Rock" },
-  { name: "Mick Jagger",        gender: "male",   vocalFach: "tenor",         timbreWeight: 74,  genre: "Rock" },
+  // WESTERN WOMEN (25)
+  { name: "Adele",                            gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 35, airiness: 20, raspiness: 10  },
+  { name: "Dua Lipa",                         gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 45, airiness: 35, raspiness: 5   },
+  { name: "Lana Del Rey",                     gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 25, airiness: 60, raspiness: 5   },
+  { name: "Shakira",                          gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 50, airiness: 20, raspiness: 40  },
+  { name: "Cher",                             gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 20, airiness: 5,  raspiness: 10  },
+  { name: "Amy Winehouse",                    gender: "female", vocalFach: "contralto",     genre: "Jazz/Soul",        timbreWeight: 30, airiness: 15, raspiness: 45  },
+  { name: "Ella Fitzgerald",                  gender: "female", vocalFach: "contralto",     genre: "Jazz/Soul",        timbreWeight: 35, airiness: 10, raspiness: 0   },
+  { name: "Miley Cyrus",                      gender: "female", vocalFach: "contralto",     genre: "Rock",             timbreWeight: 40, airiness: 15, raspiness: 60  },
+  { name: "Tina Turner",                      gender: "female", vocalFach: "contralto",     genre: "Rock",             timbreWeight: 35, airiness: 5,  raspiness: 85  },
+  { name: "Billie Eilish",                    gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 85, airiness: 95, raspiness: 5   },
+  { name: "Ariana Grande",                    gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 95, airiness: 40, raspiness: 0   },
+  { name: "Beyonce",                          gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 75, airiness: 20, raspiness: 15  },
+  { name: "Lady Gaga",                        gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 65, airiness: 15, raspiness: 25  },
+  { name: "Taylor Swift",                     gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 70, airiness: 30, raspiness: 5   },
+  { name: "Rihanna",                          gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 60, airiness: 25, raspiness: 15  },
+  { name: "Katy Perry",                       gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 68, airiness: 15, raspiness: 5   },
+  { name: "Sia",                              gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 78, airiness: 20, raspiness: 60  },
+  { name: "Celine Dion",                      gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 82, airiness: 10, raspiness: 5   },
+  { name: "Mariah Carey",                     gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 92, airiness: 30, raspiness: 0   },
+  { name: "Whitney Houston",                  gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 88, airiness: 15, raspiness: 10  },
+  { name: "Cardi B",                          gender: "female", vocalFach: "mezzo_soprano", genre: "Rap/Hip-Hop",      timbreWeight: 60, airiness: 5,  raspiness: 50  },
+  { name: "Janis Joplin",                     gender: "female", vocalFach: "mezzo_soprano", genre: "Rock",             timbreWeight: 58, airiness: 5,  raspiness: 95  },
+  { name: "Avril Lavigne",                    gender: "female", vocalFach: "mezzo_soprano", genre: "Rock",             timbreWeight: 82, airiness: 10, raspiness: 15  },
+  { name: "Amy Lee (Evanescence)",            gender: "female", vocalFach: "mezzo_soprano", genre: "Rock",             timbreWeight: 75, airiness: 20, raspiness: 10  },
+  { name: "Aretha Franklin",                  gender: "female", vocalFach: "mezzo_soprano", genre: "Jazz/Soul",        timbreWeight: 70, airiness: 10, raspiness: 20  },
 
-  // РОССИЙСКИЕ МУЖЧИНЫ
-  { name: "Муслим Магомаев",                gender: "male", vocalFach: "bass_baritone", timbreWeight: 20, genre: "Pop"  },
-  { name: "Дмитрий Хворостовский",          gender: "male", vocalFach: "bass_baritone", timbreWeight: 12, genre: "Pop"  },
-  { name: "Григорий Лепс",                  gender: "male", vocalFach: "bass_baritone", timbreWeight: 40, genre: "Pop"  },
-  { name: "Дима Билан",                     gender: "male", vocalFach: "tenor",         timbreWeight: 80, genre: "Pop"  },
-  { name: "Сергей Лазарев",                 gender: "male", vocalFach: "tenor",         timbreWeight: 85, genre: "Pop"  },
-  { name: "Баста",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 25, genre: "Pop"  },
-  { name: "Леонид Агутин",                  gender: "male", vocalFach: "bass_baritone", timbreWeight: 45, genre: "Pop"  },
-  { name: "Валерий Меладзе",                gender: "male", vocalFach: "tenor",         timbreWeight: 71, genre: "Pop"  },
-  { name: "Niletto",                        gender: "male", vocalFach: "tenor",         timbreWeight: 78, genre: "Pop"  },
-  { name: "Владимир Пресняков",             gender: "male", vocalFach: "tenor",         timbreWeight: 92, genre: "Pop"  },
-  { name: "Николай Басков",                 gender: "male", vocalFach: "tenor",         timbreWeight: 68, genre: "Pop"  },
-  { name: "Филипп Киркоров",                gender: "male", vocalFach: "tenor",         timbreWeight: 62, genre: "Pop"  },
-  { name: "Валерий Кипелов",                gender: "male", vocalFach: "tenor",         timbreWeight: 88, genre: "Rock" },
-  { name: "Михаил Горшенев (Король и Шут)", gender: "male", vocalFach: "bass_baritone", timbreWeight: 25, genre: "Rock" },
-  { name: "Shaman",                         gender: "male", vocalFach: "tenor",         timbreWeight: 82, genre: "Pop"  },
-  { name: "Macan",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 42, genre: "Pop"  },
-  { name: "Feduk",                          gender: "male", vocalFach: "bass_baritone", timbreWeight: 48, genre: "Pop"  },
-  { name: "Jony",                           gender: "male", vocalFach: "tenor",         timbreWeight: 76, genre: "Pop"  },
-  { name: "Александр Градский",             gender: "male", vocalFach: "tenor",         timbreWeight: 80, genre: "Rock" },
-  { name: "Скриптонит",                     gender: "male", vocalFach: "bass_baritone", timbreWeight: 18, genre: "Pop"  },
-
-  // СМЕШАННЫЙ БЛОК — добирает ростер ровно до 100 (поп/рок, м/ж, RU/EN)
-  { name: "Christina Aguilera", gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 90, genre: "Pop"  },
-  { name: "Alicia Keys",        gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 52, genre: "Pop"  },
-  { name: "Avril Lavigne",      gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 82, genre: "Rock" },
-  { name: "Camila Cabello",     gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 74, genre: "Pop"  },
-  { name: "Stevie Wonder",      gender: "male",   vocalFach: "tenor",         timbreWeight: 79, genre: "Pop"  },
-  { name: "Bob Dylan",          gender: "male",   vocalFach: "bass_baritone", timbreWeight: 38, genre: "Rock" },
-  { name: "Bruce Springsteen",  gender: "male",   vocalFach: "bass_baritone", timbreWeight: 32, genre: "Rock" },
-  { name: "Axl Rose",           gender: "male",   vocalFach: "tenor",         timbreWeight: 96, genre: "Rock" },
-  { name: "Adam Levine",        gender: "male",   vocalFach: "tenor",         timbreWeight: 91, genre: "Pop"  },
-  { name: "Justin Bieber",      gender: "male",   vocalFach: "tenor",         timbreWeight: 90, genre: "Pop"  },
-  { name: "Drake",              gender: "male",   vocalFach: "bass_baritone", timbreWeight: 50, genre: "Pop"  },
-  { name: "Post Malone",        gender: "male",   vocalFach: "tenor",         timbreWeight: 66, genre: "Pop"  },
-  { name: "Ozzy Osbourne",      gender: "male",   vocalFach: "tenor",         timbreWeight: 73, genre: "Rock" },
-  { name: "Юрий Шатунов",       gender: "male",   vocalFach: "tenor",         timbreWeight: 86, genre: "Pop"  },
-  { name: "Вячеслав Бутусов",   gender: "male",   vocalFach: "bass_baritone", timbreWeight: 28, genre: "Rock" },
-  { name: "Гарик Сукачёв",      gender: "male",   vocalFach: "bass_baritone", timbreWeight: 22, genre: "Rock" },
-  { name: "Тимати",             gender: "male",   vocalFach: "bass_baritone", timbreWeight: 35, genre: "Pop"  },
-  { name: "Ирина Аллегрова",    gender: "female", vocalFach: "contralto",     timbreWeight: 38, genre: "Pop"  },
-  { name: "Юта",                gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 69, genre: "Pop"  },
-  { name: "Ани Лорак",          gender: "female", vocalFach: "mezzo_soprano", timbreWeight: 83, genre: "Pop"  },
+  // RUSSIAN WOMEN (25)
+  { name: "Zivert",                           gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 48, airiness: 35, raspiness: 10  },
+  { name: "Слава",                            gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 32, airiness: 10, raspiness: 30  },
+  { name: "Лобода",                           gender: "female", vocalFach: "contralto",     genre: "Pop",              timbreWeight: 45, airiness: 25, raspiness: 20  },
+  { name: "Земфира",                          gender: "female", vocalFach: "contralto",     genre: "Rock",             timbreWeight: 40, airiness: 30, raspiness: 15  },
+  { name: "Диана Арбенина",                   gender: "female", vocalFach: "contralto",     genre: "Rock",             timbreWeight: 30, airiness: 10, raspiness: 40  },
+  { name: "Лолита",                           gender: "female", vocalFach: "contralto",     genre: "Estrada/Chanson",  timbreWeight: 25, airiness: 15, raspiness: 35  },
+  { name: "Алла Пугачева",                    gender: "female", vocalFach: "contralto",     genre: "Estrada/Chanson",  timbreWeight: 35, airiness: 20, raspiness: 45  },
+  { name: "Ирина Аллегрова",                  gender: "female", vocalFach: "contralto",     genre: "Estrada/Chanson",  timbreWeight: 38, airiness: 10, raspiness: 60  },
+  { name: "Любовь Успенская",                 gender: "female", vocalFach: "contralto",     genre: "Estrada/Chanson",  timbreWeight: 28, airiness: 25, raspiness: 50  },
+  { name: "Надежда Кадышева",                 gender: "female", vocalFach: "contralto",     genre: "Estrada/Chanson",  timbreWeight: 40, airiness: 5,  raspiness: 0   },
+  { name: "Полина Гагарина",                  gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 80, airiness: 15, raspiness: 25  },
+  { name: "Anna Asti",                        gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 58, airiness: 40, raspiness: 35  },
+  { name: "Монеточка",                        gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 100,airiness: 50, raspiness: 0   },
+  { name: "Клава Кока",                       gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 93, airiness: 45, raspiness: 5   },
+  { name: "Нюша",                             gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 89, airiness: 35, raspiness: 0   },
+  { name: "МакSим",                           gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 87, airiness: 55, raspiness: 0   },
+  { name: "Мари Краймбрери",                  gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 75, airiness: 30, raspiness: 15  },
+  { name: "Дора",                             gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 90, airiness: 40, raspiness: 0   },
+  { name: "Ёлка",                             gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 72, airiness: 25, raspiness: 10  },
+  { name: "Валерия",                          gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 76, airiness: 10, raspiness: 0   },
+  { name: "Темникова",                        gender: "female", vocalFach: "mezzo_soprano", genre: "Pop",              timbreWeight: 66, airiness: 60, raspiness: 5   },
+  { name: "Бьянка",                           gender: "female", vocalFach: "mezzo_soprano", genre: "Rap/Hip-Hop",      timbreWeight: 70, airiness: 15, raspiness: 20  },
+  { name: "Инстасамка",                       gender: "female", vocalFach: "mezzo_soprano", genre: "Rap/Hip-Hop",      timbreWeight: 65, airiness: 30, raspiness: 25  },
+  { name: "Пелагея",                          gender: "female", vocalFach: "mezzo_soprano", genre: "Rock",             timbreWeight: 78, airiness: 10, raspiness: 0   },
+  { name: "Лариса Долина",                    gender: "female", vocalFach: "mezzo_soprano", genre: "Jazz/Soul",        timbreWeight: 75, airiness: 10, raspiness: 15  },
 ];
 
 export const CELEBRITIES_DB: CelebrityProfile[] = RAW_ENTRIES.map((entry) => ({
@@ -208,6 +208,12 @@ export const CELEBRITIES_DB: CelebrityProfile[] = RAW_ENTRIES.map((entry) => ({
 
 const MALE_FACHES: VocalFach[] = ["bass_baritone", "tenor"];
 const FEMALE_FACHES: VocalFach[] = ["contralto", "mezzo_soprano"];
+
+function assertAxis(name: string, label: string, value: number): void {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(`celebritiesDB: ${name} has out-of-range ${label} ${value}`);
+  }
+}
 
 if (process.env.NODE_ENV !== "production") {
   const ids = new Set(CELEBRITIES_DB.map((c) => c.id));
@@ -222,9 +228,9 @@ if (process.env.NODE_ENV !== "production") {
     if (!allowed.includes(c.vocalFach)) {
       throw new Error(`celebritiesDB: ${c.name} has fach ${c.vocalFach} incompatible with gender ${c.gender}`);
     }
-    if (!Number.isFinite(c.timbreWeight) || c.timbreWeight < 0 || c.timbreWeight > 100) {
-      throw new Error(`celebritiesDB: ${c.name} has out-of-range timbreWeight ${c.timbreWeight}`);
-    }
+    assertAxis(c.name, "timbreWeight", c.timbreWeight);
+    assertAxis(c.name, "airiness", c.airiness);
+    assertAxis(c.name, "raspiness", c.raspiness);
   }
 }
 
@@ -257,78 +263,90 @@ export function classifyVocalFach(
 
 export type CelebrityMatch = {
   celebrity: CelebrityProfile;
-  /** |userWeight − celebrity.timbreWeight|, 0-100. Smaller = better match. */
-  weightDiff: number;
-  /** 0-100 display score, see `weightDiffToPercent`. */
+  /** Euclidean 3-D distance in the 0-100 cube. Smaller = better match. */
+  distance: number;
+  /** 0-100 display score, see `distanceToPercent`. */
   percent: number;
 };
 
 /**
- * Worst possible displayed similarity. Everyone in the returned list already
- * passed the STRICT gender+fach filter, i.e. they genuinely share the
- * student's tessitura, so even the tonally furthest member of that pool is a
- * real (if not ideal) match and shouldn't be shown as "0% similar".
+ * Maximum Euclidean distance in the 0-100 cube:
+ *   sqrt((100-0)^2 + (100-0)^2 + (100-0)^2) = sqrt(30000) ≈ 173.205
  */
-const MIN_MATCH_PERCENT = 40;
+export const MAX_3D_DISTANCE = Math.sqrt(3 * 100 * 100);
 
 /**
- * Timbre-weight distance → display percentage.
- *
- * Linear and strictly monotonic: `diff = 0 → 100%`, `diff = 100 → 40%`
- * (i.e. `percent = 100 − 0.6 × diff`). Chosen over the naive `100 − diff`
- * because the pool is already fach-filtered (see `MIN_MATCH_PERCENT`), and
- * over a steeper/exponential curve because a linear map keeps the displayed
- * number literally interpretable: 10 points of timbre-weight distance always
- * costs exactly 6 percentage points, anywhere on the scale. Fully
- * deterministic — no randomness anywhere in this module.
+ * 3-D Euclidean distance between two timbre vectors:
+ *   d = sqrt((uw-sw)^2 + (ua-sa)^2 + (ur-sr)^2)
  */
-function weightDiffToPercent(diff: number): number {
-  const clamped = Math.max(0, Math.min(100, diff));
-  return Math.round(MIN_MATCH_PERCENT + (100 - MIN_MATCH_PERCENT) * (1 - clamped / 100));
+export function euclideanDistance3D(user: TimbreVector, star: TimbreVector): number {
+  const dw = user.timbreWeight - star.timbreWeight;
+  const da = user.airiness - star.airiness;
+  const dr = user.raspiness - star.raspiness;
+  return Math.sqrt(dw * dw + da * da + dr * dr);
 }
 
 /**
- * The one and only matcher.
- *
- * 1. STRICT filter: only profiles whose `gender` AND `vocalFach` both exactly
- *    equal the student's selected gender / classified fach are ever
- *    considered. There is NO fallback to the unfiltered pool — a bass is
- *    physically incapable of being matched to a tenor here, by construction.
- * 2. Ranking inside that pool is by absolute timbre-weight distance, ascending
- *    (ties broken by `id` so the order is stable and reproducible).
- *
- * Returns the whole filtered pool ranked; the caller slices/groups it (see
- * `groupMatchesByGenre`).
+ * Distance → display percentage. Linear, strictly monotonic:
+ *   percent = round(100 × (1 − clamp(d, 0, dMax) / dMax))
+ * so d = 0 → 100%, d = dMax ≈ 173.2 → 0%. Fully deterministic.
  */
-export function matchCelebrities(
+export function distanceToPercent(distance: number): number {
+  const clamped = Math.max(0, Math.min(MAX_3D_DISTANCE, distance));
+  return Math.round(100 * (1 - clamped / MAX_3D_DISTANCE));
+}
+
+/** STRICT filter: only profiles whose gender AND vocalFach both match. */
+export function filterCelebrities(
   gender: CelebrityGender,
-  fach: VocalFach,
-  userWeight: number
+  fach: VocalFach
+): CelebrityProfile[] {
+  return CELEBRITIES_DB.filter((c) => c.gender === gender && c.vocalFach === fach);
+}
+
+/**
+ * Rank an already-filtered pool by 3-D Euclidean distance, ascending
+ * (ties broken by `id` so the order is stable and reproducible).
+ */
+export function rankCelebrities(
+  pool: CelebrityProfile[],
+  user: TimbreVector
 ): CelebrityMatch[] {
-  return CELEBRITIES_DB.filter((c) => c.gender === gender && c.vocalFach === fach)
+  return pool
     .map((celebrity) => {
-      const weightDiff = Math.abs(userWeight - celebrity.timbreWeight);
-      return { celebrity, weightDiff, percent: weightDiffToPercent(weightDiff) };
+      const distance = euclideanDistance3D(user, celebrity);
+      return { celebrity, distance, percent: distanceToPercent(distance) };
     })
     .sort((a, b) =>
-      a.weightDiff === b.weightDiff
+      a.distance === b.distance
         ? a.celebrity.id.localeCompare(b.celebrity.id)
-        : a.weightDiff - b.weightDiff
+        : a.distance - b.distance
     );
 }
 
 /**
+ * The one and only matcher: STRICT (gender × vocalFach) filter, then 3-D
+ * Euclidean rank. No fallback pool — a bass cannot surface a tenor.
+ */
+export function matchCelebrities(
+  gender: CelebrityGender,
+  fach: VocalFach,
+  user: TimbreVector
+): CelebrityMatch[] {
+  return rankCelebrities(filterCelebrities(gender, fach), user);
+}
+
+/**
  * Groups an already filtered + ranked match list by `celebrity.genre`, keeping
- * only the top `perGenreLimit` (default 5) per genre. Input order is assumed
- * ascending by `weightDiff` (as returned by `matchCelebrities`), so grouping
- * preserves rank order. Buckets with fewer than the limit are simply shorter —
- * never padded, never topped up from outside the filtered pool.
+ * only the top `perGenreLimit` (default 5) per genre. If a genre has fewer
+ * than the limit, the bucket is simply shorter — never padded, never topped
+ * up from outside the filtered pool. Empty genres are omitted.
  */
 export function groupMatchesByGenre(
   matches: CelebrityMatch[],
   perGenreLimit = 5
-): Partial<Record<CelebrityGenre, CelebrityMatch[]>> {
-  const groups: Partial<Record<CelebrityGenre, CelebrityMatch[]>> = {};
+): Partial<Record<Genre, CelebrityMatch[]>> {
+  const groups: Partial<Record<Genre, CelebrityMatch[]>> = {};
   for (const match of matches) {
     const genre = match.celebrity.genre;
     const bucket = groups[genre] ?? (groups[genre] = []);
@@ -336,3 +354,6 @@ export function groupMatchesByGenre(
   }
   return groups;
 }
+
+/** Alias of `groupMatchesByGenre` — top-N per genre (5 if enough, else all). */
+export const topMatchesPerGenre = groupMatchesByGenre;
