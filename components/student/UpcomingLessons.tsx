@@ -6,7 +6,6 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/context/AuthContext";
-import { getChatSessionToken } from "@/lib/chat-media";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
 
@@ -95,34 +94,25 @@ export default function UpcomingLessons() {
     setRequestingId(rescheduleLesson.id);
     setError("");
 
-    const preferredDatetime =
-      preferredDate && preferredTime
-        ? new Date(`${preferredDate}T${preferredTime}`).toISOString()
-        : null;
+    let preferredDatetime: string | null = null;
+    if (preferredDate && preferredTime) {
+      const preferred = new Date(`${preferredDate}T${preferredTime}`);
+      if (!Number.isNaN(preferred.getTime())) {
+        preferredDatetime = preferred.toISOString();
+      }
+    }
+    const studentNote = note.trim().slice(0, 200) || null;
 
     try {
-      const token = await getChatSessionToken();
-      if (!token) {
-        setError("Сессия истекла. Войдите снова.");
-        setRequestingId(null);
-        return;
-      }
-
-      const response = await fetch("/api/lessons/reschedule-request", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          lessonId: rescheduleLesson.id,
-          preferredDatetime,
-          note,
-        }),
+      const { error: rpcError } = await supabase.rpc("request_lesson_reschedule", {
+        lesson_id: rescheduleLesson.id,
+        preferred_at: preferredDatetime,
+        student_note: studentNote,
       });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        setError(result.error ?? "Не удалось отправить запрос");
+
+      if (rpcError) {
+        setError("Не удалось отправить запрос");
+        console.error("Unable to request reschedule:", rpcError.message);
         setRequestingId(null);
         return;
       }
@@ -130,7 +120,12 @@ export default function UpcomingLessons() {
       setLessons((current) =>
         current.map((lesson) =>
           lesson.id === rescheduleLesson.id
-            ? { ...lesson, reschedule_request: "pending" }
+            ? {
+                ...lesson,
+                reschedule_request: "pending",
+                preferred_reschedule_at: preferredDatetime,
+                reschedule_note: studentNote,
+              }
             : lesson
         )
       );

@@ -43,6 +43,12 @@ update public.lessons
 set status = 'open'
 where student_id is null and status = 'scheduled';
 
+alter table public.lessons
+  add column if not exists series_id uuid,
+  add column if not exists is_recurring boolean not null default false,
+  add column if not exists preferred_reschedule_at timestamptz,
+  add column if not exists reschedule_note text;
+
 create table if not exists public.exercises (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -303,7 +309,9 @@ begin
 
   update public.lessons
   set datetime = case when approve then new_datetime else datetime end,
-      reschedule_request = case when approve then 'none' else 'rejected' end
+      reschedule_request = case when approve then 'none' else 'rejected' end,
+      preferred_reschedule_at = null,
+      reschedule_note = null
   where id = lesson_id
     and reschedule_request = 'pending'
   returning student_id into target_student_id;
@@ -532,31 +540,101 @@ begin
 end
 $$;
 
-create or replace function public.request_lesson_reschedule(lesson_id uuid)
+drop function if exists public.request_lesson_reschedule(uuid);
+drop function if exists public.request_lesson_reschedule(uuid, timestamptz);
+drop function if exists public.request_lesson_reschedule(uuid, timestamptz, text);
+
+create or replace function public.request_lesson_reschedule(
+  lesson_id uuid,
+  preferred_at timestamptz default null,
+  student_note text default null
+)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  current_when timestamptz;
+  student_name text;
+  notify_message text;
+  note_clean text;
+  preferred_text text;
 begin
+  note_clean := nullif(left(trim(coalesce(student_note, '')), 200), '');
+
   update public.lessons
-  set reschedule_request = 'pending'
+  set
+    reschedule_request = 'pending',
+    preferred_reschedule_at = preferred_at,
+    reschedule_note = note_clean
   where id = lesson_id
     and student_id = auth.uid()
     and status = 'scheduled'
-    and reschedule_request in ('none', 'rejected');
+    and reschedule_request in ('none', 'rejected')
+  returning datetime into current_when;
 
   if not found then
     raise exception 'Lesson is not available for a reschedule request';
   end if;
 
-  insert into public.notifications (recipient_role, message)
-  values ('admin', 'Ученик запросил перенос урока');
+  select coalesce(
+    nullif(trim(full_name), ''),
+    nullif(trim(email), ''),
+    'Ученик'
+  )
+  into student_name
+  from public.profiles
+  where id = auth.uid();
+
+  student_name := coalesce(student_name, 'Ученик');
+  notify_message :=
+    student_name
+    || ' запросил(а) перенос урока. Сейчас: '
+    || to_char(current_when at time zone 'Europe/Moscow', 'DD.MM.YYYY HH24:MI');
+
+  if preferred_at is not null then
+    preferred_text := to_char(preferred_at at time zone 'Europe/Moscow', 'DD.MM.YYYY HH24:MI');
+    notify_message := notify_message || '. Желаемое время: ' || preferred_text;
+  end if;
+
+  if note_clean is not null then
+    notify_message := notify_message || '. Комментарий: ' || note_clean;
+  end if;
+
+  insert into public.notifications (
+    recipient_id, recipient_role, title, message, kind, action_url, email_fallback_at
+  )
+  select
+    p.id,
+    'admin',
+    'Запрос переноса урока',
+    notify_message,
+    'lesson',
+    '/dashboard/admin?tab=schedule',
+    now() + interval '5 minutes'
+  from public.profiles p
+  where p.role = 'admin';
+
+  if not found then
+    insert into public.notifications (
+      recipient_id, recipient_role, title, message, kind, action_url, email_fallback_at
+    )
+    values (
+      null,
+      'admin',
+      'Запрос переноса урока',
+      notify_message,
+      'lesson',
+      '/dashboard/admin?tab=schedule',
+      now() + interval '5 minutes'
+    );
+  end if;
 end;
 $$;
 
-revoke all on function public.request_lesson_reschedule(uuid) from public;
-grant execute on function public.request_lesson_reschedule(uuid) to authenticated;
+revoke all on function public.request_lesson_reschedule(uuid, timestamptz, text) from public;
+grant execute on function public.request_lesson_reschedule(uuid, timestamptz, text) to authenticated;
 
 create or replace function public.complete_lesson(lesson_id uuid)
 returns void

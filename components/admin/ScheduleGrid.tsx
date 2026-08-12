@@ -107,6 +107,22 @@ function ScheduleCard({
       {lesson.reschedule_request === "pending" && (
         <div className="mt-3 rounded-xl bg-studio-gold/10 p-3 ring-1 ring-studio-gold/20">
           <p className="text-xs text-studio-gold">Запрошен перенос урока</p>
+          {lesson.preferred_reschedule_at ? (
+            <p className="mt-1 text-xs text-studio-muted">
+              Желаемое время:{" "}
+              {new Date(lesson.preferred_reschedule_at).toLocaleString("ru-RU", {
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          ) : null}
+          {lesson.reschedule_note ? (
+            <p className="mt-1 text-xs text-studio-muted">
+              Комментарий: {lesson.reschedule_note}
+            </p>
+          ) : null}
           <div className="mt-2 flex gap-2">
             <button
               type="button"
@@ -415,7 +431,13 @@ export default function ScheduleGrid() {
   };
 
   const openReschedule = (lesson: Lesson) => {
-    const current = new Date(lesson.datetime);
+    const preferred = lesson.preferred_reschedule_at
+      ? new Date(lesson.preferred_reschedule_at)
+      : null;
+    const current =
+      preferred && !Number.isNaN(preferred.getTime())
+        ? preferred
+        : new Date(lesson.datetime);
     setRescheduleLesson(lesson);
     setRescheduleDate(localDateKey(current));
     setRescheduleTime(
@@ -441,6 +463,8 @@ export default function ScheduleGrid() {
                 ...lesson,
                 datetime: newDatetime ?? lesson.datetime,
                 reschedule_request: approve ? "approved" : "rejected",
+                preferred_reschedule_at: null,
+                reschedule_note: null,
               }
             : lesson
         )
@@ -774,6 +798,11 @@ export default function ScheduleGrid() {
         size="sm"
       >
         <div className="space-y-4">
+          {rescheduleLesson?.reschedule_note ? (
+            <p className="rounded-xl bg-studio-surface px-3 py-2 text-xs text-studio-muted ring-1 ring-studio-border">
+              Комментарий ученика: {rescheduleLesson.reschedule_note}
+            </p>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <label>
               <span className="mb-1.5 block text-xs text-studio-muted">

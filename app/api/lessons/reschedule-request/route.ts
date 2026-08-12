@@ -6,8 +6,8 @@ import { getRequestUser } from "@/lib/server-auth";
 export const runtime = "nodejs";
 
 /**
- * Student requests a lesson reschedule.
- * Creates admin notification + immediate web push.
+ * Leftover for `next dev` only. GitHub Pages static export has no API routes.
+ * Production student UI calls `request_lesson_reschedule` via the Supabase client.
  */
 export async function POST(request: NextRequest) {
   try {

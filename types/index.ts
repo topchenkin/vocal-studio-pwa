@@ -40,6 +40,7 @@ export interface Lesson {
   series_id?: string | null;
   is_recurring?: boolean;
   preferred_reschedule_at?: string | null;
+  reschedule_note?: string | null;
 }
 
 export interface Exercise {
@@ -242,6 +243,7 @@ export interface Database {
           series_id?: string | null;
           is_recurring?: boolean;
           preferred_reschedule_at?: string | null;
+          reschedule_note?: string | null;
         };
         Update: Partial<Omit<Lesson, "id">>;
         Relationships: [];
@@ -496,7 +498,11 @@ export interface Database {
     Views: Record<string, never>;
     Functions: {
       request_lesson_reschedule: {
-        Args: { lesson_id: string };
+        Args: {
+          lesson_id: string;
+          preferred_at?: string | null;
+          student_note?: string | null;
+        };
         Returns: undefined;
       };
       complete_lesson: {
