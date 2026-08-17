@@ -1,6 +1,6 @@
 /**
- * Static export (GitHub Pages) cannot include Route Handlers or middleware.
- * Stash them for the duration of `next build`, then restore.
+ * Static export (Timeweb / GitHub Pages CI) cannot include Route Handlers
+ * or middleware. Stash them for the duration of `next build`, then restore.
  */
 import { access, cp, mkdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";

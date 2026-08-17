@@ -17,6 +17,7 @@ import Logo from "@/components/Logo";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { mapBackendError } from "@/lib/supabase-errors";
 import { ADMIN_EMAIL } from "@/lib/admin";
 
 export default function AdminLoginPage() {
@@ -103,26 +104,35 @@ export default function AdminLoginPage() {
     setMessage("");
 
     const redirectTo = `${window.location.origin}/admin/setup`;
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: ADMIN_EMAIL,
-      options: {
-        emailRedirectTo: redirectTo,
-        shouldCreateUser: true,
-      },
-    });
+    try {
+      const { error: otpError } = await supabase.auth.signInWithOtp({
+        email: ADMIN_EMAIL,
+        options: {
+          emailRedirectTo: redirectTo,
+          shouldCreateUser: true,
+        },
+      });
 
-    setSendingLink(false);
+      setSendingLink(false);
 
-    if (otpError) {
-      const rateLimited = otpError.message
-        .toLowerCase()
-        .includes("rate limit");
-      setError(
-        rateLimited
-          ? "Лимит отправки писем Supabase исчерпан. Используйте последнее полученное письмо или повторите запрос позже."
-          : `Не удалось отправить ссылку: ${otpError.message}`
-      );
-      if (rateLimited) setCooldown(60);
+      if (otpError) {
+        const rateLimited = otpError.message
+          .toLowerCase()
+          .includes("rate limit");
+        setError(
+          rateLimited
+            ? "Лимит отправки писем Supabase исчерпан. Используйте последнее полученное письмо или повторите запрос позже."
+            : mapBackendError(
+                otpError,
+                `Не удалось отправить ссылку: ${otpError.message}`
+              )
+        );
+        if (rateLimited) setCooldown(60);
+        return;
+      }
+    } catch (otpThrown) {
+      setSendingLink(false);
+      setError(mapBackendError(otpThrown));
       return;
     }
 

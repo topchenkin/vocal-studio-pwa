@@ -32,6 +32,7 @@ export default function StudentDashboardClient() {
     profileError,
     refreshProfile,
     loading,
+    backendError,
   } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -91,11 +92,12 @@ export default function StudentDashboardClient() {
         <StudentNav />
         <div className="rounded-2xl bg-red-500/10 p-5 ring-1 ring-red-500/30">
           <p className="font-medium text-red-300">
-            {profileError ?? "Профиль ученика отсутствует"}
+            {backendError ?? profileError ?? "Профиль ученика отсутствует"}
           </p>
           <p className="mt-2 text-sm text-studio-muted">
-            После выполнения обновлённого supabase-schema.sql профиль будет
-            создан автоматически из auth.users.
+            {backendError
+              ? "Кабинет не может загрузиться, пока браузер не достучится до supabase.co."
+              : "После выполнения обновлённого supabase-schema.sql профиль будет создан автоматически из auth.users."}
           </p>
           <button
             type="button"

@@ -60,6 +60,9 @@ const DAY = 24 * 60 * 60;
 /**
  * Static hashed assets are CacheFirst (Timeweb IP is stable). HTML stays
  * NetworkFirst with a short timeout so updates appear without hanging.
+ * Default next-pwa rules also cache Google Fonts and ALL cross-origin
+ * traffic (including supabase.co) — that makes a blocked API look like a
+ * hung PWA. Same-origin only; never cache the API.
  */
 const withPWA = withPWAInit({
   dest: "public",
@@ -71,13 +74,20 @@ const withPWA = withPWAInit({
   fallbacks: {
     document: "/offline",
   },
-  extendDefaultRuntimeCaching: true,
+  extendDefaultRuntimeCaching: false,
   workboxOptions: {
+    cacheId: "uvs-timeweb",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
     navigateFallbackDenylist: [/^\/api\//],
-    exclude: [/\.map$/, /^manifest.*\.js$/, /static\/chunks\//, /static\/css\//],
+    exclude: [
+      /\.map$/,
+      /^manifest.*\.js$/,
+      /static\/chunks\//,
+      /static\/css\//,
+      /^CNAME$/,
+    ],
     runtimeCaching: [
       {
         urlPattern: /\/_next\/static.+\.(js|css)$/i,
@@ -112,7 +122,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc-prefetch",
-          networkTimeoutSeconds: 2,
+          networkTimeoutSeconds: 4,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -124,7 +134,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc",
-          networkTimeoutSeconds: 2,
+          networkTimeoutSeconds: 4,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -134,7 +144,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
-          networkTimeoutSeconds: 2,
+          networkTimeoutSeconds: 4,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },

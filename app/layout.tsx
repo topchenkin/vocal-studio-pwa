@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+/** next/font downloads at build time and ships woff2 from /_next/static/media — no Google Fonts at runtime. */
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import AppProviders from "@/components/providers/AppProviders";
 import InstallPrompt from "@/components/pwa/InstallPrompt";

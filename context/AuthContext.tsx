@@ -10,6 +10,12 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import {
+  mapBackendError,
+  isLikelyUnreachableBackend,
+  withTimeout,
+  SUPABASE_UNREACHABLE_RU,
+} from "@/lib/supabase-errors";
 import type {
   AppSubscriptionTier,
   StudentProfile,
@@ -22,6 +28,7 @@ interface AuthContextValue {
   user: User | null;
   profile: StudentProfile | null;
   profileError: string | null;
+  backendError: string | null;
   role: UserRole;
   tier: AppSubscriptionTier;
   loading: boolean;
@@ -40,6 +47,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const MOCK_ADMIN_KEY = "uvs_mock_admin";
+const AUTH_BOOT_MS = 8_000;
+const PROFILE_MS = 12_000;
 
 const mockAdminProfile: StudentProfile = {
   id: "mock-admin",
@@ -66,19 +75,31 @@ const mockAdminUser = {
   created_at: new Date(0).toISOString(),
 } as User;
 
-async function fetchProfile(userId: string): Promise<StudentProfile | null> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .maybeSingle();
+async function fetchProfile(
+  userId: string
+): Promise<{ profile: StudentProfile | null; unreachable: boolean }> {
+  try {
+    const { data, error } = await withTimeout(
+      supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      PROFILE_MS
+    );
 
-  if (error) {
-    console.error("Unable to load profile:", error.message);
-    return null;
+    if (error) {
+      if (isLikelyUnreachableBackend(error)) {
+        return { profile: null, unreachable: true };
+      }
+      console.error("Unable to load profile:", error.message);
+      return { profile: null, unreachable: false };
+    }
+
+    return { profile: data, unreachable: false };
+  } catch (error) {
+    if (isLikelyUnreachableBackend(error)) {
+      return { profile: null, unreachable: true };
+    }
+    console.error("Unable to load profile:", error);
+    return { profile: null, unreachable: false };
   }
-
-  return data;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -86,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [isMockAdmin, setIsMockAdmin] = useState(false);
 
   const loadProfile = useCallback(async (authUser: User | null) => {
@@ -95,8 +117,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const loadedProfile = await fetchProfile(authUser.id);
+    const { profile: loadedProfile, unreachable } = await fetchProfile(
+      authUser.id
+    );
     setProfile(loadedProfile);
+    if (unreachable) {
+      setBackendError(SUPABASE_UNREACHABLE_RU);
+      setProfileError(SUPABASE_UNREACHABLE_RU);
+      return;
+    }
+    setBackendError(null);
     setProfileError(
       loadedProfile
         ? null
@@ -119,12 +149,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!mounted) return;
-      setUser(session?.user ?? null);
-      await loadProfile(session?.user ?? null);
-      if (mounted) setLoading(false);
-    });
+    withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS)
+      .then(async ({ data: { session } }) => {
+        if (!mounted) return;
+        setUser(session?.user ?? null);
+        await loadProfile(session?.user ?? null);
+        if (mounted) {
+          if (!session) setBackendError(null);
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        setUser(null);
+        setProfile(null);
+        setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
+        setLoading(false);
+      });
 
     const {
       data: { subscription },
@@ -189,40 +230,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = useCallback(
     async (email: string, password: string, fullName: string): Promise<AuthResult> => {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { full_name: fullName },
-        },
-      });
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: fullName },
+          },
+        });
 
-      if (error) return { error: error.message };
+        if (error) return { error: mapBackendError(error) };
 
-      if (data.session && data.user) {
-        await loadProfile(data.user);
+        if (data.session && data.user) {
+          await loadProfile(data.user);
+        }
+
+        setBackendError(null);
+        return {
+          error: null,
+          needsEmailConfirmation: !data.session,
+        };
+      } catch (error) {
+        const message = mapBackendError(error);
+        setBackendError(message);
+        return { error: message };
       }
-
-      return {
-        error: null,
-        needsEmailConfirmation: !data.session,
-      };
     },
     [loadProfile]
   );
 
   const signIn = useCallback(
     async (email: string, password: string): Promise<AuthResult> => {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-      if (error) return { error: error.message };
+        if (error) return { error: mapBackendError(error) };
 
-      setUser(data.user);
-      await loadProfile(data.user);
-      return { error: null };
+        setUser(data.user);
+        await loadProfile(data.user);
+        setBackendError(null);
+        return { error: null };
+      } catch (error) {
+        const message = mapBackendError(error);
+        setBackendError(message);
+        return { error: message };
+      }
     },
     [loadProfile]
   );
@@ -234,6 +289,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setProfile(null);
     setProfileError(null);
+    setBackendError(null);
   }, []);
 
   const enableMockAdmin = useCallback(() => {
@@ -242,12 +298,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(mockAdminUser);
     setProfile(mockAdminProfile);
     setProfileError(null);
+    setBackendError(null);
     setIsMockAdmin(true);
     setLoading(false);
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    await loadProfile(user);
+    try {
+      if (!user) {
+        const {
+          data: { session },
+        } = await withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS);
+        setUser(session?.user ?? null);
+        await loadProfile(session?.user ?? null);
+        setBackendError(null);
+        return;
+      }
+      await loadProfile(user);
+    } catch (error) {
+      setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
+    }
   }, [loadProfile, user]);
 
   const role: UserRole = profile?.role ?? (user ? "student" : "guest");
@@ -258,6 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       profile,
       profileError,
+      backendError,
       role,
       tier,
       loading,
@@ -277,6 +348,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       profile,
       profileError,
+      backendError,
       role,
       tier,
       loading,

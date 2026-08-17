@@ -1,5 +1,7 @@
 name: Deploy to GitHub Pages
 
+# Production is Timeweb. Do not set Pages custom domain to uniquevocal.ru —
+# leftover www CNAME to github.io is what broke RF access without a VPN.
 on:
   push:
   workflow_dispatch:
@@ -36,6 +38,9 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+
+      - name: Strip GitHub Pages CNAME
+        run: rm -f out/CNAME public/CNAME
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

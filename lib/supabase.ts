@@ -3,6 +3,7 @@ import type { Database } from "@/types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const FETCH_TIMEOUT_MS = 12_000;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   // Dev still fails fast. Production/Timeweb builds must finish so the
@@ -17,6 +18,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  init?.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+    init?.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 export const supabase = createClient<Database>(
   supabaseUrl || "https://placeholder.supabase.co",
   supabaseAnonKey || "public-anon-placeholder",
@@ -25,6 +42,9 @@ export const supabase = createClient<Database>(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+    },
+    global: {
+      fetch: fetchWithTimeout,
     },
   }
 );

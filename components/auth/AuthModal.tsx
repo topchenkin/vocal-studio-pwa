@@ -19,7 +19,7 @@ export default function AuthModal({
   initialMode,
   onClose,
 }: AuthModalProps) {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, backendError } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -147,6 +147,9 @@ export default function AuthModal({
         </label>
 
         {error && <p className="text-sm text-red-400">{error}</p>}
+        {!error && backendError && (
+          <p className="text-sm text-red-400">{backendError}</p>
+        )}
         {message && <p className="text-sm text-emerald-400">{message}</p>}
 
         <Button type="submit" size="lg" fullWidth disabled={submitting}>
