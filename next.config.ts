@@ -1,16 +1,79 @@
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
 
+const DAY = 24 * 60 * 60;
+
+/**
+ * GitHub Pages anycast (185.199.108–111.153) is flaky from some RU ISPs:
+ * a TCP connect to 3 of 4 IPs times out. Default next-pwa NetworkFirst
+ * waits out that hang, then paints /offline (or Response.error() for JS).
+ * Fail-open: skipWaiting, do not reload on blips, time out to last-good
+ * cache in a few seconds, and do not precache every hashed chunk (install
+ * must not depend on fetching 50 files across a dying IP).
+ */
 const withPWA = withPWAInit({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
   register: true,
+  cacheOnFrontEndNav: false,
+  reloadOnOnline: false,
+  cacheStartUrl: true,
   fallbacks: {
     document: "/offline",
   },
+  extendDefaultRuntimeCaching: true,
   workboxOptions: {
-    // Never cache AI analyze POSTs / audio analysis responses
+    skipWaiting: true,
+    clientsClaim: true,
+    cleanupOutdatedCaches: true,
     navigateFallbackDenylist: [/^\/api\//],
+    exclude: [/\.map$/, /^manifest.*\.js$/, /static\/chunks\//, /static\/css\//],
+    runtimeCaching: [
+      {
+        urlPattern: /\/_next\/static.+\.js$/i,
+        handler: "NetworkFirst",
+        options: {
+          cacheName: "next-static-js-assets",
+          networkTimeoutSeconds: 4,
+          expiration: { maxEntries: 64, maxAgeSeconds: DAY },
+        },
+      },
+      {
+        urlPattern: ({ request, url: { pathname }, sameOrigin }) =>
+          request.headers.get("RSC") === "1" &&
+          request.headers.get("Next-Router-Prefetch") === "1" &&
+          sameOrigin &&
+          !pathname.startsWith("/api/"),
+        handler: "NetworkFirst",
+        options: {
+          cacheName: "pages-rsc-prefetch",
+          networkTimeoutSeconds: 4,
+          expiration: { maxEntries: 32, maxAgeSeconds: DAY },
+        },
+      },
+      {
+        urlPattern: ({ request, url: { pathname }, sameOrigin }) =>
+          request.headers.get("RSC") === "1" &&
+          sameOrigin &&
+          !pathname.startsWith("/api/"),
+        handler: "NetworkFirst",
+        options: {
+          cacheName: "pages-rsc",
+          networkTimeoutSeconds: 4,
+          expiration: { maxEntries: 32, maxAgeSeconds: DAY },
+        },
+      },
+      {
+        urlPattern: ({ url: { pathname }, sameOrigin }) =>
+          sameOrigin && !pathname.startsWith("/api/"),
+        handler: "NetworkFirst",
+        options: {
+          cacheName: "pages",
+          networkTimeoutSeconds: 4,
+          expiration: { maxEntries: 32, maxAgeSeconds: DAY },
+        },
+      },
+    ],
   },
 });
 
