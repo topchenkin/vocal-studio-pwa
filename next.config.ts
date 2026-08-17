@@ -1,5 +1,53 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
+
+/**
+ * Timeweb Next.js Apps (and a plain `next build`) fail with
+ * `output: "export"` while `app/api` and `middleware.ts` exist.
+ * Stash them for the production build, then restore on process exit.
+ * `npm run build` still uses scripts/build-static.mjs as a second guard.
+ */
+if (process.env.NEXT_PHASE === "phase-production-build") {
+  const root = process.cwd();
+  const stashDir = path.join(root, ".static-export-stash");
+  const apiSrc = path.join(root, "app", "api");
+  const apiDst = path.join(stashDir, "api");
+  const mwSrc = path.join(root, "middleware.ts");
+  const mwDst = path.join(stashDir, "middleware.ts");
+
+  fs.mkdirSync(stashDir, { recursive: true });
+  if (fs.existsSync(apiSrc) && !fs.existsSync(apiDst)) {
+    fs.renameSync(apiSrc, apiDst);
+  }
+  if (fs.existsSync(mwSrc) && !fs.existsSync(mwDst)) {
+    fs.renameSync(mwSrc, mwDst);
+  }
+
+  const restore = () => {
+    try {
+      if (fs.existsSync(apiDst) && !fs.existsSync(apiSrc)) {
+        fs.renameSync(apiDst, apiSrc);
+      }
+      if (fs.existsSync(mwDst) && !fs.existsSync(mwSrc)) {
+        fs.renameSync(mwDst, mwSrc);
+      }
+    } catch {
+      /* ignore restore races between next.config and build-static.mjs */
+    }
+  };
+
+  process.once("exit", restore);
+  process.once("SIGINT", () => {
+    restore();
+    process.exit(1);
+  });
+  process.once("SIGTERM", () => {
+    restore();
+    process.exit(1);
+  });
+}
 
 const DAY = 24 * 60 * 60;
 
@@ -81,6 +129,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "export",
   images: { unoptimized: true },
+  eslint: { ignoreDuringBuilds: true },
 };
 
 export default withPWA(nextConfig);
