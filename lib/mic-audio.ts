@@ -53,7 +53,7 @@ export function connectAnalyserToDestination(
 
 export function readAnalyserTimeDomain(
   analyser: AnalyserNode,
-  floatBuf: Float32Array
+  floatBuf: Float32Array<ArrayBuffer>
 ): void {
   analyser.getFloatTimeDomainData(floatBuf);
   let peak = 0;
