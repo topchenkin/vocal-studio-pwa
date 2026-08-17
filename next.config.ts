@@ -58,12 +58,8 @@ if (process.env.NEXT_PHASE === "phase-production-build") {
 const DAY = 24 * 60 * 60;
 
 /**
- * GitHub Pages anycast (185.199.108–111.153) is flaky from some RU ISPs:
- * a TCP connect to 3 of 4 IPs times out. Default next-pwa NetworkFirst
- * waits out that hang, then paints /offline (or Response.error() for JS).
- * Fail-open: skipWaiting, do not reload on blips, time out to last-good
- * cache in a few seconds, and do not precache every hashed chunk (install
- * must not depend on fetching 50 files across a dying IP).
+ * Static hashed assets are CacheFirst (Timeweb IP is stable). HTML stays
+ * NetworkFirst with a short timeout so updates appear without hanging.
  */
 const withPWA = withPWAInit({
   dest: "public",
@@ -84,12 +80,27 @@ const withPWA = withPWAInit({
     exclude: [/\.map$/, /^manifest.*\.js$/, /static\/chunks\//, /static\/css\//],
     runtimeCaching: [
       {
-        urlPattern: /\/_next\/static.+\.js$/i,
-        handler: "NetworkFirst",
+        urlPattern: /\/_next\/static.+\.(js|css)$/i,
+        handler: "CacheFirst",
         options: {
-          cacheName: "next-static-js-assets",
-          networkTimeoutSeconds: 4,
-          expiration: { maxEntries: 64, maxAgeSeconds: DAY },
+          cacheName: "next-static-assets",
+          expiration: { maxEntries: 64, maxAgeSeconds: DAY * 30 },
+        },
+      },
+      {
+        urlPattern: /\/_next\/static\/media.+\.woff2$/i,
+        handler: "CacheFirst",
+        options: {
+          cacheName: "next-static-fonts",
+          expiration: { maxEntries: 16, maxAgeSeconds: DAY * 30 },
+        },
+      },
+      {
+        urlPattern: /\/icons\/.+\.png$/i,
+        handler: "CacheFirst",
+        options: {
+          cacheName: "app-icons",
+          expiration: { maxEntries: 16, maxAgeSeconds: DAY * 30 },
         },
       },
       {
@@ -101,7 +112,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc-prefetch",
-          networkTimeoutSeconds: 4,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -113,7 +124,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc",
-          networkTimeoutSeconds: 4,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -123,7 +134,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
-          networkTimeoutSeconds: 4,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
