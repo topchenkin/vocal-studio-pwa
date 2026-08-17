@@ -22,7 +22,6 @@ import { getChatSessionToken } from "@/lib/chat-media";
 import {
   describeNote,
   frequencyFromMidi,
-  hzToleranceForMidi,
   midiFromNoteLabel,
   pickPracticeNote,
   PRACTICE_NOTES,
@@ -194,9 +193,6 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   }, [cents, zone]);
 
   const liveTargetHz = frequencyFromMidi(midiFromNoteLabel(targetNote));
-  const liveHzTolerance = Math.round(
-    hzToleranceForMidi(midiFromNoteLabel(targetNote), IN_TUNE_CENTS)
-  );
   const mentor = report
     ? mentorFeedback(report.overallScore, profile?.cat_level)
     : "";
@@ -218,7 +214,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             <Lock className="h-7 w-7 text-amber-300" />
           </div>
           <h2 className="mt-4 font-display text-2xl font-semibold">
-            ИИ-тюнер нот
+            Нейроанализ голоса
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу, заданному администратором.
@@ -240,12 +236,9 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           <Mic className="h-5 w-5 text-studio-accent" />
         </div>
         <div>
-          <h2 className="font-display text-2xl font-semibold">ИИ-тюнер нот</h2>
-          <p className="mt-1 text-sm text-studio-muted">
-            Живой тюнер для учеников: допуск ~±{IN_TUNE_CENTS}¢
-            (около ±10–15 Гц в среднем регистре), нота не прыгает от каждого
-            микроколебания.
-          </p>
+          <h2 className="font-display text-2xl font-semibold">
+            Нейроанализ голоса
+          </h2>
         </div>
       </div>
 
@@ -308,10 +301,6 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
               style={{ left: `${needlePercent}%` }}
             />
           </div>
-          <p className="mt-3 text-center text-xs text-studio-muted">
-            Зелёная зона для учеников: ±{IN_TUNE_CENTS}¢ ≈ ±{liveHzTolerance} Гц
-            на {targetNote}
-          </p>
         </div>
       </div>
 
@@ -343,8 +332,10 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              10 секунд: целевая нота или гамма. Зелёная зона теста ±{TEST_IN_TUNE_CENTS}¢
-              — строже живого тюнера, чистый проход реально даёт 90+.
+              10 секунд — и вы увидите, насколько чисто держите ноту или гамму.
+              Это не «просто попеть»: тест ставит оценку как на прослушивании
+              и показывает, где голос уходит. Хотите удивить себя — нажмите
+              старт.
             </p>
           </div>
         </div>

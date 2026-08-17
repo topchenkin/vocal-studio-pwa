@@ -3,25 +3,21 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Home,
-  StickyNote,
-  MessageCircle,
-} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import Tabs from "@/components/ui/Tabs";
 import SubscriptionStatus from "@/components/student/SubscriptionStatus";
 import UpcomingLessons from "@/components/student/UpcomingLessons";
 import NotesSection from "@/components/student/NotesSection";
 import StudentChatSection from "@/components/student/StudentChatSection";
+import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import StudentNav from "@/components/student/StudentNav";
 import { useAuth } from "@/context/AuthContext";
 
-const TABS = [
-  { id: "home", label: "Главная", icon: <Home className="h-4 w-4" /> },
-  { id: "notes", label: "Заметки", icon: <StickyNote className="h-4 w-4" /> },
-  { id: "chat", label: "Чат", icon: <MessageCircle className="h-4 w-4" /> },
-];
+const TABS = ["home", "notes", "chat", "lessons", "audio"] as const;
+type TabId = (typeof TABS)[number];
+
+function isTab(value: string | null): value is TabId {
+  return Boolean(value && TABS.includes(value as TabId));
+}
 
 export default function StudentDashboardClient() {
   const {
@@ -35,7 +31,7 @@ export default function StudentDashboardClient() {
   } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState("home");
+  const [activeTab, setActiveTab] = useState<TabId>("home");
 
   useEffect(() => {
     if (loading) return;
@@ -50,17 +46,12 @@ export default function StudentDashboardClient() {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (tab && TABS.some((t) => t.id === tab)) {
-      setActiveTab(tab);
+    if (isTab(tab)) {
+      setActiveTab(tab === "notes" ? "home" : tab);
+    } else {
+      setActiveTab("home");
     }
   }, [searchParams]);
-
-  const changeTab = (id: string) => {
-    setActiveTab(id);
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", id);
-    router.replace(`/dashboard/student?${params.toString()}`, { scroll: false });
-  };
 
   if (loading || !user || isAdmin) {
     return (
@@ -75,6 +66,7 @@ export default function StudentDashboardClient() {
       <DashboardLayout
         title="Профиль ученика"
         subtitle="Не удалось загрузить данные кабинета"
+        bottomInset
       >
         <StudentNav />
         <div className="rounded-2xl bg-red-500/10 p-5 ring-1 ring-red-500/30">
@@ -98,30 +90,30 @@ export default function StudentDashboardClient() {
   }
 
   const isChat = activeTab === "chat";
+  const firstName = String(
+    user.user_metadata?.full_name ?? user.email ?? "ученик"
+  ).split(" ")[0];
+
+  const title =
+    activeTab === "chat"
+      ? "Чат"
+      : activeTab === "lessons"
+        ? "Занятия"
+        : activeTab === "audio"
+          ? "Мои аудио"
+          : `Привет, ${firstName}!`;
+
+  const subtitle =
+    activeTab === "home" ? "Личный кабинет ученика" : undefined;
 
   return (
     <DashboardLayout
-      title={
-        isChat
-          ? "Чат"
-          : `Привет, ${String(
-              user.user_metadata?.full_name ?? user.email ?? "ученик"
-            ).split(" ")[0]}!`
-      }
-      subtitle={isChat ? undefined : "Личный кабинет ученика"}
+      title={title}
+      subtitle={subtitle}
       compact={isChat}
+      bottomInset
     >
       <StudentNav />
-      <div
-        className={
-          isChat
-            ? "sticky top-0 z-20 shrink-0 bg-studio-bg/95 pb-3 pt-1 backdrop-blur"
-            : ""
-        }
-      >
-        <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
-      </div>
-
       <AnimatePresence mode="wait">
         <motion.div
           key={activeTab}
@@ -134,10 +126,19 @@ export default function StudentDashboardClient() {
           {activeTab === "home" && (
             <div className="space-y-8">
               <SubscriptionStatus />
-              <UpcomingLessons />
+              <section>
+                <h3 className="font-display text-lg font-semibold">
+                  Домашние задания
+                </h3>
+                <p className="mb-3 text-xs text-studio-muted">
+                  Задания от преподавателя после урока
+                </p>
+                <NotesSection />
+              </section>
             </div>
           )}
-          {activeTab === "notes" && <NotesSection />}
+          {activeTab === "lessons" && <UpcomingLessons />}
+          {activeTab === "audio" && <MyAudioLibrary />}
           {activeTab === "chat" && <StudentChatSection />}
         </motion.div>
       </AnimatePresence>

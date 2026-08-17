@@ -1890,7 +1890,7 @@ with check (public.current_user_is_admin());
 
 insert into public.ai_tool_access (tool_id, min_tier, enabled, title)
 values
-  ('tuner', 'none', true, 'ИИ-Тюнер нот'),
+  ('tuner', 'none', true, 'Нейроанализ голоса'),
   ('remover', 'premium', true, 'Удаление вокала'),
   ('timbre', 'premium', true, 'Похожий тембр'),
   ('mixer', 'standard', true, 'Сведение дорожек')

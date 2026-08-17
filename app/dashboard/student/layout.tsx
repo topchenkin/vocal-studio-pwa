@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import StudentBottomNav from "@/components/student/StudentBottomNav";
 
 export default function StudentProtectedLayout({
   children,
@@ -26,5 +27,12 @@ export default function StudentProtectedLayout({
     );
   }
 
-  return children;
+  return (
+    <>
+      {children}
+      <Suspense fallback={null}>
+        <StudentBottomNav />
+      </Suspense>
+    </>
+  );
 }

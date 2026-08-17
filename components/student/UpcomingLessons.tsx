@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRightLeft, Calendar, CheckCircle2, Clock } from "lucide-react";
+import { ArrowRightLeft, Calendar, CheckCircle2, Clock, List } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import MonthCalendar, { localDateKey } from "@/components/calendar/MonthCalendar";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
@@ -19,6 +20,8 @@ export default function UpcomingLessons() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [note, setNote] = useState("");
+  const [view, setView] = useState<"list" | "calendar">("list");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const loadLessons = useCallback(async () => {
     if (!user) return;
@@ -138,26 +141,73 @@ export default function UpcomingLessons() {
 
   if (!user) return null;
 
+  const lessonDates = new Set(lessons.map((lesson) => localDateKey(lesson.datetime)));
+  const visibleLessons =
+    view === "calendar" && selectedDate
+      ? lessons.filter((lesson) => localDateKey(lesson.datetime) === selectedDate)
+      : lessons;
+
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="font-display text-lg font-semibold">Предстоящие уроки</h3>
-        <p className="text-xs text-studio-muted">
-          Запись делает преподаватель. Здесь можно запросить перенос.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-display text-lg font-semibold">Ближайшие занятия</h3>
+          <p className="text-xs text-studio-muted">
+            Запись делает преподаватель. Здесь можно запросить перенос.
+          </p>
+        </div>
+        <div className="flex shrink-0 rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
+          <button
+            type="button"
+            onClick={() => {
+              setView("list");
+              setSelectedDate(null);
+            }}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+              view === "list"
+                ? "bg-studio-accent/20 text-studio-accent-light"
+                : "text-studio-muted"
+            }`}
+          >
+            <List className="h-3.5 w-3.5" />
+            Список
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("calendar")}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+              view === "calendar"
+                ? "bg-studio-accent/20 text-studio-accent-light"
+                : "text-studio-muted"
+            }`}
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            Календарь
+          </button>
+        </div>
       </div>
+
+      {view === "calendar" && !loading && lessons.length > 0 && (
+        <MonthCalendar
+          availableDates={lessonDates}
+          selectedDate={selectedDate}
+          onSelect={setSelectedDate}
+        />
+      )}
 
       {loading ? (
         <div className="h-28 animate-pulse rounded-2xl bg-studio-surface ring-1 ring-studio-border" />
-      ) : lessons.length === 0 ? (
+      ) : visibleLessons.length === 0 ? (
         <div className="rounded-2xl bg-studio-surface p-6 text-center ring-1 ring-studio-border">
           <Calendar className="mx-auto h-8 w-8 text-studio-muted" />
           <p className="mt-2 text-sm text-studio-muted">
-            Нет запланированных уроков — преподаватель добавит их в расписание
+            {view === "calendar" && selectedDate
+              ? "В этот день занятий нет — выберите дату с точкой"
+              : "Нет запланированных уроков — преподаватель добавит их в расписание"}
           </p>
         </div>
       ) : (
-        lessons.map((lesson) => {
+        visibleLessons.map((lesson) => {
           const date = new Date(lesson.datetime);
           const requestPending = lesson.reschedule_request === "pending";
 

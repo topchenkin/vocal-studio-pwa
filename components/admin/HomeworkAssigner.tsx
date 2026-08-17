@@ -85,7 +85,7 @@ export default function HomeworkAssigner({
         <p className="font-medium">Домашнее задание по занятию</p>
         <p className="mt-1 text-xs text-studio-muted">
           Привяжите ДЗ к уроку из истории. Ученик получит Push и увидит задание
-          во вкладке «Заметки».
+          в разделе «Домашние задания».
         </p>
       </div>
 

@@ -11,7 +11,11 @@ const items = [
     label: "Упражнения",
     icon: BookOpen,
   },
-  { href: "/dashboard/student/ai-tools", label: "AI-вокал", icon: Sparkles },
+  {
+    href: "/dashboard/student/ai-tools",
+    label: "Нейросети Premium",
+    icon: Sparkles,
+  },
 ];
 
 export default function StudentNav() {

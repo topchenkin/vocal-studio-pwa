@@ -901,7 +901,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
           Сведение дорожек
         </h2>
         <p className="mt-2 text-sm text-studio-muted">
-          Мультитрек 1–10 дорожек доступен начиная с Standard (настраивается).
+          Сведите голос с минусовкой как в студии: несколько дорожек, запись
+          поверх трека и готовый микс в одно нажатие. Откройте доступ — и
+          первый дубль можно записать уже сегодня.
         </p>
       </section>
     );
@@ -920,20 +922,44 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Сведение дорожек
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Мини-редактор: запись, старт с метки на линейке, сдвиг/обрезка
-            клипов и сведение. Поставьте курсор — «Слушать» и запись пойдут
-            с этого времени.
+            Ваш голос + минусовка = готовый трек. Записывайте дубли поверх
+            музыки, собирайте подпевки и скачивайте сведение — как мини-студия
+            в телефоне.
           </p>
         </div>
       </div>
 
-      <div className="mt-4 flex items-start gap-2 rounded-2xl bg-studio-bg/70 px-3 py-2.5 text-xs text-studio-muted ring-1 ring-studio-border">
-        <Headphones className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-        <p>
-          Наушники обязательны. Линейка сверху — старт с выбранного времени
-          (прослушка и запись с punch-in). Клип: середина — сдвиг, края —
-          обрезка.
+      <div className="mt-4 space-y-2 rounded-2xl bg-studio-bg/70 px-3 py-3 text-sm text-studio-muted ring-1 ring-studio-border">
+        <p className="flex items-start gap-2 text-studio-text">
+          <Headphones className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+          <span className="font-medium">Как пользоваться</span>
         </p>
+        <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed sm:text-sm">
+          <li>Наденьте наушники — иначе микрофон поймает эхо колонок.</li>
+          <li>
+            Нажмите «Записать первую дорожку» или загрузите минусовку, если
+            она уже есть.
+          </li>
+          <li>
+            Линейка сверху — таймлайн. Поставьте курсор туда, откуда хотите
+            слушать или писать (punch-in).
+          </li>
+          <li>
+            «Слушать» воспроизводит с курсора. «Запись с прослушкой» пишет
+            новый слой, пока в наушниках играют остальные дорожки.
+          </li>
+          <li>
+            Клип на дорожке: потяните середину — сдвиг по времени, края —
+            обрезка начала и конца.
+          </li>
+          <li>
+            Добавьте до 10 дорожек: основной вокал, подпевки, гармонии.
+          </li>
+          <li>
+            «Свести» соберёт всё в один файл. Скачайте результат кнопкой
+            ниже.
+          </li>
+        </ol>
       </div>
 
       <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

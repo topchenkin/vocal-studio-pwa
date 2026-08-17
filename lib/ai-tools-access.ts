@@ -27,7 +27,7 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
   AiToolId,
   Pick<AiToolAccess, "min_tier" | "enabled" | "title">
 > = {
-  tuner: { min_tier: "none", enabled: true, title: "ИИ-Тюнер нот" },
+  tuner: { min_tier: "none", enabled: true, title: "Нейроанализ голоса" },
   remover: { min_tier: "premium", enabled: true, title: "Удаление вокала" },
   timbre: { min_tier: "premium", enabled: true, title: "Похожий тембр" },
   mixer: { min_tier: "standard", enabled: true, title: "Сведение дорожек" },

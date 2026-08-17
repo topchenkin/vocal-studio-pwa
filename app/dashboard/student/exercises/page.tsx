@@ -7,6 +7,7 @@ export default function StudentExercisesPage() {
     <DashboardLayout
       title="База упражнений"
       subtitle="Распевки и видео-уроки для ежедневной практики"
+      bottomInset
     >
       <StudentNav />
       <ExerciseLibrary />

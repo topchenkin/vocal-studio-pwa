@@ -10,17 +10,26 @@ export default function DashboardLayout({
   title,
   subtitle,
   compact,
+  bottomInset,
 }: {
   children: React.ReactNode;
   title: string;
   subtitle?: string;
   compact?: boolean;
+  bottomInset?: boolean;
 }) {
   return (
     <div
       className={cn(
         "relative",
-        compact ? "flex h-[100dvh] flex-col overflow-hidden" : "min-h-screen"
+        compact ? "flex flex-col overflow-hidden" : "min-h-screen",
+        compact && bottomInset
+          ? "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))]"
+          : compact
+            ? "h-[100dvh]"
+            : bottomInset
+              ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
+              : ""
       )}
     >
       <div className="pointer-events-none fixed inset-0 bg-hero-glow" aria-hidden />
