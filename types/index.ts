@@ -214,6 +214,7 @@ export interface PushSubscriptionRecord {
 export type StudentAudioSource = "remover_minus" | "remover_vocal" | "mixer";
 
 export interface StudentAudioTrack {
+  [key: string]: unknown;
   id: string;
   user_id: string;
   source: StudentAudioSource;
@@ -316,13 +317,13 @@ export interface Database {
           student_id: string;
           created_at?: string;
         };
-        Update: never;
+        Update: Record<string, never>;
         Relationships: [];
       };
       duo_subscriptions: {
         Row: DuoSubscription;
-        Insert: never;
-        Update: never;
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
         Relationships: [];
       };
       student_notes: {
@@ -351,7 +352,7 @@ export interface Database {
       };
       payment_transactions: {
         Row: PaymentTransaction;
-        Insert: never;
+        Insert: Record<string, never>;
         Update: Partial<
           Pick<PaymentTransaction, "status" | "external_id" | "confirmed_at">
         >;
@@ -366,7 +367,7 @@ export interface Database {
           exercise_id: string;
           folder_id: string;
         };
-        Update: never;
+        Update: Record<string, never>;
         Relationships: [];
       };
       exercise_student_access: {
@@ -431,7 +432,7 @@ export interface Database {
           student_id: string;
           created_at?: string;
         };
-        Update: never;
+        Update: Record<string, never>;
         Relationships: [];
       };
       group_chat_messages: {
@@ -521,11 +522,11 @@ export interface Database {
           size_bytes: number;
           created_at?: string;
         };
-        Update: never;
+        Update: Record<string, never>;
         Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: { [_ in never]: never };
     Functions: {
       request_lesson_reschedule: {
         Args: {
@@ -610,7 +611,7 @@ export interface Database {
         Returns: string;
       };
     };
-    Enums: Record<string, never>;
-    CompositeTypes: Record<string, never>;
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
   };
 }
