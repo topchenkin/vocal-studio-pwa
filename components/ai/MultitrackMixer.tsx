@@ -23,6 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import {
   decodeBlobToAudioBuffer,
   mixAudioBuffersWithOffsets,
@@ -1218,16 +1219,28 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
       {mixUrl && (
         <div className="mt-5 rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-2">
             <span className="text-sm font-medium">Результат сведения</span>
-            <a
-              href={mixUrl}
-              download="uvs-mixdown.wav"
-              className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
-              aria-label="Скачать микс"
-            >
-              <Download className="h-4 w-4" />
-            </a>
+            <div className="flex items-center gap-1">
+              <SaveToLibraryButton
+                url={mixUrl}
+                source="mixer"
+                title={`Сведение · ${new Date().toLocaleString("ru-RU", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}`}
+              />
+              <a
+                href={mixUrl}
+                download="uvs-mixdown.wav"
+                className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
+                aria-label="Скачать микс"
+              >
+                <Download className="h-4 w-4" />
+              </a>
+            </div>
           </div>
           {mixPeaks.length > 0 && (
             <div className="flex h-12 items-end gap-px rounded-xl bg-studio-bg px-2 py-1.5 ring-1 ring-studio-border">

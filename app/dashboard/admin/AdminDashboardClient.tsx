@@ -25,6 +25,7 @@ import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import ContentManager from "@/components/admin/ContentManager";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
+import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 
 const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
   ssr: false,
@@ -120,6 +121,7 @@ export default function AdminDashboardClient() {
           {activeTab === "ai-tools" && (
             <div className="space-y-5">
               <AiToolsAccessSettings />
+              <MyAudioLibrary />
               <div className="grid gap-5 lg:grid-cols-2">
                 <PitchAnalyzer />
                 <VocalRemover />

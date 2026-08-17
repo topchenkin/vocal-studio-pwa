@@ -15,6 +15,7 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
+import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -312,12 +313,16 @@ export default function VocalRemover({ locked = false }: Props) {
             icon={<Music2 className="h-5 w-5 text-studio-accent" />}
             src={result.minusUrl}
             filename={`minus-${file.name.replace(/\.\w+$/, "")}.wav`}
+            source="remover_minus"
+            saveTitle={`Минусовка · ${file.name.replace(/\.\w+$/, "")}`}
           />
           <ResultTrack
             title="Изолированный вокал"
             icon={<Mic2 className="h-5 w-5 text-blue-400" />}
             src={result.vocalUrl}
             filename={`vocal-${file.name.replace(/\.\w+$/, "")}.wav`}
+            source="remover_vocal"
+            saveTitle={`Вокал · ${file.name.replace(/\.\w+$/, "")}`}
           />
           <button
             type="button"
@@ -347,11 +352,15 @@ function ResultTrack({
   icon,
   src,
   filename,
+  source,
+  saveTitle,
 }: {
   title: string;
   icon: React.ReactNode;
   src: string;
   filename: string;
+  source: "remover_minus" | "remover_vocal";
+  saveTitle: string;
 }) {
   return (
     <div className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
@@ -360,14 +369,17 @@ function ResultTrack({
           {icon}
           <span className="truncate text-sm font-medium">{title}</span>
         </div>
-        <a
-          href={src}
-          download={filename}
-          className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
-          aria-label={`Скачать ${title}`}
-        >
-          <Download className="h-4 w-4" />
-        </a>
+        <div className="flex shrink-0 items-center gap-1">
+          <SaveToLibraryButton url={src} source={source} title={saveTitle} />
+          <a
+            href={src}
+            download={filename}
+            className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
+            aria-label={`Скачать ${title}`}
+          >
+            <Download className="h-4 w-4" />
+          </a>
+        </div>
       </div>
       <audio controls playsInline src={src} className="h-10 w-full" />
     </div>

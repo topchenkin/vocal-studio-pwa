@@ -13,6 +13,7 @@
     "generate-vapid": "web-push generate-vapid-keys"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@ducanh2912/next-pwa": "^10.2.9",
     "@gradio/client": "^2.4.0",
     "@supabase/supabase-js": "^2.110.8",

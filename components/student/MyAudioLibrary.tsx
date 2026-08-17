@@ -1,17 +1,140 @@
 "use client";
 
-import { Music2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Music2, Trash2 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import {
+  STUDENT_AUDIO_MAX_TRACKS,
+  deleteAudioTrack,
+  formatTrackDuration,
+  listOwnAudioTracks,
+  signedAudioUrl,
+  sourceLabel,
+} from "@/lib/student-audio";
+import type { StudentAudioTrack } from "@/types";
 
 export default function MyAudioLibrary() {
+  const { user, isAdmin } = useAuth();
+  const [items, setItems] = useState<StudentAudioTrack[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setError("");
+    try {
+      const tracks = await listOwnAudioTracks(user.id);
+      setItems(tracks);
+      const nextUrls: Record<string, string> = {};
+      await Promise.all(
+        tracks.map(async (track) => {
+          nextUrls[track.id] = await signedAudioUrl(track.storage_path);
+        })
+      );
+      setUrls(nextUrls);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Не удалось загрузить аудио"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void load();
+    const refresh = () => void load();
+    window.addEventListener("uvs-audio-saved", refresh);
+    return () => window.removeEventListener("uvs-audio-saved", refresh);
+  }, [load]);
+
+  const onDelete = async (track: StudentAudioTrack) => {
+    if (!window.confirm(`Удалить «${track.title}»?`)) return;
+    setDeletingId(track.id);
+    try {
+      await deleteAudioTrack(track);
+      setItems((current) => current.filter((item) => item.id !== track.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось удалить");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  if (!user) return null;
+
+  if (loading) {
+    return <div className="h-40 animate-pulse rounded-2xl bg-studio-surface" />;
+  }
+
   return (
-    <div className="rounded-2xl bg-studio-surface p-8 text-center ring-1 ring-studio-border">
-      <Music2 className="mx-auto h-8 w-8 text-studio-muted" />
-      <h3 className="mt-3 font-display text-lg font-semibold">Мои аудио</h3>
-      <p className="mt-2 text-sm leading-relaxed text-studio-muted">
-        Здесь появятся треки из «Удаления вокала» и «Сведения дорожек» — после
-        того как согласуем, где их хранить. Пока можно скачивать результат
-        прямо в этих инструментах.
-      </p>
+    <div className="space-y-3">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h3 className="font-display text-lg font-semibold">Мои аудио</h3>
+          <p className="text-xs text-studio-muted">
+            {isAdmin
+              ? "Администратор: без лимита по числу и длительности"
+              : `${items.length} из ${STUDENT_AUDIO_MAX_TRACKS} треков · до 10 минут каждый`}
+          </p>
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {items.length === 0 ? (
+        <div className="rounded-2xl bg-studio-surface p-8 text-center ring-1 ring-studio-border">
+          <Music2 className="mx-auto h-8 w-8 text-studio-muted" />
+          <p className="mt-3 text-sm text-studio-muted">
+            Пока пусто. Сохраните минусовку, вокал или сведение кнопкой «В Мои
+            аудио» — файлы будут и на телефоне, и на ноутбуке.
+          </p>
+        </div>
+      ) : (
+        items.map((track) => (
+          <article
+            key={track.id}
+            className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border"
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{track.title}</p>
+                <p className="mt-0.5 text-xs text-studio-muted">
+                  {sourceLabel(track.source)} ·{" "}
+                  {formatTrackDuration(Number(track.duration_sec))} ·{" "}
+                  {new Date(track.created_at).toLocaleString("ru-RU", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={deletingId === track.id}
+                onClick={() => void onDelete(track)}
+                className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-red-300 disabled:opacity-40"
+                aria-label="Удалить трек"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            {urls[track.id] ? (
+              <audio
+                controls
+                playsInline
+                src={urls[track.id]}
+                className="h-10 w-full"
+              />
+            ) : (
+              <p className="text-xs text-studio-muted">Загружаем плеер…</p>
+            )}
+          </article>
+        ))
+      )}
     </div>
   );
 }

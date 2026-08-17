@@ -136,6 +136,7 @@ const nextConfig: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   eslint: { ignoreDuringBuilds: true },
+  transpilePackages: ["@breezystack/lamejs"],
 };
 
 export default withPWA(nextConfig);

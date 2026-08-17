@@ -211,6 +211,20 @@ export interface PushSubscriptionRecord {
   created_at: string;
 }
 
+export type StudentAudioSource = "remover_minus" | "remover_vocal" | "mixer";
+
+export interface StudentAudioTrack {
+  id: string;
+  user_id: string;
+  source: StudentAudioSource;
+  title: string;
+  duration_sec: number;
+  storage_path: string;
+  mime: string;
+  size_bytes: number;
+  created_at: string;
+}
+
 export type AiToolId = "tuner" | "remover" | "timbre" | "mixer";
 
 export interface AiToolAccess {
@@ -492,6 +506,22 @@ export interface Database {
         Update: Partial<
           Pick<AiToolAccess, "min_tier" | "enabled" | "title" | "updated_by">
         >;
+        Relationships: [];
+      };
+      student_audio_tracks: {
+        Row: StudentAudioTrack;
+        Insert: {
+          id?: string;
+          user_id: string;
+          source: StudentAudioSource;
+          title: string;
+          duration_sec: number;
+          storage_path: string;
+          mime: string;
+          size_bytes: number;
+          created_at?: string;
+        };
+        Update: never;
         Relationships: [];
       };
     };
