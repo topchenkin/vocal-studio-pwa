@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Sparkles, Square, Stars } from "lucide-react";
-import Meyda, { type MeydaFeaturesObject } from "meyda";
+import type { MeydaFeaturesObject } from "meyda";
 import Button from "@/components/ui/Button";
 import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
@@ -86,6 +86,26 @@ const GENDER_LABEL_RU: Record<TimbreGender, string> = {
   female: "Женский",
 };
 
+type MeydaAnalyzerHandle = { start: () => void; stop: () => void };
+
+async function loadMeydaCreate() {
+  const mod = (await import("meyda")) as {
+    default?: { createMeydaAnalyzer?: unknown };
+    createMeydaAnalyzer?: unknown;
+  };
+  const Meyda = mod.default ?? mod;
+  if (typeof Meyda.createMeydaAnalyzer !== "function") {
+    throw new Error("Анализ тембра недоступен в этом браузере");
+  }
+  return Meyda.createMeydaAnalyzer as (options: {
+    audioContext: AudioContext;
+    source: AudioNode;
+    bufferSize: number;
+    featureExtractors: string[];
+    callback: (features: Partial<MeydaFeaturesObject>) => void;
+  }) => MeydaAnalyzerHandle;
+}
+
 export default function TimbreMatcher({ locked = false }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
@@ -103,9 +123,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const meydaSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const pitchAnalyserRef = useRef<AnalyserNode | null>(null);
-  const analyzerRef = useRef<ReturnType<typeof Meyda.createMeydaAnalyzer> | null>(
-    null
-  );
+  const analyzerRef = useRef<MeydaAnalyzerHandle | null>(null);
   const pcmSessionRef = useRef<PcmCaptureSession | null>(null);
   const timersRef = useRef<number[]>([]);
   const busyRef = useRef(false);
@@ -279,7 +297,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
       pitchAnalyserRef.current = pitchAnalyser;
       const rawTimeDomain = new Float32Array(PITCH_WINDOW_SIZE);
 
-      const analyzer = Meyda.createMeydaAnalyzer({
+      const createMeydaAnalyzer = await loadMeydaCreate();
+      const analyzer = createMeydaAnalyzer({
         audioContext: ctx,
         source: meydaSource,
         bufferSize: ANALYSIS_BUFFER_SIZE,
@@ -353,8 +372,12 @@ export default function TimbreMatcher({ locked = false }: Props) {
       }, RECORD_MS);
       timersRef.current = [progressTimer, finishTimer];
       endCaptureRef.current = endCapture;
-    } catch {
-      setError("Разрешите доступ к микрофону");
+    } catch (err) {
+      setError(
+        err instanceof Error && /тембра/i.test(err.message)
+          ? err.message
+          : "Разрешите доступ к микрофону"
+      );
       cleanupAudio();
       busyRef.current = false;
       setStage("idle");

@@ -105,7 +105,7 @@ export default function StudentDashboardClient() {
         isChat
           ? "Чат"
           : `Привет, ${String(
-              user.user_metadata.full_name ?? user.email ?? "ученик"
+              user.user_metadata?.full_name ?? user.email ?? "ученик"
             ).split(" ")[0]}!`
       }
       subtitle={isChat ? undefined : "Личный кабинет ученика"}

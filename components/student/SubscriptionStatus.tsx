@@ -33,11 +33,11 @@ export default function SubscriptionStatus() {
 
   if (!profile) return null;
 
-  const cat = catLevels[profile.cat_level];
+  const cat = catLevels[profile.cat_level] ?? catLevels.beginner;
   const tierName =
     tier === "none"
       ? "Без подписки"
-      : tier.charAt(0).toUpperCase() + tier.slice(1);
+      : `${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
 
   return (
     <>

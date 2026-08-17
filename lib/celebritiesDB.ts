@@ -215,7 +215,13 @@ function assertAxis(name: string, label: string, value: number): void {
   }
 }
 
-if (process.env.NODE_ENV !== "production") {
+/**
+ * Integrity checks run only in Node (build / SSR). Never touch `process` in
+ * the browser: a leftover `process.env.NODE_ENV` lookup becomes
+ * `ReferenceError: process is not defined` and kills any page that loads this
+ * module (admin dashboard and student AI-tools via static import / prefetch).
+ */
+function assertDatabaseIntegrity(): void {
   const ids = new Set(CELEBRITIES_DB.map((c) => c.id));
   if (ids.size !== CELEBRITIES_DB.length) {
     throw new Error("celebritiesDB: duplicate slug ids detected");
@@ -232,6 +238,10 @@ if (process.env.NODE_ENV !== "production") {
     assertAxis(c.name, "airiness", c.airiness);
     assertAxis(c.name, "raspiness", c.raspiness);
   }
+}
+
+if (typeof window === "undefined") {
+  assertDatabaseIntegrity();
 }
 
 /**

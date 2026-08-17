@@ -7,8 +7,8 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
-import TimbreMatcher from "@/components/ai/TimbreMatcher";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
@@ -21,6 +21,10 @@ import {
 } from "@/lib/ai-tools-access";
 
 type ToolTab = AiToolId;
+
+const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
+  ssr: false,
+});
 
 const TABS: Array<{
   id: ToolTab;

@@ -21,10 +21,14 @@ import AdminChat from "@/components/admin/AdminChat";
 import NotificationForm from "@/components/admin/NotificationForm";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
-import TimbreMatcher from "@/components/ai/TimbreMatcher";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
+import dynamic from "next/dynamic";
 import ContentManager from "@/components/admin/ContentManager";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
+
+const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
+  ssr: false,
+});
 
 const TABS = [
   { id: "students", label: "Ученики", icon: <Users className="h-4 w-4" /> },
