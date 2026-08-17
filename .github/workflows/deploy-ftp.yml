@@ -1,0 +1,69 @@
+# Optional: upload the same static `out/` build to RU hosting (reg.ru / Timeweb / Beget)
+# via FTP/FTPS. Does not run on push. Does not use Cloudflare.
+#
+# GitHub → Settings → Secrets and variables → Actions, add:
+#   FTP_SERVER       host from the registrar (e.g. ftp.uniquevocal.ru)
+#   FTP_USERNAME
+#   FTP_PASSWORD
+#   FTP_SERVER_DIR   remote web root, with trailing slash (e.g. / or /www/ or /public_html/)
+# Optional:
+#   FTP_PROTOCOL     ftp | ftps | ftps-legacy  (default ftp)
+#   FTP_PORT         default 21
+#
+# Then run: Actions → "Deploy static via FTP" → Run workflow
+name: Deploy static via FTP
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ftp-static
+  cancel-in-progress: true
+
+jobs:
+  build-and-ftp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static export
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+
+      - name: Check FTP secrets
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ]; then
+            echo "Missing FTP_SERVER / FTP_USERNAME / FTP_PASSWORD."
+            echo "Add them in repo Actions secrets, then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Upload out/ via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ${{ secrets.FTP_PROTOCOL || 'ftp' }}
+          port: ${{ secrets.FTP_PORT || 21 }}
+          local-dir: ./out/
+          server-dir: ${{ secrets.FTP_SERVER_DIR || './' }}
+          dangerous-clean-slate: false

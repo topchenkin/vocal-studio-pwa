@@ -1,0 +1,14 @@
+# Apache (reg.ru / Beget / Timeweb): GitHub Pages "pretty URLs" are not available
+# there, so map /dashboard/student → dashboard/student.html from Next `output: "export"`.
+Options -Indexes -MultiViews
+RewriteEngine On
+RewriteBase /
+
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteCond %{DOCUMENT_ROOT}/$1.html -f
+RewriteRule ^(.+?)/?$ $1.html [L]
+
+ErrorDocument 404 /404.html
