@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { MessageCircle, Music2 } from "lucide-react";
+import { CalendarDays, MessageCircle, Music2 } from "lucide-react";
 
 const items = [
+  {
+    id: "schedule",
+    href: "/dashboard/admin?tab=schedule",
+    label: "Расписание",
+    icon: CalendarDays,
+  },
   {
     id: "chat",
     href: "/dashboard/admin?tab=chat",
@@ -30,7 +36,7 @@ export default function AdminBottomNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
       aria-label="Быстрый доступ"
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-2 px-2 pt-1">
+      <div className="mx-auto grid max-w-6xl grid-cols-3 px-2 pt-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = onCabinet && tab === item.id;
