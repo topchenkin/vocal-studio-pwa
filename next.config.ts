@@ -17,21 +17,27 @@ if (process.env.NEXT_PHASE === "phase-production-build") {
   const mwSrc = path.join(root, "middleware.ts");
   const mwDst = path.join(stashDir, "middleware.ts");
 
+  /** Copy then delete — `renameSync()` throws EXDEV across Docker overlay mounts. */
+  const movePath = (src: string, dest: string) => {
+    fs.cpSync(src, dest, { recursive: true, force: true });
+    fs.rmSync(src, { recursive: true, force: true });
+  };
+
   fs.mkdirSync(stashDir, { recursive: true });
   if (fs.existsSync(apiSrc) && !fs.existsSync(apiDst)) {
-    fs.renameSync(apiSrc, apiDst);
+    movePath(apiSrc, apiDst);
   }
   if (fs.existsSync(mwSrc) && !fs.existsSync(mwDst)) {
-    fs.renameSync(mwSrc, mwDst);
+    movePath(mwSrc, mwDst);
   }
 
   const restore = () => {
     try {
       if (fs.existsSync(apiDst) && !fs.existsSync(apiSrc)) {
-        fs.renameSync(apiDst, apiSrc);
+        movePath(apiDst, apiSrc);
       }
       if (fs.existsSync(mwDst) && !fs.existsSync(mwSrc)) {
-        fs.renameSync(mwDst, mwSrc);
+        movePath(mwDst, mwSrc);
       }
     } catch {
       /* ignore restore races between next.config and build-static.mjs */

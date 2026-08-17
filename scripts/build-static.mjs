@@ -2,7 +2,7 @@
  * Static export (GitHub Pages) cannot include Route Handlers or middleware.
  * Stash them for the duration of `next build`, then restore.
  */
-import { access, mkdir, rename } from "node:fs/promises";
+import { access, cp, mkdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,15 +23,21 @@ async function exists(p) {
   }
 }
 
+/** Copy then delete — `rename()` throws EXDEV across Docker overlay mounts. */
+async function movePath(src, dest) {
+  await cp(src, dest, { recursive: true, force: true });
+  await rm(src, { recursive: true, force: true });
+}
+
 async function stashIncompatible() {
   await mkdir(stashDir, { recursive: true });
-  if (await exists(apiSrc)) await rename(apiSrc, apiDst);
-  if (await exists(mwSrc)) await rename(mwSrc, mwDst);
+  if (await exists(apiSrc)) await movePath(apiSrc, apiDst);
+  if (await exists(mwSrc)) await movePath(mwSrc, mwDst);
 }
 
 async function restoreIncompatible() {
-  if (await exists(apiDst)) await rename(apiDst, apiSrc);
-  if (await exists(mwDst)) await rename(mwDst, mwSrc);
+  if (await exists(apiDst)) await movePath(apiDst, apiSrc);
+  if (await exists(mwDst)) await movePath(mwDst, mwSrc);
 }
 
 function runNextBuild() {
