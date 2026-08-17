@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import AdminBottomNav from "@/components/admin/AdminBottomNav";
 
 export default function AdminProtectedLayout({
   children,
@@ -29,5 +30,12 @@ export default function AdminProtectedLayout({
     );
   }
 
-  return children;
+  return (
+    <>
+      {children}
+      <Suspense fallback={null}>
+        <AdminBottomNav />
+      </Suspense>
+    </>
+  );
 }

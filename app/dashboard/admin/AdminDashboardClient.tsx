@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
   Calendar,
-  MessageCircle,
   Bell,
   AlertTriangle,
   Sparkles,
@@ -38,7 +37,6 @@ const TABS = [
     label: "Расписание",
     icon: <Calendar className="h-4 w-4" />,
   },
-  { id: "chat", label: "Чат", icon: <MessageCircle className="h-4 w-4" /> },
   {
     id: "notifications",
     label: "Уведомления",
@@ -56,6 +54,8 @@ const TABS = [
   },
 ];
 
+const QUICK_TABS = ["chat", "audio"] as const;
+
 export default function AdminDashboardClient() {
   const [activeTab, setActiveTab] = useState("students");
   const { isMockAdmin } = useAuth();
@@ -64,7 +64,11 @@ export default function AdminDashboardClient() {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
-    if (tab && TABS.some((item) => item.id === tab)) {
+    if (
+      tab &&
+      (TABS.some((item) => item.id === tab) ||
+        QUICK_TABS.includes(tab as (typeof QUICK_TABS)[number]))
+    ) {
       setActiveTab(tab);
     }
   }, [searchParams]);
@@ -77,12 +81,23 @@ export default function AdminDashboardClient() {
   };
 
   const isChat = activeTab === "chat";
+  const title =
+    activeTab === "chat"
+      ? "Чат"
+      : activeTab === "audio"
+        ? "Мои аудио"
+        : "Панель администратора";
+  const subtitle =
+    isChat || activeTab === "audio"
+      ? undefined
+      : "Unique Vocal Studio — управление";
 
   return (
     <DashboardLayout
-      title={isChat ? "Чат" : "Панель администратора"}
-      subtitle={isChat ? undefined : "Unique Vocal Studio — управление"}
+      title={title}
+      subtitle={subtitle}
       compact={isChat}
+      bottomInset
     >
       {isMockAdmin && (
         <div className="mb-4 flex shrink-0 gap-3 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-200 ring-1 ring-amber-500/30">
@@ -118,10 +133,10 @@ export default function AdminDashboardClient() {
           {activeTab === "chat" && <AdminChat />}
           {activeTab === "notifications" && <NotificationForm />}
           {activeTab === "content" && <ContentManager />}
+          {activeTab === "audio" && <MyAudioLibrary />}
           {activeTab === "ai-tools" && (
             <div className="space-y-5">
               <AiToolsAccessSettings />
-              <MyAudioLibrary />
               <div className="grid gap-5 lg:grid-cols-2">
                 <PitchAnalyzer />
                 <VocalRemover />

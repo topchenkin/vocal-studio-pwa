@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { BookmarkPlus, Check, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { saveAudioFromUrl } from "@/lib/student-audio";
@@ -58,6 +59,18 @@ export default function SaveToLibraryButton({
         )}
         {saving ? "Сохраняем…" : saved ? "В кабинете" : "В Мои аудио"}
       </button>
+      {saved && (
+        <Link
+          href={
+            isAdmin
+              ? "/dashboard/admin?tab=audio"
+              : "/dashboard/student?tab=audio"
+          }
+          className="text-[11px] text-studio-accent hover:underline"
+        >
+          Открыть
+        </Link>
+      )}
       {error && (
         <p className="max-w-[14rem] text-right text-[11px] text-red-400">{error}</p>
       )}
