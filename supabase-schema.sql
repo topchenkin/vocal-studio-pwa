@@ -1890,11 +1890,15 @@ with check (public.current_user_is_admin());
 
 insert into public.ai_tool_access (tool_id, min_tier, enabled, title)
 values
-  ('tuner', 'none', true, 'Нейроанализ голоса'),
+  ('tuner', 'none', true, 'Нейроанализатор нот'),
   ('remover', 'premium', true, 'Удаление вокала'),
   ('timbre', 'premium', true, 'Звёздный двойник'),
   ('mixer', 'standard', true, 'Сведение дорожек')
 on conflict (tool_id) do nothing;
+
+update public.ai_tool_access
+set title = 'Нейроанализатор нот'
+where tool_id = 'tuner';
 
 do $$
 begin
@@ -1956,6 +1960,13 @@ create policy "student_audio_delete_own_or_admin"
 on public.student_audio_tracks for delete
 to authenticated
 using (user_id = auth.uid() or public.current_user_is_admin());
+
+drop policy if exists "student_audio_update_own_or_admin" on public.student_audio_tracks;
+create policy "student_audio_update_own_or_admin"
+on public.student_audio_tracks for update
+to authenticated
+using (user_id = auth.uid() or public.current_user_is_admin())
+with check (user_id = auth.uid() or public.current_user_is_admin());
 
 create or replace function public.enforce_student_audio_limits()
 returns trigger

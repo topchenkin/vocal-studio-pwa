@@ -214,7 +214,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             <Lock className="h-7 w-7 text-amber-300" />
           </div>
           <h2 className="mt-4 font-display text-2xl font-semibold">
-            Нейроанализ голоса
+            Нейроанализатор нот
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу, заданному администратором.
@@ -237,7 +237,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            Нейроанализ голоса
+            Нейроанализатор нот
           </h2>
         </div>
       </div>

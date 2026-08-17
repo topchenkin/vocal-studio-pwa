@@ -10,6 +10,10 @@ import NotesSection from "@/components/student/NotesSection";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import StudentNav from "@/components/student/StudentNav";
+import {
+  CABINET_TAB_EVENT,
+  consumeRequestedCabinetTab,
+} from "@/components/dashboard/CabinetTabLink";
 import { useAuth } from "@/context/AuthContext";
 
 const TABS = ["home", "notes", "chat", "lessons", "audio"] as const;
@@ -45,13 +49,29 @@ export default function StudentDashboardClient() {
   }, [isAuthenticated, isAdmin, loading, router]);
 
   useEffect(() => {
-    const tab = searchParams.get("tab");
+    const fromUrl = searchParams.get("tab");
+    const requested = consumeRequestedCabinetTab();
+    const tab = isTab(fromUrl) ? fromUrl : requested;
     if (isTab(tab)) {
       setActiveTab(tab === "notes" ? "home" : tab);
+      if (!isTab(fromUrl)) {
+        router.replace(`/dashboard/student?tab=${tab}`, { scroll: false });
+      }
     } else {
       setActiveTab("home");
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
+
+  useEffect(() => {
+    const onTab = (event: Event) => {
+      const tab = (event as CustomEvent<string>).detail;
+      if (!isTab(tab)) return;
+      setActiveTab(tab === "notes" ? "home" : tab);
+      router.replace(`/dashboard/student?tab=${tab}`, { scroll: false });
+    };
+    window.addEventListener(CABINET_TAB_EVENT, onTab);
+    return () => window.removeEventListener(CABINET_TAB_EVENT, onTab);
+  }, [router]);
 
   if (loading || !user || isAdmin) {
     return (
@@ -114,7 +134,7 @@ export default function StudentDashboardClient() {
       bottomInset
     >
       <StudentNav />
-      <AnimatePresence mode="wait">
+      <AnimatePresence>
         <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 12 }}

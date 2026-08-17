@@ -27,7 +27,7 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
   AiToolId,
   Pick<AiToolAccess, "min_tier" | "enabled" | "title">
 > = {
-  tuner: { min_tier: "none", enabled: true, title: "Нейроанализ голоса" },
+  tuner: { min_tier: "none", enabled: true, title: "Нейроанализатор нот" },
   remover: { min_tier: "premium", enabled: true, title: "Удаление вокала" },
   timbre: { min_tier: "premium", enabled: true, title: "Звёздный двойник" },
   mixer: { min_tier: "standard", enabled: true, title: "Сведение дорожек" },
@@ -75,13 +75,17 @@ export function mergeAiToolAccessRows(
       typeof row.min_tier === "string" && isTier(row.min_tier)
         ? row.min_tier
         : map[row.tool_id].min_tier;
+    const incomingTitle =
+      typeof row.title === "string" && row.title.trim()
+        ? row.title.trim()
+        : map[row.tool_id].title;
     map[row.tool_id] = {
       min_tier: minTier,
       enabled: row.enabled !== false,
       title:
-        typeof row.title === "string" && row.title.trim()
-          ? row.title.trim()
-          : map[row.tool_id].title,
+        row.tool_id === "tuner"
+          ? DEFAULT_AI_TOOL_ACCESS.tuner.title
+          : incomingTitle,
     };
   }
   return map;

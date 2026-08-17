@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   AI_TOOL_IDS,
   defaultAiToolAccessMap,
+  mergeAiToolAccessRows,
   type AiToolAccessMap,
   type AiToolId,
 } from "@/lib/ai-tools-access";
@@ -55,17 +56,7 @@ export default function AiToolsAccessSettings() {
       return;
     }
 
-    const next = defaultAiToolAccessMap();
-    for (const row of data ?? []) {
-      const id = row.tool_id as AiToolId;
-      if (!TOOL_ORDER.includes(id)) continue;
-      next[id] = {
-        min_tier: row.min_tier,
-        enabled: row.enabled,
-        title: row.title || next[id].title,
-      };
-    }
-    setAccess(next);
+    setAccess(mergeAiToolAccessRows(data));
     setLoading(false);
   }, []);
 

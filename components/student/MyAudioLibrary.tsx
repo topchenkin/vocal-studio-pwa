@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Music2, Trash2 } from "lucide-react";
+import { Check, Music2, Pencil, Trash2, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
   STUDENT_AUDIO_MAX_TRACKS,
   deleteAudioTrack,
   formatTrackDuration,
   listOwnAudioTracks,
+  renameAudioTrack,
   signedAudioUrl,
   sourceLabel,
 } from "@/lib/student-audio";
@@ -20,17 +21,28 @@ export default function MyAudioLibrary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setError("");
     try {
       const tracks = await listOwnAudioTracks(user.id);
       setItems(tracks);
+      setLoading(false);
       const nextUrls: Record<string, string> = {};
       await Promise.all(
         tracks.map(async (track) => {
-          nextUrls[track.id] = await signedAudioUrl(track.storage_path);
+          try {
+            nextUrls[track.id] = await signedAudioUrl(track.storage_path);
+          } catch {
+            /* keep the row even if the player URL fails */
+          }
         })
       );
       setUrls(nextUrls);
@@ -38,7 +50,6 @@ export default function MyAudioLibrary() {
       setError(
         err instanceof Error ? err.message : "Не удалось загрузить аудио"
       );
-    } finally {
       setLoading(false);
     }
   }, [user]);
@@ -49,6 +60,36 @@ export default function MyAudioLibrary() {
     window.addEventListener("uvs-audio-saved", refresh);
     return () => window.removeEventListener("uvs-audio-saved", refresh);
   }, [load]);
+
+  const startEdit = (track: StudentAudioTrack) => {
+    setEditingId(track.id);
+    setEditTitle(track.title);
+    setError("");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditTitle("");
+  };
+
+  const saveEdit = async (track: StudentAudioTrack) => {
+    if (renaming) return;
+    setRenaming(true);
+    setError("");
+    try {
+      const nextTitle = await renameAudioTrack(track.id, editTitle);
+      setItems((current) =>
+        current.map((item) =>
+          item.id === track.id ? { ...item, title: nextTitle } : item
+        )
+      );
+      cancelEdit();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось переименовать");
+    } finally {
+      setRenaming(false);
+    }
+  };
 
   const onDelete = async (track: StudentAudioTrack) => {
     if (!window.confirm(`Удалить «${track.title}»?`)) return;
@@ -99,8 +140,46 @@ export default function MyAudioLibrary() {
             className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border"
           >
             <div className="mb-3 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate font-medium">{track.title}</p>
+              <div className="min-w-0 flex-1">
+                {editingId === track.id ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={editTitle}
+                      maxLength={120}
+                      disabled={renaming}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveEdit(track);
+                        }
+                        if (event.key === "Escape") cancelEdit();
+                      }}
+                      className="min-w-0 flex-1 rounded-lg bg-studio-card px-2.5 py-1.5 text-sm font-medium ring-1 ring-studio-border"
+                    />
+                    <button
+                      type="button"
+                      disabled={renaming}
+                      onClick={() => void saveEdit(track)}
+                      className="rounded-lg p-2 text-studio-accent-light hover:bg-studio-card disabled:opacity-40"
+                      aria-label="Сохранить название"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={renaming}
+                      onClick={cancelEdit}
+                      className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-studio-text disabled:opacity-40"
+                      aria-label="Отменить"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <p className="truncate font-medium">{track.title}</p>
+                )}
                 <p className="mt-0.5 text-xs text-studio-muted">
                   {sourceLabel(track.source)} ·{" "}
                   {formatTrackDuration(Number(track.duration_sec))} ·{" "}
@@ -112,15 +191,27 @@ export default function MyAudioLibrary() {
                   })}
                 </p>
               </div>
-              <button
-                type="button"
-                disabled={deletingId === track.id}
-                onClick={() => void onDelete(track)}
-                className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-red-300 disabled:opacity-40"
-                aria-label="Удалить трек"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {editingId !== track.id && (
+                <div className="flex shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(track)}
+                    className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-studio-text"
+                    aria-label="Переименовать трек"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deletingId === track.id}
+                    onClick={() => void onDelete(track)}
+                    className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-red-300 disabled:opacity-40"
+                    aria-label="Удалить трек"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
             {urls[track.id] ? (
               <audio

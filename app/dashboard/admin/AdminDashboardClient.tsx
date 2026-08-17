@@ -25,6 +25,10 @@ import dynamic from "next/dynamic";
 import ContentManager from "@/components/admin/ContentManager";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
+import {
+  CABINET_TAB_EVENT,
+  consumeRequestedCabinetTab,
+} from "@/components/dashboard/CabinetTabLink";
 
 const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
   ssr: false,
@@ -56,6 +60,14 @@ const TABS = [
 
 const QUICK_TABS = ["chat", "audio"] as const;
 
+function isAdminTab(value: string | null): boolean {
+  return Boolean(
+    value &&
+      (TABS.some((item) => item.id === value) ||
+        QUICK_TABS.includes(value as (typeof QUICK_TABS)[number]))
+  );
+}
+
 export default function AdminDashboardClient() {
   const [activeTab, setActiveTab] = useState("students");
   const { isMockAdmin } = useAuth();
@@ -63,15 +75,27 @@ export default function AdminDashboardClient() {
   const router = useRouter();
 
   useEffect(() => {
-    const tab = searchParams.get("tab");
-    if (
-      tab &&
-      (TABS.some((item) => item.id === tab) ||
-        QUICK_TABS.includes(tab as (typeof QUICK_TABS)[number]))
-    ) {
+    const fromUrl = searchParams.get("tab");
+    const requested = consumeRequestedCabinetTab();
+    const tab = isAdminTab(fromUrl) ? fromUrl : requested;
+    if (isAdminTab(tab) && tab) {
       setActiveTab(tab);
+      if (!isAdminTab(fromUrl)) {
+        router.replace(`/dashboard/admin?tab=${tab}`, { scroll: false });
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
+
+  useEffect(() => {
+    const onTab = (event: Event) => {
+      const tab = (event as CustomEvent<string>).detail;
+      if (!isAdminTab(tab)) return;
+      setActiveTab(tab);
+      router.replace(`/dashboard/admin?tab=${tab}`, { scroll: false });
+    };
+    window.addEventListener(CABINET_TAB_EVENT, onTab);
+    return () => window.removeEventListener(CABINET_TAB_EVENT, onTab);
+  }, [router]);
 
   const changeTab = (id: string) => {
     setActiveTab(id);
@@ -119,7 +143,7 @@ export default function AdminDashboardClient() {
         <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
       </div>
 
-      <AnimatePresence mode="wait">
+      <AnimatePresence>
         <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 12 }}

@@ -26,6 +26,13 @@ import {
   type PitchDetectorFn,
   type PitchFrame,
 } from "@/lib/pitch";
+import {
+  connectAnalyserToDestination,
+  isAppleWebKit,
+  readAnalyserTimeDomain,
+  singingInputGainValue,
+  singingMicConstraints,
+} from "@/lib/mic-audio";
 
 export type { PitchFrame } from "@/lib/pitch";
 
@@ -34,13 +41,16 @@ export type { PitchFrame } from "@/lib/pitch";
 const FFT_SIZE = 4096;
 
 /** Skip pitch detection entirely below this loudness — saves CPU and avoids
- * YIN returning garbage on pure noise/silence. */
+ * YIN returning garbage on pure noise/silence. iOS sits quieter even after
+ * AGC, so the gate is a bit lower there only. */
 const DETECT_SKIP_DB = -55;
+const DETECT_SKIP_DB_IOS = -62;
 
 /** Below this average dB the take/live signal is considered "too quiet" to
  * trust — surfaced as `tooQuiet` so the UI can ask the user to sing louder
  * instead of showing a bogus score. */
 const NOISE_FLOOR_DB = -50;
+const NOISE_FLOOR_DB_IOS = -58;
 
 /** A take needs at least this fraction of voiced frames to be scoreable. */
 const MIN_VOICED_RATIO = 0.15;
@@ -131,10 +141,13 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const inputGainRef = useRef<GainNode | null>(null);
+  const muteGainRef = useRef<GainNode | null>(null);
   const detectorRef = useRef<PitchDetectorFn | null>(null);
   const bufferRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const rafRef = useRef<number | null>(null);
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const iosRef = useRef(false);
 
   const silentFramesRef = useRef(0);
   const rollingDbRef = useRef<number[]>([]);
@@ -162,6 +175,8 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     }
     audioContextRef.current = null;
     analyserRef.current = null;
+    inputGainRef.current = null;
+    muteGainRef.current = null;
     detectorRef.current = null;
     bufferRef.current = null;
     silentFramesRef.current = 0;
@@ -192,12 +207,14 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
 
     const buf = bufferRef.current ?? new Float32Array(analyser.fftSize);
     bufferRef.current = buf;
-    analyser.getFloatTimeDomainData(buf);
+    readAnalyserTimeDomain(analyser, buf);
     drawWaveform(canvasElRef.current, buf);
 
     const rms = computeRms(buf);
     const db = dbFromRms(rms);
-    const hz = db > DETECT_SKIP_DB ? detector(buf) : null;
+    const skipDb = iosRef.current ? DETECT_SKIP_DB_IOS : DETECT_SKIP_DB;
+    const floorDb = iosRef.current ? NOISE_FLOOR_DB_IOS : NOISE_FLOOR_DB;
+    const hz = db > skipDb ? detector(buf) : null;
     const pitch = hz !== null ? analyzeFrequency(hz) : null;
 
     const rollingWindow = rollingDbRef.current;
@@ -205,7 +222,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     if (rollingWindow.length > ROLLING_DB_WINDOW) rollingWindow.shift();
     const rollingAvgDb =
       rollingWindow.reduce((a, b) => a + b, 0) / rollingWindow.length;
-    const tooQuiet = rollingWindow.length >= 30 && rollingAvgDb < NOISE_FLOOR_DB;
+    const tooQuiet = rollingWindow.length >= 30 && rollingAvgDb < floorDb;
 
     if (pitch) {
       silentFramesRef.current = 0;
@@ -251,7 +268,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
             ? frames.reduce((sum, f) => sum + f.db, 0) / frames.length
             : -100;
         const voicedRatio = frames.length > 0 ? voicedCount / frames.length : 0;
-        const resultTooQuiet = avgDb < NOISE_FLOOR_DB || voicedRatio < MIN_VOICED_RATIO;
+        const resultTooQuiet = avgDb < floorDb || voicedRatio < MIN_VOICED_RATIO;
 
         testFramesRef.current = [];
         const resolve = testResolveRef.current;
@@ -276,11 +293,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
+      audio: singingMicConstraints(),
     });
     const AudioCtx =
       window.AudioContext ||
@@ -288,14 +301,22 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     const audioContext = new AudioCtx();
     if (audioContext.state === "suspended") await audioContext.resume();
 
+    iosRef.current = isAppleWebKit();
     const source = audioContext.createMediaStreamSource(stream);
+    const inputGain = audioContext.createGain();
+    inputGain.gain.value = singingInputGainValue();
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = FFT_SIZE;
-    source.connect(analyser);
+    analyser.smoothingTimeConstant = 0;
+    source.connect(inputGain);
+    inputGain.connect(analyser);
+    const mute = connectAnalyserToDestination(audioContext, analyser);
 
     streamRef.current = stream;
     audioContextRef.current = audioContext;
     analyserRef.current = analyser;
+    inputGainRef.current = inputGain;
+    muteGainRef.current = mute;
     detectorRef.current = createYinDetector(audioContext.sampleRate);
     bufferRef.current = new Float32Array(analyser.fftSize);
     silentFramesRef.current = 0;

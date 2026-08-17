@@ -49,6 +49,22 @@ export async function signedAudioUrl(path: string): Promise<string> {
   return data.signedUrl;
 }
 
+export async function renameAudioTrack(
+  trackId: string,
+  title: string
+): Promise<string> {
+  const nextTitle = title.trim().slice(0, 120);
+  if (!nextTitle) {
+    throw new Error("Напишите название трека");
+  }
+  const { error } = await supabase
+    .from("student_audio_tracks")
+    .update({ title: nextTitle })
+    .eq("id", trackId);
+  if (error) throw new Error(error.message);
+  return nextTitle;
+}
+
 export async function deleteAudioTrack(track: StudentAudioTrack): Promise<void> {
   await supabase.storage.from(STUDENT_AUDIO_BUCKET).remove([track.storage_path]);
   const { error } = await supabase

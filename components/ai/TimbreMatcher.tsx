@@ -25,6 +25,12 @@ import {
   startContextPcmCapture,
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
+import {
+  connectAnalyserToDestination,
+  readAnalyserTimeDomain,
+  singingInputGainValue,
+  singingMicConstraints,
+} from "@/lib/mic-audio";
 
 const RECORD_MS = 10_000;
 /**
@@ -239,12 +245,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
     try {
       cleanupAudio();
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-        },
+        audio: singingMicConstraints(),
       });
       if (isStale(analysisId)) {
         stream.getTracks().forEach((t) => t.stop());
@@ -269,6 +270,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
       // Independent MediaStreamSource tap on the same context for Meyda —
       // multiple taps on one context/stream is standard and doesn't affect the mic.
       const meydaSource = ctx.createMediaStreamSource(stream);
+      const inputGain = ctx.createGain();
+      inputGain.gain.value = singingInputGainValue();
+      meydaSource.connect(inputGain);
       meydaSourceRef.current = meydaSource;
 
       const accumulator = new VoiceMeasurementAccumulator(
@@ -293,28 +297,37 @@ export default function TimbreMatcher({ locked = false }: Props) {
       // unprocessed samples, decoupled from whatever Meyda does internally.
       const pitchAnalyser = ctx.createAnalyser();
       pitchAnalyser.fftSize = PITCH_WINDOW_SIZE;
-      meydaSource.connect(pitchAnalyser);
+      pitchAnalyser.smoothingTimeConstant = 0;
+      inputGain.connect(pitchAnalyser);
+      connectAnalyserToDestination(ctx, pitchAnalyser);
       pitchAnalyserRef.current = pitchAnalyser;
       const rawTimeDomain = new Float32Array(PITCH_WINDOW_SIZE);
 
       const createMeydaAnalyzer = await loadMeydaCreate();
       const analyzer = createMeydaAnalyzer({
         audioContext: ctx,
-        source: meydaSource,
+        source: inputGain,
         bufferSize: ANALYSIS_BUFFER_SIZE,
-        featureExtractors: ["spectralCentroid", "spectralFlatness", "zcr", "rms"],
+        featureExtractors: [
+          "spectralCentroid",
+          "spectralFlatness",
+          "zcr",
+          "rms",
+          "amplitudeSpectrum",
+        ],
         callback: (features: Partial<MeydaFeaturesObject>) => {
           // YIN runs on raw PCM tapped straight from the AnalyserNode above —
           // NOT on Meyda's (windowed) features — over roughly the same time
           // window as this Meyda callback.
-          pitchAnalyser.getFloatTimeDomainData(rawTimeDomain);
+          readAnalyserTimeDomain(pitchAnalyser, rawTimeDomain);
           const f0 = yinDetector(rawTimeDomain);
           accumulator.addFrame(
             features.spectralCentroid,
             features.rms,
             f0,
             features.spectralFlatness,
-            features.zcr
+            features.zcr,
+            features.amplitudeSpectrum
           );
         },
       });
@@ -336,6 +349,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
           analyzer.stop();
           try {
             pitchAnalyser.disconnect();
+            inputGain.disconnect();
             meydaSource.disconnect();
           } catch {
             /* already disconnected */

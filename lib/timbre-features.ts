@@ -18,8 +18,13 @@
  *
  * Axes (all 0-100, FIXED calibration — never per-take min/max):
  *   timbreWeight ← spectral centroid (Hz, log map)
- *   airiness     ← zero-crossing rate
+ *   airiness     ← high-frequency energy ratio (4–12 kHz), not ZCR
  *   raspiness    ← spectral flatness
+ *
+ * Air used to be mapped from zero-crossing rate. That is almost always 0 for
+ * sung vowels: a 150 Hz chest tone at 44.1 kHz has ZCR ≈ 0.007, below the
+ * old 0.015 floor, and ZCR mostly tracks F0 rather than breath. Breath / air
+ * lives in the 4–12 kHz band.
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/match-voice/route.ts`,
  * `lib/neural-voice-match.ts`, `lib/singing-gender.ts`, `lib/voice-embed.ts`
@@ -109,20 +114,27 @@ export const FLATNESS_RASP_MIN = 0.001;
 export const FLATNESS_RASP_MAX = 0.25;
 
 /**
- * Calibration range for zero-crossing RATE → `airiness` (0-100).
+ * High-frequency energy ratio → airiness (0-100).
  *
- * Meyda 5.x `zcr` is a COUNT of sign changes in the analysis window, not a
- * 0–1 rate. We convert with `count / bufferSize` (see `zcrToRate`). Dense
- * chest voice typically lands ~0.015–0.05; breathy pop ~0.10–0.20; exposed
- * sibilants / air noise higher still. LINEAR map — ZCR already tracks
- * high-frequency energy roughly linearly for sung vowels.
+ * `hfRatio` is energy in 4–12 kHz divided by energy in 80 Hz–12 kHz, from
+ * Meyda's amplitude spectrum (or an equivalent FFT). Dense chest vowels sit
+ * ~0.02–0.08; mixed / light ~0.10–0.18; breathy pop ~0.22–0.40.
  *
- *   0.015 → 0    (dense)
- *   0.080 → 35
- *   0.200 → 100  (very breathy)
+ *   0.03 → 0     (dense)
+ *   0.12 → 35
+ *   0.28 → 100   (very breathy)
  */
-export const ZCR_AIR_MIN = 0.015;
-export const ZCR_AIR_MAX = 0.2;
+export const HF_AIR_MIN = 0.03;
+export const HF_AIR_MAX = 0.28;
+export const HF_AIR_BAND_LO_HZ = 4000;
+export const HF_AIR_BAND_HI_HZ = 12000;
+
+/**
+ * Calibration range for zero-crossing RATE → `airiness` (0-100).
+ * Fallback only, when no amplitude spectrum is available.
+ */
+export const ZCR_AIR_MIN = 0.004;
+export const ZCR_AIR_MAX = 0.08;
 
 /**
  * Meyda's `spectralCentroid` is `mu(1, ampSpectrum)` — the amplitude-weighted
@@ -174,9 +186,42 @@ export function zcrToRate(zcr: number, bufferSize: number): number {
   return zcr;
 }
 
-/** Zero-crossing rate (0–1) → 0-100 airiness. */
+/** Zero-crossing rate (0–1) → 0-100 airiness. Fallback when no spectrum. */
 export function zcrRateToAiriness(zcrRate: number): number {
   return Math.round(linMap(zcrRate, ZCR_AIR_MIN, ZCR_AIR_MAX) * 100);
+}
+
+/**
+ * Convert a magnitude spectrum (linear amplitude per FFT bin) into the
+ * high-frequency energy ratio used for airiness. `fftSize` is the full FFT
+ * size (typically 2 × spectrum.length).
+ */
+export function amplitudeSpectrumToHfRatio(
+  spectrum: ArrayLike<number>,
+  sampleRate: number,
+  fftSize: number
+): number {
+  if (!spectrum.length || sampleRate <= 0 || fftSize <= 0) return 0;
+  const binHz = sampleRate / fftSize;
+  const nyquist = sampleRate / 2;
+  const airHi = Math.min(HF_AIR_BAND_HI_HZ, nyquist);
+  let voiced = 0;
+  let air = 0;
+  for (let i = 1; i < spectrum.length; i += 1) {
+    const hz = i * binHz;
+    if (hz < 80 || hz > airHi) continue;
+    const mag = spectrum[i] ?? 0;
+    const energy = mag * mag;
+    if (hz < HF_AIR_BAND_LO_HZ) voiced += energy;
+    else air += energy;
+  }
+  const total = voiced + air;
+  if (total <= 0) return 0;
+  return air / total;
+}
+
+export function hfRatioToAiriness(ratio: number): number {
+  return Math.round(linMap(ratio, HF_AIR_MIN, HF_AIR_MAX) * 100);
 }
 
 /** Robust (median-based) summary of a single take. */
@@ -189,6 +234,8 @@ export type VoiceMeasurement = {
   medianFlatness: number;
   /** Median zero-crossing rate (0–1) across non-silent frames. */
   medianZcrRate: number;
+  /** Median high-frequency energy ratio (0–1) when a spectrum was supplied. */
+  medianHfRatio: number;
   /** `medianCentroidHz` mapped onto the same 0-100 scale as the stars' `timbreWeight`. */
   userWeight: number;
   /** ZCR mapped onto the same 0-100 scale as the stars' `airiness`. */
@@ -223,6 +270,7 @@ export class VoiceMeasurementAccumulator {
   private centroidBins: number[] = [];
   private flatness: number[] = [];
   private zcrRates: number[] = [];
+  private hfRatios: number[] = [];
   private pitchHz: number[] = [];
   private frames = 0;
 
@@ -243,7 +291,8 @@ export class VoiceMeasurementAccumulator {
     rms: number | undefined,
     f0Hz?: number | null,
     spectralFlatness?: number,
-    zcr?: number
+    zcr?: number,
+    amplitudeSpectrum?: ArrayLike<number>
   ): void {
     if (typeof rms !== "number" || !Number.isFinite(rms) || rms < RMS_NOISE_FLOOR) {
       return; // silence gate
@@ -258,6 +307,14 @@ export class VoiceMeasurementAccumulator {
     }
     if (typeof zcr === "number" && Number.isFinite(zcr) && zcr >= 0) {
       this.zcrRates.push(zcrToRate(zcr, this.bufferSize));
+    }
+    if (amplitudeSpectrum && amplitudeSpectrum.length > 0) {
+      const ratio = amplitudeSpectrumToHfRatio(
+        amplitudeSpectrum,
+        this.sampleRate,
+        this.bufferSize
+      );
+      if (Number.isFinite(ratio) && ratio >= 0) this.hfRatios.push(ratio);
     }
     if (typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0) {
       this.pitchHz.push(f0Hz);
@@ -278,7 +335,7 @@ export class VoiceMeasurementAccumulator {
     if (this.pitchHz.length < MIN_PITCHED_FRAMES) return null;
     if (this.centroidBins.length === 0) return null;
     if (this.flatness.length === 0) return null;
-    if (this.zcrRates.length === 0) return null;
+    if (this.hfRatios.length === 0 && this.zcrRates.length === 0) return null;
 
     const medianCentroidHz = centroidBinToHz(
       median(this.centroidBins),
@@ -287,14 +344,20 @@ export class VoiceMeasurementAccumulator {
     );
     const medianFlatness = median(this.flatness);
     const medianZcrRate = median(this.zcrRates);
+    const medianHfRatio = median(this.hfRatios);
+    const userAiriness =
+      this.hfRatios.length > 0
+        ? hfRatioToAiriness(medianHfRatio)
+        : zcrRateToAiriness(medianZcrRate);
 
     return {
       medianHz: median(this.pitchHz),
       medianCentroidHz,
       medianFlatness,
       medianZcrRate,
+      medianHfRatio,
       userWeight: centroidHzToWeight(medianCentroidHz),
-      userAiriness: zcrRateToAiriness(medianZcrRate),
+      userAiriness,
       userRaspiness: flatnessToRaspiness(medianFlatness),
       frameCount: this.frames,
       pitchedFrameCount: this.pitchHz.length,

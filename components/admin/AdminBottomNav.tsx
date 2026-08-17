@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { CalendarDays, MessageCircle, Music2 } from "lucide-react";
+import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
 
 const items = [
   {
@@ -41,9 +41,10 @@ export default function AdminBottomNav() {
           const Icon = item.icon;
           const active = onCabinet && tab === item.id;
           return (
-            <Link
+            <CabinetTabLink
               key={item.id}
               href={item.href}
+              tabId={item.id}
               className={`flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition ${
                 active
                   ? "text-studio-accent-light"
@@ -52,7 +53,7 @@ export default function AdminBottomNav() {
             >
               <Icon className={`h-5 w-5 ${active ? "stroke-[2.25]" : ""}`} />
               {item.label}
-            </Link>
+            </CabinetTabLink>
           );
         })}
       </div>

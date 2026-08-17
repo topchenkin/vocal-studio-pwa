@@ -522,7 +522,7 @@ export interface Database {
           size_bytes: number;
           created_at?: string;
         };
-        Update: Record<string, never>;
+        Update: Partial<Pick<StudentAudioTrack, "title">>;
         Relationships: [];
       };
     };
