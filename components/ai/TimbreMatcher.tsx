@@ -430,7 +430,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
   if (locked) {
     return (
       <LockedCard
-        title="На кого похож твой тембр?"
+        title="Звёздный двойник"
         text="10 секунд в микрофон — и вы увидите, на какую звезду похож ваш голос. Тип голоса, совпадения с 100 исполнителями и «вау»-момент, после которого хочется петь ещё. Доступно на Premium."
       />
     );
@@ -444,7 +444,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            На кого похож твой тембр?
+            Звёздный двойник
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Спойте 10 секунд — нейросеть разберёт тембр и покажет, с какими

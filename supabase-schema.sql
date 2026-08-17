@@ -1892,7 +1892,7 @@ insert into public.ai_tool_access (tool_id, min_tier, enabled, title)
 values
   ('tuner', 'none', true, 'Нейроанализ голоса'),
   ('remover', 'premium', true, 'Удаление вокала'),
-  ('timbre', 'premium', true, 'Похожий тембр'),
+  ('timbre', 'premium', true, 'Звёздный двойник'),
   ('mixer', 'standard', true, 'Сведение дорожек')
 on conflict (tool_id) do nothing;
 
