@@ -168,7 +168,10 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current?.getTracks().forEach((track) => {
+      track.enabled = false;
+      track.stop();
+    });
     streamRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
       void audioContextRef.current.close();

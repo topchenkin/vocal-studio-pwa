@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   Camera,
   ImagePlus,
@@ -16,10 +17,14 @@ import {
 } from "lucide-react";
 import type { ChatSendPayload } from "@/hooks/useChatMessages";
 import {
-  mediaFileFromChunks,
-  pickVideoRecorderMime,
-  pickVoiceRecorderMime,
-} from "@/lib/media-mime";
+  attachPreviewStream,
+  chatCaptureErrorMessage,
+  createChatRecorder,
+  getChatMediaStream,
+  startChatRecorder,
+  stopMediaStream,
+} from "@/lib/chat-capture";
+import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { ChatMessage, User } from "@/lib/types";
 import { formatTime } from "@/lib/storage";
@@ -86,9 +91,7 @@ export default function ChatWindow({
     const el = previewRef.current;
     const stream = streamRef.current;
     if (!el || !stream) return;
-    el.srcObject = stream;
-    el.muted = true;
-    void el.play().catch(() => undefined);
+    void attachPreviewStream(el, stream);
     return () => {
       el.srcObject = null;
     };
@@ -97,7 +100,8 @@ export default function ChatWindow({
   useEffect(
     () => () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMediaStream(streamRef.current);
+      streamRef.current = null;
     },
     []
   );
@@ -158,7 +162,7 @@ export default function ChatWindow({
     recorder.ondataavailable = null;
     recorder.onstop = () => {
       chunksRef.current = [];
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMediaStream(streamRef.current);
       streamRef.current = null;
       mediaRecorderRef.current = null;
     };
@@ -169,7 +173,11 @@ export default function ChatWindow({
   const pauseRecording = () => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state !== "recording") return;
-    recorder.pause();
+    try {
+      recorder.pause();
+    } catch {
+      return;
+    }
     accumulatedMsRef.current += Date.now() - segmentStartedRef.current;
     clearTimer();
     setPhase("paused");
@@ -179,7 +187,11 @@ export default function ChatWindow({
   const resumeRecording = () => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state !== "paused") return;
-    recorder.resume();
+    try {
+      recorder.resume();
+    } catch {
+      return;
+    }
     segmentStartedRef.current = Date.now();
     setPhase("recording");
     startTimer();
@@ -200,25 +212,34 @@ export default function ChatWindow({
   const startRecording = async (kind: RecordKind) => {
     setRecordError("");
     setPanel("none");
-    setRecordKind(kind);
     recordKindRef.current = kind;
+    stopMediaStream(streamRef.current);
+    streamRef.current = null;
     try {
       if (typeof MediaRecorder === "undefined") {
         setRecordError("Запись не поддерживается в этом браузере");
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia(
-        kind === "video"
-          ? { audio: true, video: { facingMode: "user" } }
-          : { audio: true }
-      );
+      // Mount the preview <video> before getUserMedia. iOS will not start the
+      // camera on a missing / display:none / opacity-0 element, and play()
+      // after an await is no longer a user gesture unless the node exists.
+      flushSync(() => {
+        setRecordKind(kind);
+        if (kind === "video") {
+          setPhase("recording");
+          setRecordMs(0);
+        }
+      });
+
+      const stream = await getChatMediaStream(kind);
       streamRef.current = stream;
-      const preferredMime =
-        kind === "video" ? pickVideoRecorderMime() : pickVoiceRecorderMime();
-      preferredMimeRef.current = preferredMime;
-      const recorder = preferredMime
-        ? new MediaRecorder(stream, { mimeType: preferredMime })
-        : new MediaRecorder(stream);
+
+      if (kind === "video" && previewRef.current) {
+        await attachPreviewStream(previewRef.current, stream);
+      }
+
+      const { recorder, mime } = createChatRecorder(stream, kind);
+      preferredMimeRef.current = mime;
       chunksRef.current = [];
       mediaRecorderRef.current = recorder;
       accumulatedMsRef.current = 0;
@@ -235,7 +256,7 @@ export default function ChatWindow({
           1,
           Math.round(durationMsRef.current / 1000) || 1
         );
-        stream.getTracks().forEach((track) => track.stop());
+        stopMediaStream(stream);
         streamRef.current = null;
         mediaRecorderRef.current = null;
         if (!shouldSend || chunksRef.current.length === 0) {
@@ -266,16 +287,16 @@ export default function ChatWindow({
         chunksRef.current = [];
       };
 
-      recorder.start(250);
+      startChatRecorder(recorder, kind);
       setPhase("recording");
       setRecordMs(0);
       startTimer();
-    } catch {
-      setRecordError(
-        kind === "video"
-          ? "Нужен доступ к камере и микрофону"
-          : "Нужен доступ к микрофону"
-      );
+    } catch (err) {
+      stopMediaStream(streamRef.current);
+      streamRef.current = null;
+      mediaRecorderRef.current = null;
+      resetRecordingState();
+      setRecordError(chatCaptureErrorMessage(kind, err));
     }
   };
 
@@ -356,6 +377,7 @@ export default function ChatWindow({
                       <video
                         controls
                         playsInline
+                        {...{ "webkit-playsinline": "true" }}
                         src={msg.mediaUrl}
                         className="h-48 w-48 rounded-full object-cover"
                       />
@@ -475,6 +497,8 @@ export default function ChatWindow({
                     muted
                     playsInline
                     autoPlay
+                    // iOS Safari / standalone PWA: without this the camera stays black
+                    {...{ "webkit-playsinline": "true" }}
                     className="h-full w-full scale-x-[-1] object-cover"
                   />
                 </div>
