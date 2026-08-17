@@ -23,7 +23,9 @@ import {
   getChatMediaStream,
   startChatRecorder,
   stopMediaStream,
+  unlockInlineVideo,
 } from "@/lib/chat-capture";
+import { isAppleWebKit } from "@/lib/mic-audio";
 import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { ChatMessage, User } from "@/lib/types";
@@ -91,10 +93,11 @@ export default function ChatWindow({
     const el = previewRef.current;
     const stream = streamRef.current;
     if (!el || !stream) return;
-    void attachPreviewStream(el, stream);
-    return () => {
-      el.srcObject = null;
-    };
+    if (el.srcObject !== stream) {
+      void attachPreviewStream(el, stream);
+    }
+    // Do not clear srcObject on cleanup: iOS goes permanently black if we
+    // detach/reattach when phase flips recording ↔ paused (Strict Mode too).
   }, [phase, recordKind]);
 
   useEffect(
@@ -220,9 +223,9 @@ export default function ChatWindow({
         setRecordError("Запись не поддерживается в этом браузере");
         return;
       }
-      // Mount the preview <video> before getUserMedia. iOS will not start the
-      // camera on a missing / display:none / opacity-0 element, and play()
-      // after an await is no longer a user gesture unless the node exists.
+      // Mount a visible preview <video> during the tap. iOS will not start
+      // the camera on a missing / display:none element, and play() after an
+      // await is no longer a user gesture unless we unlock the node first.
       flushSync(() => {
         setRecordKind(kind);
         if (kind === "video") {
@@ -230,12 +233,20 @@ export default function ChatWindow({
           setRecordMs(0);
         }
       });
+      if (kind === "video" && previewRef.current) {
+        unlockInlineVideo(previewRef.current);
+        previewRef.current.scrollIntoView({ block: "nearest" });
+      }
 
       const stream = await getChatMediaStream(kind);
       streamRef.current = stream;
 
-      if (kind === "video" && previewRef.current) {
-        await attachPreviewStream(previewRef.current, stream);
+      if (kind === "video") {
+        const preview = previewRef.current;
+        if (!preview) {
+          throw new Error("preview missing");
+        }
+        await attachPreviewStream(preview, stream);
       }
 
       const { recorder, mime } = createChatRecorder(stream, kind);
@@ -308,7 +319,7 @@ export default function ChatWindow({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-studio-surface ring-1 ring-studio-border">
+    <div className="flex h-full min-h-0 flex-col rounded-2xl bg-studio-surface ring-1 ring-studio-border">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {chatMessages.length === 0 ? (
           <p className="py-8 text-center text-sm text-studio-muted">
@@ -374,13 +385,15 @@ export default function ChatWindow({
                     />
                   ) : msg.messageType === "video" && msg.mediaUrl ? (
                     <div className="space-y-1">
-                      <video
-                        controls
-                        playsInline
-                        {...{ "webkit-playsinline": "true" }}
-                        src={msg.mediaUrl}
-                        className="h-48 w-48 rounded-full object-cover"
-                      />
+                      <CircleVideoFrame className="h-48 w-48">
+                        <video
+                          controls
+                          playsInline
+                          {...{ "webkit-playsinline": "true" }}
+                          src={msg.mediaUrl}
+                          className="h-full w-full object-cover"
+                        />
+                      </CircleVideoFrame>
                       {msg.mediaDurationSec ? (
                         <p className="text-center text-[10px] opacity-60">
                           {msg.mediaDurationSec} сек
@@ -491,17 +504,21 @@ export default function ChatWindow({
           {phase !== "idle" ? (
             <div className="space-y-2">
               {recordKind === "video" && (
-                <div className="mx-auto flex h-44 w-44 items-center justify-center overflow-hidden rounded-full bg-black ring-2 ring-red-400/50">
+                <CircleVideoFrame className="mx-auto h-44 w-44">
                   <video
                     ref={previewRef}
                     muted
                     playsInline
                     autoPlay
+                    width={640}
+                    height={480}
                     // iOS Safari / standalone PWA: without this the camera stays black
                     {...{ "webkit-playsinline": "true" }}
-                    className="h-full w-full scale-x-[-1] object-cover"
+                    className={`h-full w-full object-cover ${
+                      isAppleWebKit() ? "" : "scale-x-[-1]"
+                    }`}
                   />
-                </div>
+                </CircleVideoFrame>
               )}
               <div className="flex items-center gap-2 rounded-2xl bg-red-500/10 px-2 py-1.5 ring-1 ring-red-500/25">
                 <button
@@ -705,5 +722,29 @@ function ComposerIcon({
     >
       {children}
     </button>
+  );
+}
+
+/** Circle crop without overflow:hidden / border-radius on the <video> itself.
+ *  WebKit paints a live camera layer as black when those CSS properties clip it. */
+function CircleVideoFrame({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`overflow-visible bg-black ${className ?? ""}`}
+      style={{
+        WebkitMaskImage:
+          "radial-gradient(circle closest-side at center, #000 99.6%, transparent 100%)",
+        maskImage:
+          "radial-gradient(circle closest-side at center, #000 99.6%, transparent 100%)",
+      }}
+    >
+      {children}
+    </div>
   );
 }

@@ -22,7 +22,7 @@ export default function DashboardLayout({
     <div
       className={cn(
         "relative",
-        compact ? "flex flex-col overflow-hidden" : "min-h-screen",
+        compact ? "flex min-h-0 flex-col" : "min-h-screen",
         compact && bottomInset
           ? "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))]"
           : compact

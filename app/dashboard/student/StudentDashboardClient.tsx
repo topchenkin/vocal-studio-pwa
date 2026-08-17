@@ -136,34 +136,39 @@ export default function StudentDashboardClient() {
       bottomInset
     >
       <StudentNav />
-      <AnimatePresence>
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.25 }}
-          className={isChat ? "mt-3 flex min-h-0 flex-1 flex-col" : "mt-6"}
-        >
-          {activeTab === "home" && (
-            <div className="space-y-8">
-              <SubscriptionStatus />
-              <section>
-                <h3 className="font-display text-lg font-semibold">
-                  Домашние задания
-                </h3>
-                <p className="mb-3 text-xs text-studio-muted">
-                  Задания от преподавателя после урока
-                </p>
-                <NotesSection />
-              </section>
-            </div>
-          )}
-          {activeTab === "lessons" && <UpcomingLessons />}
-          {activeTab === "audio" && <MyAudioLibrary />}
-          {activeTab === "chat" && <StudentChatSection />}
-        </motion.div>
-      </AnimatePresence>
+      {isChat ? (
+        <div className="mt-3 flex min-h-0 flex-1 flex-col">
+          <StudentChatSection />
+        </div>
+      ) : (
+        <AnimatePresence>
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+            className="mt-6"
+          >
+            {activeTab === "home" && (
+              <div className="space-y-8">
+                <SubscriptionStatus />
+                <section>
+                  <h3 className="font-display text-lg font-semibold">
+                    Домашние задания
+                  </h3>
+                  <p className="mb-3 text-xs text-studio-muted">
+                    Задания от преподавателя после урока
+                  </p>
+                  <NotesSection />
+                </section>
+              </div>
+            )}
+            {activeTab === "lessons" && <UpcomingLessons />}
+            {activeTab === "audio" && <MyAudioLibrary />}
+          </motion.div>
+        </AnimatePresence>
+      )}
     </DashboardLayout>
   );
 }

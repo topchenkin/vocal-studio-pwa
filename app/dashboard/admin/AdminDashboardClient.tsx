@@ -143,34 +143,39 @@ export default function AdminDashboardClient() {
         <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
       </div>
 
-      <AnimatePresence>
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.25 }}
-          className={isChat ? "mt-3 flex min-h-0 flex-1 flex-col" : "mt-6"}
-        >
-          {activeTab === "students" && <StudentsTable />}
-          {activeTab === "schedule" && <ScheduleGrid />}
-          {activeTab === "chat" && <AdminChat />}
-          {activeTab === "notifications" && <NotificationForm />}
-          {activeTab === "content" && <ContentManager />}
-          {activeTab === "audio" && <MyAudioLibrary />}
-          {activeTab === "ai-tools" && (
-            <div className="space-y-5">
-              <AiToolsAccessSettings />
-              <div className="grid gap-5 lg:grid-cols-2">
-                <PitchAnalyzer />
-                <VocalRemover />
-                <TimbreMatcher />
-                <MultitrackMixer />
+      {isChat ? (
+        <div className="mt-3 flex min-h-0 flex-1 flex-col">
+          <AdminChat />
+        </div>
+      ) : (
+        <AnimatePresence>
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25 }}
+            className="mt-6"
+          >
+            {activeTab === "students" && <StudentsTable />}
+            {activeTab === "schedule" && <ScheduleGrid />}
+            {activeTab === "notifications" && <NotificationForm />}
+            {activeTab === "content" && <ContentManager />}
+            {activeTab === "audio" && <MyAudioLibrary />}
+            {activeTab === "ai-tools" && (
+              <div className="space-y-5">
+                <AiToolsAccessSettings />
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <PitchAnalyzer />
+                  <VocalRemover />
+                  <TimbreMatcher />
+                  <MultitrackMixer />
+                </div>
               </div>
-            </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      )}
     </DashboardLayout>
   );
 }
