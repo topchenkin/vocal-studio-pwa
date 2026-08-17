@@ -1,5 +1,22 @@
 # Обновление Supabase и production
 
+**Боевой сайт — только Timeweb Cloud Apps:** https://www.uniquevocal.ru
+(A → `92.246.76.92`). GitHub Actions запускает workflow **CI**: `npm run build`
+и typecheck. Это проверка, а не публикация. Деплой на GitHub Pages отключён:
+зелёный Pages раньше выглядел как «сайт упал», а CNAME `www` → `*.github.io`
+отправлял пользователей из РФ на заблокированные IP GitHub.
+
+GitHub → Settings → Pages:
+- Source / custom domain — **выключено / пусто**. Не включать и не указывать
+  `uniquevocal.ru` / `www.uniquevocal.ru`.
+- Файл `public/CNAME` удалён специально и **нельзя возвращать**.
+- Environment `github-pages` не используется.
+
+Optional FTP (`deploy-ftp.yml`) — ручная заливка той же статики `out/` на
+хостинг, не GitHub Pages.
+
+## Supabase и переменные
+
 1. Выполнить целиком `supabase-schema.sql` в Supabase SQL Editor.
 2. Проверить Storage buckets:
    - `exercise-media` — аудио/видео CMS (приватный)
@@ -36,8 +53,9 @@ Email отправляется только для непрочитанного 
 
 1. `@` и `www` — только A → `92.246.76.92`. **Не должно быть CNAME**
    `www` → `*.github.io`.
-2. GitHub → Settings → Pages → Custom domain: **пусто**. Файл `public/CNAME`
-   удалён специально, чтобы Pages снова не забрал `www.uniquevocal.ru`.
+2. GitHub → Settings → Pages: **Disabled**, Custom domain **пусто**.
+   Файл `public/CNAME` удалён специально, чтобы Pages снова не забрал
+   `www.uniquevocal.ru`. Не включайте Pages и не возвращайте CNAME.
 3. После смены DNS подождите TTL или сбросьте кэш (`ipconfig /flushdns`).
    Старый CNAME в кэше провайдера отправляет `www` на GitHub, который из РФ
    часто не открывается — отсюда «нужен VPN», хотя хост российский.

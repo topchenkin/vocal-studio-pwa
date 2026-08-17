@@ -1,22 +1,25 @@
-name: Deploy to GitHub Pages
+# Production is Timeweb Cloud Apps (https://www.uniquevocal.ru).
+# This workflow only typechecks and builds. It must NOT upload a Pages
+# artifact or call actions/deploy-pages — a green Pages deploy used to
+# look like the live site was down, and a leftover www CNAME to github.io
+# sent Russia users to blocked GitHub IPs instead of Timeweb.
+name: CI
 
-# Production is Timeweb. Do not set Pages custom domain to uniquevocal.ru —
-# leftover www CNAME to github.io is what broke RF access without a VPN.
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: github-pages
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    name: Typecheck and static export
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -39,21 +42,13 @@ jobs:
           NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
 
-      - name: Strip GitHub Pages CNAME
-        run: rm -f out/CNAME public/CNAME
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: out
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Guard against Pages CNAME
+        run: |
+          if [ -f public/CNAME ] || [ -f out/CNAME ]; then
+            echo "public/CNAME and out/CNAME must stay deleted."
+            echo "A CNAME file makes GitHub Pages claim www.uniquevocal.ru."
+            exit 1
+          fi

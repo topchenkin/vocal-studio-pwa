@@ -23,12 +23,20 @@ export function mapBackendError(error: unknown, fallback?: string): string {
   return fallback ?? SUPABASE_UNREACHABLE_RU;
 }
 
-export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
+/**
+ * Wrap any thenable (real Promise or Supabase query builder).
+ * `Promise<T>` is wrong here: Postgrest builders are PromiseLike, so T
+ * collapsed to `unknown` and `next build` failed on `{ data, error }`.
+ */
+export function withTimeout<T>(
+  thenable: T,
+  ms: number
+): Promise<Awaited<T>> {
+  return new Promise<Awaited<T>>((resolve, reject) => {
     const id = setTimeout(() => {
       reject(new Error("timeout"));
     }, ms);
-    promise.then(
+    Promise.resolve(thenable).then(
       (value) => {
         clearTimeout(id);
         resolve(value);
