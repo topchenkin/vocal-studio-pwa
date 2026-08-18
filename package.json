@@ -12,7 +12,8 @@
     "start": "next start",
     "lint": "next lint",
     "generate-vapid": "web-push generate-vapid-keys",
-    "check-dns": "node scripts/check-dns.mjs"
+    "check-dns": "node scripts/check-dns.mjs",
+    "sb-proxy": "node deploy/sb-proxy/server.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

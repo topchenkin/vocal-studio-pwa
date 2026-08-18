@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
+import { getBrowserSupabaseUrl } from "@/lib/supabase-origin";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -35,7 +36,7 @@ async function fetchWithTimeout(
 }
 
 export const supabase = createClient<Database>(
-  supabaseUrl || "https://placeholder.supabase.co",
+  getBrowserSupabaseUrl(),
   supabaseAnonKey || "public-anon-placeholder",
   {
     auth: {

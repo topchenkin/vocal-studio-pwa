@@ -6,7 +6,9 @@
 import dns from "node:dns/promises";
 
 const TIMEWEB_IP = "92.246.76.92";
+const PROXY_IP = "147.45.136.24";
 const HOSTS = ["uniquevocal.ru", "www.uniquevocal.ru"];
+const PROXY_HOST = "sb.uniquevocal.ru";
 const GITHUB_PAGES_PREFIX = "185.199.";
 
 const resolvers = [
@@ -67,11 +69,36 @@ for (const host of HOSTS) {
   console.log("");
 }
 
+console.log(`=== ${PROXY_HOST} ===`);
+for (const { label, servers } of resolvers) {
+  try {
+    const { aRecords, cnameRecords } = await lookup(PROXY_HOST, servers);
+    const cname =
+      cnameRecords.length > 0 ? ` CNAME → ${cnameRecords.join(", ")}` : "";
+    if (aRecords.length === 0 && cnameRecords.length === 0) {
+      console.log(`  ${label}: (no A/CNAME) [WARN — add A ${PROXY_IP}]`);
+      failed = true;
+      continue;
+    }
+    for (const ip of aRecords) {
+      const mark = ip === PROXY_IP ? "OK" : "WARN";
+      if (ip !== PROXY_IP) failed = true;
+      console.log(`  ${label}: ${ip} [${mark}]${cname}`);
+    }
+  } catch (err) {
+    console.log(`  ${label}: error — ${err.message}`);
+    failed = true;
+  }
+}
+console.log("");
+
 if (failed) {
   console.error(
-    "DNS is NOT clean everywhere. In reg.ru delete CNAME www → github.io and any A to 185.199.x.x; leave only A @ and www → 92.246.76.92."
+    "DNS is NOT clean everywhere. Site: A @ and www → 92.246.76.92. Proxy: A sb → 147.45.136.24. Remove any CNAME www → github.io."
   );
   process.exit(1);
 }
 
-console.log("All checked resolvers point to Timeweb. If the phone still shows GitHub Pages 404, clear Safari/PWA cache or wait for ISP DNS TTL (up to 24h).");
+console.log(
+  "Site resolvers point to Timeweb and sb.uniquevocal.ru points to the Amsterdam proxy. If a phone still shows GitHub Pages 404, clear Safari/PWA cache or wait for ISP DNS TTL."
+);
