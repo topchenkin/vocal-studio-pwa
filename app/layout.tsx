@@ -19,6 +19,10 @@ const sans = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.uniquevocal.ru"),
+  alternates: {
+    canonical: "/",
+  },
   title: `${APP_NAME} — Студия вокала`,
   description:
     "Профессиональные уроки вокала. Выберите абонемент и запишитесь на занятие.",

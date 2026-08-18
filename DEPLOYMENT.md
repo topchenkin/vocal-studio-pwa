@@ -2,9 +2,7 @@
 
 **Боевой сайт — только Timeweb Cloud Apps:** https://www.uniquevocal.ru
 (A → `92.246.76.92`). GitHub Actions запускает workflow **CI**: `npm run build`
-и typecheck. Это проверка, а не публикация. Деплой на GitHub Pages отключён:
-зелёный Pages раньше выглядел как «сайт упал», а CNAME `www` → `*.github.io`
-отправлял пользователей из РФ на заблокированные IP GitHub.
+и typecheck. Это проверка, а не публикация. Деплой на GitHub Pages **отключён**.
 
 GitHub → Settings → Pages:
 - Source / custom domain — **выключено / пусто**. Не включать и не указывать
@@ -14,6 +12,53 @@ GitHub → Settings → Pages:
 
 Optional FTP (`deploy-ftp.yml`) — ручная заливка той же статики `out/` на
 хостинг, не GitHub Pages.
+
+## Почему без VPN видна страница GitHub Pages 404
+
+Текст **«There isn't a GitHub Pages site here»** отдаёт **сервер GitHub**, не
+Timeweb. Значит браузер всё ещё попадает на IP GitHub (`185.199.x.x`) или на
+старый CNAME `www` → `*.github.io`.
+
+Раньше сайт публиковался через GitHub Pages. В репозитории лежал `public/CNAME`
+с `www.uniquevocal.ru`, а в reg.ru для `www` была CNAME-запись на
+`topchenkin.github.io`. С VPN DNS часто шёл через зарубежный резолвер и
+«маскировал» проблему; без VPN российский провайдер мог отдавать старый ответ
+или GitHub из РФ был недоступен/таймаутился.
+
+**Сейчас (проверено):** у authoritative DNS reg.ru (`ns1.reg.ru`, `ns2.reg.ru`),
+Google DNS и Yandex DNS записи `@` и `www` → **A `92.246.76.92`**, CNAME на
+GitHub **нет**, AAAA **нет**. Запрос на Timeweb отдаёт `Server: Caddy` и HTML
+студии. GitHub Pages на репозитории **выключен** (API `/pages` → 404).
+
+Если у вас на телефоне всё ещё GitHub 404 — это **не** «Timeweb сломан», а одно
+из:
+
+1. **Кэш DNS у мобильного оператора** (старый CNAME/A на GitHub, TTL до суток).
+2. **Старая иконка PWA** / кэш Safari с эпохи GitHub Pages — удалите приложение
+   с домашнего экрана, очистите данные сайта, откройте заново.
+3. **В reg.ru осталась лишняя запись** (см. чеклист ниже) — проверьте вручную.
+
+Проверка с компьютера: `npm run check-dns` — скрипт опрашивает несколько
+резолверов и подсветит, если где-то ещё GitHub.
+
+### Чеклист reg.ru (обязательно)
+
+1. Домен → DNS-серверы: `ns1.reg.ru`, `ns2.reg.ru`.
+2. DNS-зона → **удалить** все записи:
+   - CNAME `www` → `topchenkin.github.io` (или любой `*.github.io`);
+   - A `@` или `www` → `185.199.108.153`, `185.199.109.153`, … (IP GitHub Pages);
+   - любые AAAA, если они указывают не на Timeweb.
+3. **Оставить только:**
+   - A `@` → `92.246.76.92`
+   - A `www` → `92.246.76.92`
+4. Раздел «Переадресация» / парковка reg.ru — **выключено**.
+5. TTL на время миграции можно поставить **600** (10 мин), потом вернуть 3600+.
+6. GitHub → repo → Settings → Pages: custom domain **пусто**, Pages **Disabled**.
+7. Timeweb Cloud Apps → UniqueVocal → пересобрать **последний** коммит `main`.
+
+На iPhone для проверки DNS: Wi‑Fi → DNS вручную `77.88.8.8` или `8.8.8.8`. Если
+с таким DNS сайт открывается, а с операторским — нет, виноват кэш оператора
+(подождать или сменить сеть).
 
 ## Supabase и переменные
 
@@ -48,17 +93,6 @@ Email отправляется только для непрочитанного 
 Кабинет, вход и чат ходят **из браузера** на `*.supabase.co` — это не Россия.
 `output: "export"` не умеет проксировать Supabase; для этого нужен сервер
 (Timeweb Next.js без static export, reverse proxy, или свой домен Supabase).
-
-Проверьте DNS в reg.ru:
-
-1. `@` и `www` — только A → `92.246.76.92`. **Не должно быть CNAME**
-   `www` → `*.github.io`.
-2. GitHub → Settings → Pages: **Disabled**, Custom domain **пусто**.
-   Файл `public/CNAME` удалён специально, чтобы Pages снова не забрал
-   `www.uniquevocal.ru`. Не включайте Pages и не возвращайте CNAME.
-3. После смены DNS подождите TTL или сбросьте кэш (`ipconfig /flushdns`).
-   Старый CNAME в кэше провайдера отправляет `www` на GitHub, который из РФ
-   часто не открывается — отсюда «нужен VPN», хотя хост российский.
 
 Оплата сейчас работает в явно обозначенном Beta/sandbox-режиме: операция
 записывается в `payment_transactions`, но деньги не списываются. Выдачу

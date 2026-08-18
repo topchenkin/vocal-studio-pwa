@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "next lint",
-    "generate-vapid": "web-push generate-vapid-keys"
+    "generate-vapid": "web-push generate-vapid-keys",
+    "check-dns": "node scripts/check-dns.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
