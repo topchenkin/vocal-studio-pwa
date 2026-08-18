@@ -1,0 +1,5 @@
+deploy/sb-proxy/*.sh text eol=lf
+deploy/sb-proxy/Caddyfile text eol=lf
+deploy/sb-proxy/*.service text eol=lf
+deploy/sb-proxy/*.mjs text eol=lf
+deploy/sb-proxy/env.example text eol=lf

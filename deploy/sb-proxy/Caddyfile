@@ -1,3 +1,12 @@
+{
+	email iris.jar008@gmail.com
+}
+
+# Bootstrap until DNS A sb → this IP is live (Let's Encrypt needs the name).
+http://147.45.136.24 {
+	reverse_proxy 127.0.0.1:8787
+}
+
 sb.uniquevocal.ru {
 	encode gzip
 	reverse_proxy 127.0.0.1:8787
