@@ -6,7 +6,7 @@
 import dns from "node:dns/promises";
 
 const TIMEWEB_IP = "92.246.76.92";
-const PROXY_IP = "147.45.136.24";
+const PROXY_IP = "92.246.76.92";
 const HOSTS = ["uniquevocal.ru", "www.uniquevocal.ru"];
 const PROXY_HOST = "sb.uniquevocal.ru";
 const GITHUB_PAGES_PREFIX = "185.199.";
@@ -94,11 +94,11 @@ console.log("");
 
 if (failed) {
   console.error(
-    "DNS is NOT clean everywhere. Site: A @ and www → 92.246.76.92. Proxy: A sb → 147.45.136.24. Remove any CNAME www → github.io."
+    "DNS is NOT clean everywhere. Site and proxy: A @, www, sb → 92.246.76.92. Remove any CNAME www → github.io."
   );
   process.exit(1);
 }
 
 console.log(
-  "Site resolvers point to Timeweb and sb.uniquevocal.ru points to the Amsterdam proxy. If a phone still shows GitHub Pages 404, clear Safari/PWA cache or wait for ISP DNS TTL."
+  "Site and sb.uniquevocal.ru point to Timeweb Russia. If a phone still shows GitHub Pages 404, clear Safari/PWA cache or wait for ISP DNS TTL."
 );

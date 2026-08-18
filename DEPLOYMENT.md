@@ -96,13 +96,15 @@ Email отправляется только для непрочитанного 
 
 **Не включать SSR на текущем Frontend** — будет 404.
 
-### Шлюз в Амстердаме (`sb.uniquevocal.ru`)
+### Шлюз (`sb.uniquevocal.ru`)
 
-VPS Timeweb Cloud: **A `sb` → `147.45.136.24`**. Caddy + Node, инструкция:
-`deploy/sb-proxy/README.md`. Сайт по-прежнему на Frontend (`92.246.76.92`).
+Амстердамский VPS (`147.45.136.24`) с VPN открывается, **без VPN из РФ —
+нет** (TSPU). Публичный вход — тот же IP, что у сайта: **A `sb` →
+`92.246.76.92`**, Node-приложение Timeweb в РФ. Инструкция:
+`deploy/sb-proxy/README.md`.
 
-Пока `https://sb.uniquevocal.ru/__health` не отвечает `ok`, переменную
-`NEXT_PUBLIC_SUPABASE_PROXY_URL` в Timeweb **не** задавать.
+Пока `https://sb.uniquevocal.ru/__health` не отвечает `ok` **без VPN**,
+переменную `NEXT_PUBLIC_SUPABASE_PROXY_URL` в Timeweb не считать рабочей.
 
 Оплата сейчас работает в явно обозначенном Beta/sandbox-режиме: операция
 записывается в `payment_transactions`, но деньги не списываются. Выдачу

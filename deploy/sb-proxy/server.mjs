@@ -14,7 +14,7 @@ import { request as httpsRequest } from "node:https";
 import tls from "node:tls";
 
 const PORT = Number(process.env.PORT) || 8787;
-const BIND = process.env.BIND || "127.0.0.1";
+const BIND = process.env.BIND || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 const SUPABASE_ORIGIN = (process.env.SUPABASE_ORIGIN || "").replace(/\/$/, "");
 const PROXY_PUBLIC_ORIGIN = (
   process.env.PROXY_PUBLIC_ORIGIN || ""
