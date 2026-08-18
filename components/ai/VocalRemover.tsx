@@ -15,9 +15,11 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
+import { splitStereoCenterCancel } from "@/lib/wav-client";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const API_TIMEOUT_MS = 90_000;
 
 const STEPS = [
   "1. Загружаем трек…",
@@ -42,12 +44,121 @@ function base64ToObjectUrl(b64: string, mime: string) {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
+function isJsonContentType(value: string | null) {
+  return Boolean(value && /application\/json/i.test(value.split(";")[0]));
+}
+
+class AuthSeparateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthSeparateError";
+  }
+}
+
+function abortAfter(ms: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel: () => window.clearTimeout(timer),
+  };
+}
+
+async function separateViaApi(
+  file: File,
+  token: string,
+  signal: AbortSignal
+): Promise<ResultTracks> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch("/api/ai/separate-vocal", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+    signal,
+  });
+
+  const contentType = response.headers.get("content-type");
+  if (!isJsonContentType(contentType)) {
+    throw new Error("API_UNAVAILABLE");
+  }
+
+  let payload: {
+    error?: string;
+    vocalUrl?: string;
+    minusUrl?: string;
+    vocalBase64?: string;
+    minusBase64?: string;
+    vocalMime?: string;
+    minusMime?: string;
+    model?: string;
+    space?: string;
+  };
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    throw new Error("API_UNAVAILABLE");
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new AuthSeparateError(
+      payload.error || "Нет доступа к разделению вокала."
+    );
+  }
+
+  const vocalUrl =
+    payload.vocalUrl ||
+    (payload.vocalBase64
+      ? base64ToObjectUrl(
+          payload.vocalBase64,
+          payload.vocalMime || "audio/wav"
+        )
+      : "");
+  const minusUrl =
+    payload.minusUrl ||
+    (payload.minusBase64
+      ? base64ToObjectUrl(
+          payload.minusBase64,
+          payload.minusMime || "audio/wav"
+        )
+      : "");
+
+  if (!response.ok || !vocalUrl || !minusUrl) {
+    throw new Error("API_UNAVAILABLE");
+  }
+
+  return {
+    vocalUrl,
+    minusUrl,
+    model: payload.model || payload.space || "htdemucs",
+  };
+}
+
+async function separateLocally(file: File): Promise<{
+  tracks: ResultTracks;
+  notice: string;
+}> {
+  const split = await splitStereoCenterCancel(file);
+  const weakMinus = split.monoSource || split.minusPeak < 0.02;
+  return {
+    tracks: {
+      vocalUrl: URL.createObjectURL(split.vocal),
+      minusUrl: URL.createObjectURL(split.minus),
+      model: "local-ms",
+    },
+    notice: weakMinus
+      ? "Сервер нейросети недоступен. Использовано локальное stereo-разделение: минусовка почти тихая на моно-треке. Загрузите стереозапись."
+      : "Сервер нейросети недоступен (статический хостинг). Минус и вокал собраны локально: mid/side, приближённо.",
+  };
+}
+
 export default function VocalRemover({ locked = false }: Props) {
   const { tier } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [result, setResult] = useState<ResultTracks | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +201,7 @@ export default function VocalRemover({ locked = false }: Props) {
     clearResult();
     setFile(selected);
     setError("");
+    setNotice("");
     setStepIndex(0);
   };
 
@@ -97,78 +209,57 @@ export default function VocalRemover({ locked = false }: Props) {
     if (!file || processing || locked) return;
     setProcessing(true);
     setError("");
+    setNotice("");
     setStepIndex(0);
 
     const stepTimer = window.setInterval(() => {
       setStepIndex((current) => Math.min(STEPS.length - 1, current + 1));
     }, 4500);
+    const timeout = abortAfter(API_TIMEOUT_MS);
 
     try {
-      const token = await getChatSessionToken();
-      if (!token) {
-        setError("Сессия истекла. Войдите снова.");
-        return;
+      let token: string | null = null;
+      try {
+        token = await Promise.race([
+          getChatSessionToken(),
+          new Promise<null>((resolve) => {
+            window.setTimeout(() => resolve(null), 12_000);
+          }),
+        ]);
+      } catch {
+        token = null;
+      }
+      if (token) {
+        try {
+          const tracks = await separateViaApi(file, token, timeout.signal);
+          clearResult();
+          setResult(tracks);
+          setStepIndex(STEPS.length - 1);
+          return;
+        } catch (err) {
+          if (err instanceof AuthSeparateError) {
+            setError(err.message);
+            clearResult();
+            return;
+          }
+          // HTML/404, timeout, or Demucs down — fall through to local split
+        }
       }
 
-      const form = new FormData();
-      form.append("file", file);
-
-      const response = await fetch("/api/ai/separate-vocal", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-
-      const payload = (await response.json()) as {
-        error?: string;
-        detail?: string;
-        attempts?: string[];
-        vocalUrl?: string;
-        minusUrl?: string;
-        vocalBase64?: string;
-        minusBase64?: string;
-        vocalMime?: string;
-        minusMime?: string;
-        model?: string;
-        space?: string;
-      };
-
-      const vocalUrl =
-        payload.vocalUrl ||
-        (payload.vocalBase64
-          ? base64ToObjectUrl(
-              payload.vocalBase64,
-              payload.vocalMime || "audio/wav"
-            )
-          : "");
-      const minusUrl =
-        payload.minusUrl ||
-        (payload.minusBase64
-          ? base64ToObjectUrl(
-              payload.minusBase64,
-              payload.minusMime || "audio/wav"
-            )
-          : "");
-
-      if (!response.ok || !vocalUrl || !minusUrl) {
+      try {
+        const local = await separateLocally(file);
+        clearResult();
+        setResult(local.tracks);
+        setNotice(local.notice);
+        setStepIndex(STEPS.length - 1);
+      } catch {
         setError(
-          "Сейчас обработка недоступна. Попробуйте через пару минут."
+          "Не удалось разделить трек. Проверьте файл (MP3/WAV) или попробуйте позже."
         );
         clearResult();
-        return;
       }
-
-      clearResult();
-      setResult({
-        vocalUrl,
-        minusUrl,
-        model: payload.model || payload.space || "htdemucs",
-      });
-      setStepIndex(STEPS.length - 1);
-    } catch {
-      setError("Сейчас обработка недоступна. Попробуйте через пару минут.");
-      clearResult();
     } finally {
+      timeout.cancel();
       window.clearInterval(stepTimer);
       setProcessing(false);
     }
@@ -308,6 +399,12 @@ export default function VocalRemover({ locked = false }: Props) {
 
       {result && file && (
         <div className="mt-6 space-y-3">
+          {notice && (
+            <div className="flex gap-3 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-100 ring-1 ring-amber-400/30">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+              <p>{notice}</p>
+            </div>
+          )}
           <ResultTrack
             title="Минусовка (Backing Track)"
             icon={<Music2 className="h-5 w-5 text-studio-accent" />}
@@ -330,6 +427,7 @@ export default function VocalRemover({ locked = false }: Props) {
             onClick={() => {
               clearResult();
               setFile(null);
+              setNotice("");
             }}
           >
             Загрузить другой файл

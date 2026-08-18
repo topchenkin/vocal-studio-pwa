@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Home, Sparkles } from "lucide-react";
+import { BookOpen, CreditCard, Home, Sparkles } from "lucide-react";
 
 const items = [
   { href: "/dashboard/student", label: "Кабинет", icon: Home },
@@ -10,6 +10,11 @@ const items = [
     href: "/dashboard/student/exercises",
     label: "Упражнения",
     icon: BookOpen,
+  },
+  {
+    href: "/dashboard/student/subscription",
+    label: "Подписка",
+    icon: CreditCard,
   },
   {
     href: "/dashboard/student/ai-tools",

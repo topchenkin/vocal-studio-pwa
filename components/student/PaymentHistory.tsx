@@ -12,9 +12,16 @@ const purposeLabels: Record<PaymentTransaction["purpose"], string> = {
   lesson_package: "Пакет уроков",
 };
 
-export default function PaymentHistory() {
+export default function PaymentHistory({
+  limit = 5,
+  showEmpty = false,
+}: {
+  limit?: number;
+  showEmpty?: boolean;
+}) {
   const { user } = useAuth();
   const [items, setItems] = useState<PaymentTransaction[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -24,15 +31,17 @@ export default function PaymentHistory() {
         .select("*")
         .eq("student_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(5);
+        .limit(limit);
       setItems(data ?? []);
+      setLoaded(true);
     };
     void load();
     window.addEventListener("uvs-payment-completed", load);
     return () => window.removeEventListener("uvs-payment-completed", load);
-  }, [user]);
+  }, [user, limit]);
 
-  if (items.length === 0) return null;
+  if (!loaded) return null;
+  if (items.length === 0 && !showEmpty) return null;
 
   return (
     <details className="rounded-2xl bg-studio-surface ring-1 ring-studio-border">
@@ -40,11 +49,16 @@ export default function PaymentHistory() {
         <ReceiptText className="h-5 w-5 text-studio-accent" />
         <span className="font-medium">История операций</span>
         <span className="ml-auto text-xs text-studio-muted">
-          {items.length}
+          {items.length || ""}
         </span>
       </summary>
       <div className="space-y-1 border-t border-studio-border p-3">
-        {items.map((item) => (
+        {items.length === 0 ? (
+          <p className="px-3 py-4 text-center text-sm text-studio-muted">
+            Операций пока нет
+          </p>
+        ) : (
+          items.map((item) => (
           <div
             key={item.id}
             className="flex items-center justify-between rounded-xl bg-studio-bg/40 px-3 py-2.5 text-sm"
@@ -60,7 +74,8 @@ export default function PaymentHistory() {
               {Number(item.amount_rub).toLocaleString("ru-RU")} ₽
             </span>
           </div>
-        ))}
+          ))
+        )}
       </div>
     </details>
   );

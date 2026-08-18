@@ -68,32 +68,114 @@ export async function mixAudioBuffers(
   );
 }
 
-/** Mix lanes onto one timeline; each buffer starts at offsetSec (optional trim). */
-export async function mixAudioBuffersWithOffsets(
-  lanes: Array<{
-    buffer: AudioBuffer;
-    offsetSec: number;
-    trimStartSec?: number;
-    trimEndSec?: number;
-  }>
-): Promise<Blob> {
-  if (lanes.length === 0) throw new Error("Нет дорожек для сведения");
-  const sampleRate = lanes[0]!.buffer.sampleRate;
+export type MixLane = {
+  buffer: AudioBuffer;
+  offsetSec: number;
+  trimStartSec?: number;
+  trimEndSec?: number;
+  /** Integer semitones, typically −12…+12. Applied via BufferSource.detune. */
+  pitchSemitones?: number;
+};
+
+function clampPitchSemitones(value: number | undefined) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-12, Math.min(12, Math.round(value as number)));
+}
+
+function lanePlaySec(lane: MixLane) {
+  const trimStart = Math.max(0, lane.trimStartSec ?? 0);
+  const trimEnd = Math.min(
+    lane.buffer.duration,
+    lane.trimEndSec ?? lane.buffer.duration
+  );
+  return Math.max(0, trimEnd - trimStart);
+}
+
+function mixTimelineLength(lanes: MixLane[], sampleRate: number) {
   let endSample = 0;
   for (const lane of lanes) {
-    const trimStart = Math.max(0, lane.trimStartSec ?? 0);
-    const trimEnd = Math.min(
-      lane.buffer.duration,
-      lane.trimEndSec ?? lane.buffer.duration
-    );
-    const playSec = Math.max(0, trimEnd - trimStart);
     const start = Math.max(0, Math.round(lane.offsetSec * sampleRate));
     endSample = Math.max(
       endSample,
-      start + Math.max(1, Math.round(playSec * sampleRate))
+      start + Math.max(1, Math.round(lanePlaySec(lane) * sampleRate))
     );
   }
-  const length = Math.max(1, endSample);
+  return Math.max(1, endSample);
+}
+
+function normalizeStereoInPlace(left: Float32Array, right: Float32Array) {
+  let peak = 0;
+  const length = Math.min(left.length, right.length);
+  for (let i = 0; i < length; i += 1) {
+    peak = Math.max(peak, Math.abs(left[i] ?? 0), Math.abs(right[i] ?? 0));
+  }
+  if (peak > 1) {
+    const gain = 0.95 / peak;
+    for (let i = 0; i < length; i += 1) {
+      left[i] = (left[i] ?? 0) * gain;
+      right[i] = (right[i] ?? 0) * gain;
+    }
+  }
+}
+
+function getOfflineAudioContext(
+  channels: number,
+  length: number,
+  sampleRate: number
+) {
+  const Ctor =
+    window.OfflineAudioContext ||
+    (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext;
+  return new Ctor(channels, length, sampleRate);
+}
+
+/** Mix via OfflineAudioContext so BufferSource.detune matches live preview. */
+async function mixLanesWithDetune(
+  lanes: MixLane[],
+  sampleRate: number,
+  length: number
+): Promise<Blob> {
+  const ctx = getOfflineAudioContext(2, length, sampleRate);
+  for (const lane of lanes) {
+    const playSec = lanePlaySec(lane);
+    if (playSec <= 0) continue;
+    const source = ctx.createBufferSource();
+    source.buffer = lane.buffer;
+    const pitch = clampPitchSemitones(lane.pitchSemitones);
+    if (pitch !== 0) source.detune.value = pitch * 100;
+    source.connect(ctx.destination);
+    const when = Math.max(0, lane.offsetSec);
+    const trimStart = Math.max(0, lane.trimStartSec ?? 0);
+    source.start(when, trimStart, playSec);
+  }
+
+  const rendered = await ctx.startRendering();
+  const left = new Float32Array(rendered.getChannelData(0));
+  const right = new Float32Array(
+    rendered.numberOfChannels > 1
+      ? rendered.getChannelData(1)
+      : rendered.getChannelData(0)
+  );
+  normalizeStereoInPlace(left, right);
+  return encodeWavBlob([left, right], sampleRate);
+}
+
+/** Mix lanes onto one timeline; each buffer starts at offsetSec (optional trim). */
+export async function mixAudioBuffersWithOffsets(
+  lanes: MixLane[]
+): Promise<Blob> {
+  if (lanes.length === 0) throw new Error("Нет дорожек для сведения");
+  const sampleRate = lanes[0]!.buffer.sampleRate;
+  const length = mixTimelineLength(lanes, sampleRate);
+
+  const needsPitch = lanes.some(
+    (lane) => clampPitchSemitones(lane.pitchSemitones) !== 0
+  );
+  if (needsPitch) {
+    return mixLanesWithDetune(lanes, sampleRate, length);
+  }
+
   const left = new Float32Array(length);
   const right = new Float32Array(length);
 
@@ -126,19 +208,47 @@ export async function mixAudioBuffersWithOffsets(
     }
   }
 
-  let peak = 0;
+  normalizeStereoInPlace(left, right);
+  return encodeWavBlob([left, right], sampleRate);
+}
+
+/**
+ * Crude stereo mid/side split for when the Demucs API is missing (static host).
+ * Vocal ≈ mid (L+R)/2, instrumental ≈ side / center-cancel (L−R).
+ */
+export async function splitStereoCenterCancel(blob: Blob): Promise<{
+  vocal: Blob;
+  minus: Blob;
+  monoSource: boolean;
+  minusPeak: number;
+}> {
+  const buffer = await decodeBlobToAudioBuffer(blob);
+  const length = buffer.length;
+  const sampleRate = buffer.sampleRate;
+  const left = buffer.getChannelData(0);
+  const monoSource = buffer.numberOfChannels < 2;
+  const right = monoSource ? left : buffer.getChannelData(1);
+  const vocal = new Float32Array(length);
+  const minusL = new Float32Array(length);
+  const minusR = new Float32Array(length);
+  let minusPeak = 0;
+
   for (let i = 0; i < length; i += 1) {
-    peak = Math.max(peak, Math.abs(left[i] ?? 0), Math.abs(right[i] ?? 0));
-  }
-  if (peak > 1) {
-    const gain = 0.95 / peak;
-    for (let i = 0; i < length; i += 1) {
-      left[i] = (left[i] ?? 0) * gain;
-      right[i] = (right[i] ?? 0) * gain;
-    }
+    const l = left[i] ?? 0;
+    const r = right[i] ?? 0;
+    vocal[i] = (l + r) * 0.5;
+    const side = (l - r) * 0.5;
+    minusL[i] = side;
+    minusR[i] = -side;
+    minusPeak = Math.max(minusPeak, Math.abs(side));
   }
 
-  return encodeWavBlob([left, right], sampleRate);
+  return {
+    vocal: encodeWavBlob([vocal], sampleRate),
+    minus: encodeWavBlob([minusL, minusR], sampleRate),
+    monoSource,
+    minusPeak,
+  };
 }
 
 /** Downsample / mix to mono 16 kHz WAV for ML APIs. */

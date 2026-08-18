@@ -33,6 +33,8 @@ const MAX_TRACKS = 10;
 const PEAK_BUCKETS = 128;
 const MIN_TIMELINE_SEC = 6;
 const MIN_CLIP_SEC = 0.05;
+const PITCH_MIN = -12;
+const PITCH_MAX = 12;
 
 type Track = {
   id: string;
@@ -48,7 +50,20 @@ type Track = {
   /** Inclusive trim window inside the source buffer */
   trimStartSec: number;
   trimEndSec: number;
+  /** Integer semitones for preview + mixdown (BufferSource.detune) */
+  pitchSemitones: number;
 };
+
+function clampPitch(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(PITCH_MIN, Math.min(PITCH_MAX, Math.round(value)));
+}
+
+function formatPitchLabel(value: number) {
+  const pitch = clampPitch(value);
+  if (pitch === 0) return "0";
+  return pitch > 0 ? `+${pitch}` : `−${Math.abs(pitch)}`;
+}
 
 type Props = { locked?: boolean };
 
@@ -583,6 +598,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
       const source = ctx.createBufferSource();
       source.buffer = track.buffer;
+      const pitch = clampPitch(track.pitchSemitones);
+      if (pitch !== 0) source.detune.value = pitch * 100;
       source.connect(ctx.destination);
 
       if (cue <= clipStart) {
@@ -751,6 +768,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   offsetSec: cueSec,
                   trimStartSec: 0,
                   trimEndSec: buffer.duration,
+                  pitchSemitones: 0,
                 },
               ];
               setMonitorIds((ids) => [...ids, id]);
@@ -775,6 +793,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   offsetSec: cueSec,
                   trimStartSec: 0,
                   trimEndSec: buffer.duration,
+                  pitchSemitones: 0,
                 },
               ]);
               setMonitorIds((ids) => [...ids, id]);
@@ -878,6 +897,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           offsetSec: track.offsetSec,
           trimStartSec: track.trimStartSec,
           trimEndSec: track.trimEndSec,
+          pitchSemitones: track.pitchSemitones,
         }))
       );
       const ctx = await ensureAudioCtx();
@@ -951,7 +971,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           </li>
           <li>
             Клип на дорожке: потяните середину — сдвиг по времени, края —
-            обрезка начала и конца.
+            обрезка начала и конца. Тон: крошечные − / + (±12 полутонов).
           </li>
           <li>
             Добавьте до 10 дорожек: основной вокал, подпевки, гармонии.
@@ -1186,15 +1206,51 @@ export default function MultitrackMixer({ locked = false }: Props) {
                     </span>
                   </button>
                 </label>
-                <button
-                  type="button"
-                  className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-red-300 disabled:opacity-40"
-                  onClick={() => removeTrack(track.id)}
-                  aria-label="Удалить дорожку"
-                  disabled={busy}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className="inline-flex items-center rounded-lg bg-studio-bg ring-1 ring-studio-border"
+                    title="Тональность, полутона"
+                  >
+                    <button
+                      type="button"
+                      aria-label="Понизить тон"
+                      disabled={busy || track.pitchSemitones <= PITCH_MIN}
+                      onClick={() =>
+                        patchTrack(track.id, {
+                          pitchSemitones: clampPitch(track.pitchSemitones - 1),
+                        })
+                      }
+                      className="px-2 py-0.5 text-xs font-semibold text-studio-muted transition hover:text-studio-gold disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[2rem] text-center text-[11px] tabular-nums font-medium text-studio-gold">
+                      {formatPitchLabel(track.pitchSemitones)}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Повысить тон"
+                      disabled={busy || track.pitchSemitones >= PITCH_MAX}
+                      onClick={() =>
+                        patchTrack(track.id, {
+                          pitchSemitones: clampPitch(track.pitchSemitones + 1),
+                        })
+                      }
+                      className="px-2 py-0.5 text-xs font-semibold text-studio-muted transition hover:text-studio-gold disabled:opacity-30"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-red-300 disabled:opacity-40"
+                    onClick={() => removeTrack(track.id)}
+                    aria-label="Удалить дорожку"
+                    disabled={busy}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div onPointerDown={() => setSelectedId(track.id)}>
                 <ClipLane
