@@ -1,5 +1,4 @@
 import { supabase } from "@/lib/supabase";
-import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import { decodeBlobToAudioBuffer } from "@/lib/wav-client";
 import { encodeMp3Blob } from "@/lib/encode-mp3";
 import type { StudentAudioSource, StudentAudioTrack } from "@/types";
@@ -47,7 +46,7 @@ export async function signedAudioUrl(path: string): Promise<string> {
   if (error || !data?.signedUrl) {
     throw new Error(error?.message || "Не удалось открыть трек");
   }
-  return rewriteSupabaseAssetUrl(data.signedUrl);
+  return data.signedUrl;
 }
 
 export async function renameAudioTrack(

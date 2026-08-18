@@ -2,7 +2,6 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestUser } from "@/lib/server-auth";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { rewriteSupabaseAssetUrlOnOrigin, publicAppOriginFromRequest } from "@/lib/supabase-origin";
 import { mixStemsToInstrumental } from "@/lib/wav-stems";
 import {
   aiToolDeniedMessage,
@@ -226,8 +225,7 @@ async function uploadStem(
   userId: string,
   kind: "vocal" | "minus",
   buffer: Buffer,
-  mime: string,
-  publicOrigin: string
+  mime: string
 ) {
   const admin = getSupabaseAdmin();
   const ext = mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : "wav";
@@ -244,10 +242,7 @@ async function uploadStem(
   if (signError || !data?.signedUrl) {
     throw new Error(signError?.message || "Signed URL failed");
   }
-  return {
-    url: rewriteSupabaseAssetUrlOnOrigin(data.signedUrl, publicOrigin),
-    path: objectPath,
-  };
+  return { url: data.signedUrl, path: objectPath };
 }
 
 async function separateOnSpace(space: SpaceConfig, token: string, file: File) {
@@ -391,20 +386,8 @@ export async function POST(request: NextRequest) {
         console.info(`[demucs] trying ${space.id} via REST…`);
         const separated = await separateOnSpace(space, apiKey, file);
         const [vocal, minus] = await Promise.all([
-          uploadStem(
-            auth.user.id,
-            "vocal",
-            separated.vocalBuf,
-            "audio/wav",
-            publicAppOriginFromRequest(request)
-          ),
-          uploadStem(
-            auth.user.id,
-            "minus",
-            separated.minusBuf,
-            "audio/wav",
-            publicAppOriginFromRequest(request)
-          ),
+          uploadStem(auth.user.id, "vocal", separated.vocalBuf, "audio/wav"),
+          uploadStem(auth.user.id, "minus", separated.minusBuf, "audio/wav"),
         ]);
 
         return NextResponse.json({

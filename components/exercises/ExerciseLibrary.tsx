@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Lock, Play, Video } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import { useAuth } from "@/context/AuthContext";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
@@ -117,7 +116,7 @@ export default function ExerciseLibrary() {
             .createSignedUrl(exercise.storage_path, 60 * 60);
           return {
             ...exercise,
-            media_url: rewriteSupabaseAssetUrl(signed?.signedUrl ?? ""),
+            media_url: signed?.signedUrl ?? "",
           };
         })
       );

@@ -3,7 +3,9 @@
 **Боевой сайт — только Timeweb Cloud Apps:** https://www.uniquevocal.ru
 (A → `92.246.76.92`). GitHub Actions запускает workflow **CI**: `npm run build`
 и typecheck. Это проверка, а не публикация. Деплой на GitHub Pages **отключён**.
-Timeweb запускает Node (`npm start`), не каталог `out`.
+Timeweb **Frontend Next.js** отдаёт статику из каталога `out/` (Caddy). Не
+включайте SSR/`npm start` в этом приложении — без папки `out` сайт даёт
+пустой 404.
 
 GitHub → Settings → Pages:
 - Source / custom domain — **выключено / пусто**. Не включать и не указывать
@@ -88,24 +90,14 @@ Authorization: Bearer <CRON_SECRET>
 Email отправляется только для непрочитанного уведомления, у которого прошло
 не менее пяти минут. Без планировщика email-fallback не запускается.
 
-## Timeweb Cloud Apps (команды запуска)
-
-Приложение больше **не** static export. Timeweb должен запускать Node:
-
-- Сборка: `npm run build`
-- Запуск: `npm start` (`node server.mjs`)
-- Каталог `out` **не** указывать (его больше нет)
-
-`NEXT_PUBLIC_SUPABASE_URL` в переменных Timeweb — это **настоящий**
-`https://<проект>.supabase.co` (цель прокси). В браузере клиент ходит на
-`https://www.uniquevocal.ru/sb`, сервер Timeweb сам достугивается до Supabase.
-
 ## Доступ из России (без VPN)
 
-Сайт отдаёт Timeweb. Вход, чат и кабинет раньше шли из браузера на
-`*.supabase.co` и резались у операторов — отсюда ошибка «Недоступен Supabase»
-при живом сайте. Теперь браузер остаётся на uniquevocal.ru, а Node-прокси
-`/sb` ходит в Supabase из датацентра Timeweb.
+Статика (HTML/JS/шрифты) открывается с Timeweb `92.246.76.92`.
+Кабинет, вход и чат ходят **из браузера** на `*.supabase.co`. Это не Россия,
+и операторы часто режут этот хост — отсюда ошибка входа при живом сайте.
+Прокси через Timeweb Frontend (без SSR) невозможен: нужен отдельный
+бэкенд-приложение Timeweb с Node. Не переключайте текущий Frontend на SSR
+«на месте» — Caddy ждёт `out/`, и сайт падает в 404.
 
 Оплата сейчас работает в явно обозначенном Beta/sandbox-режиме: операция
 записывается в `payment_transactions`, но деньги не списываются. Выдачу
