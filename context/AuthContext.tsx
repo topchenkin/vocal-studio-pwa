@@ -47,8 +47,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const MOCK_ADMIN_KEY = "uvs_mock_admin";
-const AUTH_BOOT_MS = 8_000;
-const PROFILE_MS = 12_000;
+const AUTH_BOOT_MS = 15_000;
+const PROFILE_MS = 20_000;
 
 const mockAdminProfile: StudentProfile = {
   id: "mock-admin",

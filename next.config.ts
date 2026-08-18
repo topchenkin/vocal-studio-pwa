@@ -1,68 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
-
-/**
- * Timeweb Next.js Apps (and a plain `next build`) fail with
- * `output: "export"` while `app/api` and `middleware.ts` exist.
- * Stash them for the production build, then restore on process exit.
- * `npm run build` still uses scripts/build-static.mjs as a second guard.
- */
-if (process.env.NEXT_PHASE === "phase-production-build") {
-  const root = process.cwd();
-  const stashDir = path.join(root, ".static-export-stash");
-  const apiSrc = path.join(root, "app", "api");
-  const apiDst = path.join(stashDir, "api");
-  const mwSrc = path.join(root, "middleware.ts");
-  const mwDst = path.join(stashDir, "middleware.ts");
-
-  /** Copy then delete — `renameSync()` throws EXDEV across Docker overlay mounts. */
-  const movePath = (src: string, dest: string) => {
-    fs.cpSync(src, dest, { recursive: true, force: true });
-    fs.rmSync(src, { recursive: true, force: true });
-  };
-
-  fs.mkdirSync(stashDir, { recursive: true });
-  if (fs.existsSync(apiSrc) && !fs.existsSync(apiDst)) {
-    movePath(apiSrc, apiDst);
-  }
-  if (fs.existsSync(mwSrc) && !fs.existsSync(mwDst)) {
-    movePath(mwSrc, mwDst);
-  }
-
-  const restore = () => {
-    try {
-      if (fs.existsSync(apiDst) && !fs.existsSync(apiSrc)) {
-        movePath(apiDst, apiSrc);
-      }
-      if (fs.existsSync(mwDst) && !fs.existsSync(mwSrc)) {
-        movePath(mwDst, mwSrc);
-      }
-    } catch {
-      /* ignore restore races between next.config and build-static.mjs */
-    }
-  };
-
-  process.once("exit", restore);
-  process.once("SIGINT", () => {
-    restore();
-    process.exit(1);
-  });
-  process.once("SIGTERM", () => {
-    restore();
-    process.exit(1);
-  });
-}
 
 const DAY = 24 * 60 * 60;
 
 /**
- * Static hashed assets are CacheFirst (Timeweb IP is stable). HTML stays
- * NetworkFirst with a short timeout so updates appear without hanging.
- * Default next-pwa rules also cache Google Fonts and ALL cross-origin
- * traffic (including supabase.co) — that makes a blocked API look like a
- * hung PWA. Same-origin only; never cache the API.
+ * Timeweb Cloud Apps runs Node (`npm start` → server.mjs). Do not use
+ * `output: "export"` here: a static site cannot proxy supabase.co, which
+ * Russian ISPs often block. Same-origin `/sb` is reverse-proxied instead.
+ *
+ * Static hashed assets are CacheFirst. HTML stays NetworkFirst.
+ * Never cache `/api` or `/sb` (live backend).
  */
 const withPWA = withPWAInit({
   dest: "public",
@@ -76,11 +23,11 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-timeweb-v3",
+    cacheId: "uvs-timeweb-v4",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
-    navigateFallbackDenylist: [/^\/api\//],
+    navigateFallbackDenylist: [/^\/api\//, /^\/sb(\/|$)/],
     exclude: [
       /\.map$/,
       /^manifest.*\.js$/,
@@ -118,7 +65,8 @@ const withPWA = withPWAInit({
           request.headers.get("RSC") === "1" &&
           request.headers.get("Next-Router-Prefetch") === "1" &&
           sameOrigin &&
-          !pathname.startsWith("/api/"),
+          !pathname.startsWith("/api/") &&
+          !pathname.startsWith("/sb"),
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc-prefetch",
@@ -130,7 +78,8 @@ const withPWA = withPWAInit({
         urlPattern: ({ request, url: { pathname }, sameOrigin }) =>
           request.headers.get("RSC") === "1" &&
           sameOrigin &&
-          !pathname.startsWith("/api/"),
+          !pathname.startsWith("/api/") &&
+          !pathname.startsWith("/sb"),
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc",
@@ -140,7 +89,9 @@ const withPWA = withPWAInit({
       },
       {
         urlPattern: ({ url: { pathname }, sameOrigin }) =>
-          sameOrigin && !pathname.startsWith("/api/"),
+          sameOrigin &&
+          !pathname.startsWith("/api/") &&
+          !pathname.startsWith("/sb"),
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
@@ -154,7 +105,6 @@ const withPWA = withPWAInit({
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: "export",
   images: { unoptimized: true },
   eslint: { ignoreDuringBuilds: true },
   transpilePackages: ["@breezystack/lamejs"],

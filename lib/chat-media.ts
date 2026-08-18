@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
 import type { ChatMessage, GroupChatMessage } from "@/types";
 
@@ -29,7 +30,7 @@ export async function toLegacyChatMessages(
         const { data } = await supabase.storage
           .from("chat-media")
           .createSignedUrl(record.media_path, 60 * 60);
-        mediaUrl = data?.signedUrl ?? null;
+        mediaUrl = rewriteSupabaseAssetUrl(data?.signedUrl ?? "") || null;
       }
       const messageType = record.message_type ?? "text";
       const deleted = Boolean(record.deleted_at);
