@@ -1,0 +1,12 @@
+www.uniquevocal.ru, uniquevocal.ru {
+	root * /srv
+	encode gzip
+	try_files {path} /index.html
+	file_server
+}
+
+sb.uniquevocal.ru {
+	reverse_proxy http://147.45.136.24 {
+		header_up Host 147.45.136.24
+	}
+}
