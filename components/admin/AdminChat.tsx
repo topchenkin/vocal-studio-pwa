@@ -35,9 +35,9 @@ export default function AdminChat() {
 
   const activeStudentId = selectedStudentId ?? students[0]?.id ?? null;
   const activeGroupId = selectedGroupId ?? groups[0]?.id ?? null;
-  const { messages: directMessages, error: directError, send: sendDirect, edit: editDirect, remove: removeDirect } =
+  const { messages: directMessages, error: directError, sending: sendingDirect, send: sendDirect, edit: editDirect, remove: removeDirect } =
     useChatMessages(mode === "direct" ? activeStudentId : null);
-  const { messages: groupMessages, error: groupError, send: sendGroup, edit: editGroup, remove: removeGroup } =
+  const { messages: groupMessages, error: groupError, sending: sendingGroup, send: sendGroup, edit: editGroup, remove: removeGroup } =
     useGroupChatMessages(mode === "groups" ? activeGroupId : null);
 
   useEffect(() => {
@@ -239,6 +239,8 @@ export default function AdminChat() {
               onSend={(text) => void sendDirect(text)}
               onEdit={(id, text) => void editDirect(id, text)}
               onDelete={(id) => void removeDirect(id)}
+              sendError={directError}
+              sending={sendingDirect}
             />
           ) : mode === "groups" && activeGroup ? (
             <ChatWindow
@@ -249,6 +251,8 @@ export default function AdminChat() {
               onEdit={(id, text) => void editGroup(id, text)}
               onDelete={(id) => void removeGroup(id)}
               placeholder={`Сообщение в «${activeGroup.title}»...`}
+              sendError={groupError}
+              sending={sendingGroup}
             />
           ) : (
             <div className="flex h-full items-center justify-center rounded-2xl bg-studio-surface ring-1 ring-studio-border">

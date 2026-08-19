@@ -1,5 +1,10 @@
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
+import {
+  coerceChatMime,
+  extensionForChatMedia,
+  normalizeMimeType,
+} from "@/lib/media-mime";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
 import type { ChatMessage, GroupChatMessage } from "@/types";
 
@@ -62,6 +67,91 @@ export async function getChatSessionToken() {
     session = data.session;
   }
   return session?.access_token ?? null;
+}
+
+const CHAT_MEDIA_MAX_BYTES = 40 * 1024 * 1024;
+const IMAGE_MAX_EDGE = 1600;
+
+async function prepareChatImageFile(file: File): Promise<File> {
+  const mime = normalizeMimeType(file.type);
+  const needsConvert =
+    !mime ||
+    mime.includes("heic") ||
+    mime.includes("heif") ||
+    file.name.toLowerCase().endsWith(".heic") ||
+    file.name.toLowerCase().endsWith(".heif");
+
+  const canUseBitmap = typeof createImageBitmap === "function";
+  if (!needsConvert && mime.startsWith("image/") && file.size < 1.5 * 1024 * 1024) {
+    return file;
+  }
+  if (!canUseBitmap && !needsConvert) return file;
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((value) => resolve(value), "image/jpeg", 0.82);
+    });
+    if (!blob) return file;
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "photo"}.jpg`, {
+      type: "image/jpeg",
+    });
+  } catch {
+    if (needsConvert) {
+      throw new Error("Этот формат фото не поддерживается. Выберите JPEG или PNG");
+    }
+    return file;
+  }
+}
+
+export async function uploadChatMediaFile(
+  userId: string,
+  messageType: "voice" | "video" | "image",
+  file: File
+): Promise<{ path: string; mime: string }> {
+  const prepared =
+    messageType === "image" ? await prepareChatImageFile(file) : file;
+  if (prepared.size > CHAT_MEDIA_MAX_BYTES) {
+    throw new Error("Файл слишком большой (максимум 40 МБ)");
+  }
+  if (prepared.size < 32) {
+    throw new Error("Не удалось записать файл. Попробуйте ещё раз");
+  }
+  const mime = coerceChatMime(messageType, prepared.type);
+  const extension = extensionForChatMedia(messageType, mime, prepared.name);
+  const body =
+    prepared.type === mime
+      ? prepared
+      : new File([prepared], `${messageType}.${extension}`, { type: mime });
+  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
+  const { error } = await supabase.storage.from("chat-media").upload(path, body, {
+    contentType: mime,
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (error) {
+    throw new Error(
+      error.message.includes("mime") ||
+        error.message.includes("pattern") ||
+        error.message.includes("not supported")
+        ? `Формат файла не поддерживается (${mime}). Выполните SQL chat-media-mimes в Supabase.`
+        : error.message
+    );
+  }
+  return { path, mime };
 }
 
 type SendMessageType = "text" | "voice" | "image" | "sticker" | "video";

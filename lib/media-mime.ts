@@ -7,17 +7,25 @@ export function normalizeMimeType(mime: string | null | undefined): string {
 const ALLOWED_AUDIO = new Set([
   "audio/webm",
   "audio/mp4",
+  "audio/m4a",
+  "audio/aac",
+  "audio/x-m4a",
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
+  "audio/x-wav",
 ]);
 
-const ALLOWED_VIDEO = new Set(["video/webm", "video/mp4"]);
+const ALLOWED_VIDEO = new Set(["video/webm", "video/mp4", "video/quicktime"]);
 const ALLOWED_IMAGE = new Set([
   "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
   "image/png",
   "image/webp",
   "image/gif",
+  "image/heic",
+  "image/heif",
 ]);
 
 const VOICE_RECORDER_CANDIDATES = [
@@ -76,26 +84,51 @@ export function coerceChatMime(
 ): string {
   const mime = normalizeMimeType(rawMime);
   if (messageType === "voice") {
-    if (ALLOWED_AUDIO.has(mime)) return mime;
+    if (ALLOWED_AUDIO.has(mime)) {
+      if (mime === "audio/m4a" || mime === "audio/aac" || mime === "audio/x-m4a") {
+        return "audio/mp4";
+      }
+      if (mime === "audio/x-wav") return "audio/wav";
+      return mime;
+    }
     if (mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac")) {
       return "audio/mp4";
     }
     if (mime.includes("ogg")) return "audio/ogg";
     if (mime.includes("mpeg") || mime.includes("mp3")) return "audio/mpeg";
     if (mime.includes("wav")) return "audio/wav";
+    if (
+      typeof MediaRecorder !== "undefined" &&
+      MediaRecorder.isTypeSupported("audio/mp4") &&
+      !MediaRecorder.isTypeSupported("audio/webm")
+    ) {
+      return "audio/mp4";
+    }
     return "audio/webm";
   }
   if (messageType === "video") {
-    if (ALLOWED_VIDEO.has(mime)) return mime;
+    if (ALLOWED_VIDEO.has(mime)) {
+      return mime === "video/quicktime" ? "video/mp4" : mime;
+    }
     if (mime.includes("mp4") || mime.includes("quicktime") || mime.includes("m4v")) {
+      return "video/mp4";
+    }
+    if (
+      typeof MediaRecorder !== "undefined" &&
+      MediaRecorder.isTypeSupported("video/mp4") &&
+      !MediaRecorder.isTypeSupported("video/webm")
+    ) {
       return "video/mp4";
     }
     return "video/webm";
   }
-  if (ALLOWED_IMAGE.has(mime)) return mime;
-  if (mime.includes("png")) return "image/png";
-  if (mime.includes("webp")) return "image/webp";
-  if (mime.includes("gif")) return "image/gif";
+  if (mime === "image/png" || mime.includes("png")) return "image/png";
+  if (mime === "image/webp" || mime.includes("webp")) return "image/webp";
+  if (mime === "image/gif" || mime.includes("gif")) return "image/gif";
+  if (ALLOWED_IMAGE.has(mime) && mime !== "image/heic" && mime !== "image/heif") {
+    if (mime === "image/jpg" || mime === "image/pjpeg") return "image/jpeg";
+    return mime;
+  }
   return "image/jpeg";
 }
 
@@ -129,8 +162,10 @@ export function extensionForChatMedia(
 ): string {
   if (messageType === "voice") return extensionForAudioMime(mime);
   if (messageType === "video") return extensionForVideoMime(mime);
-  const fromName = fileName?.split(".").pop()?.replace(/[^\w]+/g, "");
-  if (fromName) return fromName;
+  const fromName = fileName?.split(".").pop()?.replace(/[^\w]+/g, "").toLowerCase();
+  if (fromName && fromName !== "heic" && fromName !== "heif" && fromName !== "dng") {
+    return fromName === "jpeg" ? "jpg" : fromName;
+  }
   if (mime === "image/png") return "png";
   if (mime === "image/webp") return "webp";
   if (mime === "image/gif") return "gif";

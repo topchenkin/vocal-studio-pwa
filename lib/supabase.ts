@@ -37,7 +37,13 @@ const RACE_MS = 1_000;
 const IOS_RACE_MS = 3_000;
 /** Real API calls (login, profile). Never reuse the race budget here. */
 const REQUEST_MS = 15_000;
+/** Chat photos / voice / video go through Storage; 15s kills them on LTE. */
+const STORAGE_MS = 120_000;
 const WS_CONNECT_MS = 8_000;
+
+function timeoutFor(url: string) {
+  return /\/storage\/v1\//i.test(url) ? STORAGE_MS : REQUEST_MS;
+}
 
 function raceBudget() {
   return isIosDevice() ? IOS_RACE_MS : RACE_MS;
@@ -378,7 +384,7 @@ async function fetchOneThenOther(
     const response = await fetchKnown(
       firstUrl,
       init,
-      REQUEST_MS,
+      timeoutFor(firstUrl),
       callerSignal
     );
     rememberRoute(firstRoute);
@@ -388,7 +394,7 @@ async function fetchOneThenOther(
     const response = await fetchKnown(
       secondUrl,
       init,
-      REQUEST_MS,
+      timeoutFor(secondUrl),
       callerSignal
     );
     rememberRoute(firstRoute === "direct" ? "proxy" : "direct");
@@ -419,7 +425,7 @@ async function fetchWithFallback(
   const method = String(requestInit.method || "GET").toUpperCase();
 
   if (!canFallback) {
-    return fetchOnce(url, requestInit, REQUEST_MS, callerSignal);
+    return fetchOnce(url, requestInit, timeoutFor(url), callerSignal);
   }
 
   if (callerAborted(callerSignal)) {

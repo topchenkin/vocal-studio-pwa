@@ -1690,8 +1690,10 @@ values (
   41943040,
   array[
     'audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/wav',
-    'video/webm', 'video/mp4',
-    'image/jpeg', 'image/png', 'image/webp', 'image/gif'
+    'audio/x-wav', 'audio/aac', 'audio/x-m4a',
+    'video/webm', 'video/mp4', 'video/quicktime',
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'image/heic', 'image/heif'
   ]
 )
 on conflict (id) do update

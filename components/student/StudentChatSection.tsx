@@ -23,9 +23,9 @@ export default function StudentChatSection() {
 
   const hasChatAccess = tier !== "none";
   const activeGroupId = selectedGroupId ?? groups[0]?.id ?? null;
-  const { messages: teacherMessages, error: teacherError, send: sendTeacher, edit: editTeacher, remove: removeTeacher } =
+  const { messages: teacherMessages, error: teacherError, sending: sendingTeacher, send: sendTeacher, edit: editTeacher, remove: removeTeacher } =
     useChatMessages(user?.id ?? null);
-  const { messages: groupMessages, error: groupError, send: sendGroup, edit: editGroup, remove: removeGroup } =
+  const { messages: groupMessages, error: groupError, sending: sendingGroup, send: sendGroup, edit: editGroup, remove: removeGroup } =
     useGroupChatMessages(mode === "groups" ? activeGroupId : null);
 
   useEffect(() => {
@@ -136,6 +136,8 @@ export default function StudentChatSection() {
             onEdit={(id, text) => void editTeacher(id, text)}
             onDelete={(id) => void removeTeacher(id)}
             disabled={!hasChatAccess}
+            sendError={teacherError}
+            sending={sendingTeacher}
           />
         ) : activeGroup ? (
           <ChatWindow
@@ -148,6 +150,8 @@ export default function StudentChatSection() {
             onDelete={(id) => void removeGroup(id)}
             disabled={!hasChatAccess}
             placeholder={`Сообщение в «${activeGroup.title}»...`}
+            sendError={groupError}
+            sending={sendingGroup}
           />
         ) : (
           <div className="flex min-h-0 flex-1 items-center justify-center">

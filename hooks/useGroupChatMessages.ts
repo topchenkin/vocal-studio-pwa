@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import type { ChatSendPayload } from "@/hooks/useChatMessages";
 import { ADMIN_DISPLAY_NAME } from "@/lib/admin";
@@ -9,42 +9,18 @@ import {
   editChatMessageDirect,
   sendChatMessageDirect,
   toLegacyChatMessages,
+  uploadChatMediaFile,
 } from "@/lib/chat-media";
-import {
-  coerceChatMime,
-  extensionForChatMedia,
-} from "@/lib/media-mime";
 import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
-
-async function uploadChatMedia(
-  userId: string,
-  messageType: "voice" | "video" | "image",
-  file: File
-) {
-  const mime = coerceChatMime(messageType, file.type);
-  const extension = extensionForChatMedia(messageType, mime, file.name);
-  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
-  const { error } = await supabase.storage.from("chat-media").upload(path, file, {
-    contentType: mime,
-    upsert: false,
-  });
-  if (error) {
-    throw new Error(
-      error.message.includes("mime") || error.message.includes("pattern")
-        ? `Формат файла не поддерживается (${mime}). Обновите Storage bucket chat-media.`
-        : error.message
-    );
-  }
-  return { path, mime };
-}
 
 export function useGroupChatMessages(groupId: string | null) {
   const { user, profile, isAdmin, isMockAdmin } = useAuth();
   const [messages, setMessages] = useState<LegacyChatMessage[]>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const inflightRef = useRef(0);
 
   const mergeLegacy = useCallback((message: LegacyChatMessage) => {
     setMessages((current) =>
@@ -114,7 +90,8 @@ export function useGroupChatMessages(groupId: string | null) {
 
   const send = useCallback(
     async (payload: string | ChatSendPayload) => {
-      if (!groupId || !user || sending) return;
+      if (!groupId || !user) return;
+      inflightRef.current += 1;
       setSending(true);
       setError("");
 
@@ -133,7 +110,7 @@ export function useGroupChatMessages(groupId: string | null) {
             messageType === "video" ||
             messageType === "image")
         ) {
-          const uploaded = await uploadChatMedia(user.id, messageType, data.file);
+          const uploaded = await uploadChatMediaFile(user.id, messageType, data.file);
           mediaPath = uploaded.path;
           mediaMime = uploaded.mime;
         }
@@ -159,10 +136,11 @@ export function useGroupChatMessages(groupId: string | null) {
           err instanceof Error ? err.message : "Не удалось отправить сообщение"
         );
       } finally {
-        setSending(false);
+        inflightRef.current = Math.max(0, inflightRef.current - 1);
+        if (inflightRef.current === 0) setSending(false);
       }
     },
-    [groupId, isAdmin, mergeLegacy, profile?.full_name, sending, user]
+    [groupId, isAdmin, mergeLegacy, profile?.full_name, user]
   );
 
   const edit = useCallback(

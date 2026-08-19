@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_DISPLAY_NAME } from "@/lib/admin";
 import {
@@ -8,11 +8,8 @@ import {
   editChatMessageDirect,
   sendChatMessageDirect,
   toLegacyChatMessages,
+  uploadChatMediaFile,
 } from "@/lib/chat-media";
-import {
-  coerceChatMime,
-  extensionForChatMedia,
-} from "@/lib/media-mime";
 import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
@@ -24,33 +21,12 @@ export type ChatSendPayload = {
   mediaDurationSec?: number | null;
 };
 
-async function uploadChatMedia(
-  userId: string,
-  messageType: "voice" | "video" | "image",
-  file: File
-) {
-  const mime = coerceChatMime(messageType, file.type);
-  const extension = extensionForChatMedia(messageType, mime, file.name);
-  const path = `${userId}/${crypto.randomUUID()}.${extension}`;
-  const { error } = await supabase.storage.from("chat-media").upload(path, file, {
-    contentType: mime,
-    upsert: false,
-  });
-  if (error) {
-    throw new Error(
-      error.message.includes("mime") || error.message.includes("pattern")
-        ? `Формат файла не поддерживается (${mime}). Обновите Storage bucket chat-media.`
-        : error.message
-    );
-  }
-  return { path, mime };
-}
-
 export function useChatMessages(studentId: string | null) {
   const { user, profile, isAdmin, isMockAdmin } = useAuth();
   const [messages, setMessages] = useState<LegacyChatMessage[]>([]);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const inflightRef = useRef(0);
 
   const mergeLegacy = useCallback((message: LegacyChatMessage) => {
     setMessages((current) =>
@@ -120,7 +96,8 @@ export function useChatMessages(studentId: string | null) {
 
   const send = useCallback(
     async (payload: string | ChatSendPayload) => {
-      if (!studentId || !user || sending) return;
+      if (!studentId || !user) return;
+      inflightRef.current += 1;
       setSending(true);
       setError("");
 
@@ -139,7 +116,7 @@ export function useChatMessages(studentId: string | null) {
             messageType === "video" ||
             messageType === "image")
         ) {
-          const uploaded = await uploadChatMedia(user.id, messageType, data.file);
+          const uploaded = await uploadChatMediaFile(user.id, messageType, data.file);
           mediaPath = uploaded.path;
           mediaMime = uploaded.mime;
         }
@@ -165,10 +142,11 @@ export function useChatMessages(studentId: string | null) {
           err instanceof Error ? err.message : "Не удалось отправить сообщение"
         );
       } finally {
-        setSending(false);
+        inflightRef.current = Math.max(0, inflightRef.current - 1);
+        if (inflightRef.current === 0) setSending(false);
       }
     },
-    [isAdmin, mergeLegacy, profile?.full_name, sending, studentId, user]
+    [isAdmin, mergeLegacy, profile?.full_name, studentId, user]
   );
 
   const edit = useCallback(

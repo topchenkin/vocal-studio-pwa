@@ -41,7 +41,7 @@ const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
 
 type RecordKind = "voice" | "video";
-type RecordPhase = "idle" | "recording" | "paused";
+type RecordPhase = "idle" | "recording" | "paused" | "sending";
 
 interface ChatWindowProps {
   chatId: string;
@@ -53,6 +53,8 @@ interface ChatWindowProps {
   placeholder?: string;
   disabled?: boolean;
   flush?: boolean;
+  sendError?: string;
+  sending?: boolean;
 }
 
 export default function ChatWindow({
@@ -65,6 +67,8 @@ export default function ChatWindow({
   placeholder = "Напишите сообщение...",
   disabled,
   flush = false,
+  sendError,
+  sending,
 }: ChatWindowProps) {
   const [text, setText] = useState("");
   const [panel, setPanel] = useState<"none" | "emoji" | "sticker">("none");
@@ -210,14 +214,25 @@ export default function ChatWindow({
 
   const sendRecording = () => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder) return;
+    if (!recorder || recorder.state === "inactive") return;
     if (recorder.state === "recording") {
       accumulatedMsRef.current += Date.now() - segmentStartedRef.current;
     }
     durationMsRef.current = accumulatedMsRef.current;
     sendOnStopRef.current = true;
-    if (recorder.state !== "inactive") recorder.stop();
-    resetRecordingState();
+    clearTimer();
+    setPhase("sending");
+    try {
+      if (recorder.state === "recording") recorder.requestData();
+    } catch {
+      /* Safari may not implement requestData */
+    }
+    try {
+      recorder.stop();
+    } catch {
+      setRecordError("Не удалось завершить запись");
+      resetRecordingState();
+    }
   };
 
   const startRecording = async (kind: RecordKind) => {
@@ -246,7 +261,7 @@ export default function ChatWindow({
         previewRef.current.scrollIntoView({ block: "nearest" });
       }
 
-      const stream = await getChatMediaStream(kind);
+      const stream = await getChatMediaStream(kind, previewRef.current);
       streamRef.current = stream;
 
       if (kind === "video") {
@@ -254,7 +269,9 @@ export default function ChatWindow({
         if (!preview) {
           throw new Error("preview missing");
         }
-        await attachPreviewStream(preview, stream);
+        if (preview.srcObject !== stream) {
+          await attachPreviewStream(preview, stream);
+        }
       }
 
       const { recorder, mime } = createChatRecorder(stream, kind);
@@ -280,6 +297,10 @@ export default function ChatWindow({
         mediaRecorderRef.current = null;
         if (!shouldSend || chunksRef.current.length === 0) {
           chunksRef.current = [];
+          resetRecordingState();
+          if (shouldSend) {
+            setRecordError("Запись получилась пустой. Попробуйте ещё раз");
+          }
           return;
         }
         const maxSec = kindNow === "video" ? 60 : 300;
@@ -290,6 +311,7 @@ export default function ChatWindow({
               : "Голосовое сообщение не длиннее 5 минут"
           );
           chunksRef.current = [];
+          resetRecordingState();
           return;
         }
         const file = mediaFileFromChunks(
@@ -297,13 +319,18 @@ export default function ChatWindow({
           recorder.mimeType || preferredMimeRef.current,
           kindNow
         );
+        chunksRef.current = [];
+        resetRecordingState();
+        if (file.size < 32) {
+          setRecordError("Запись получилась пустой. Попробуйте ещё раз");
+          return;
+        }
         onSend({
           messageType: kindNow,
           file,
           mediaDurationSec: durationSec,
           message: "",
         });
-        chunksRef.current = [];
       };
 
       startChatRecorder(recorder, kind);
@@ -553,7 +580,8 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={cancelRecording}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-red-400 transition hover:bg-red-500/15"
+                  disabled={phase === "sending"}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-red-400 transition hover:bg-red-500/15 disabled:opacity-40"
                   aria-label="Отменить"
                   title="Отменить"
                 >
@@ -562,7 +590,8 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={phase === "paused" ? resumeRecording : pauseRecording}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-studio-text transition hover:bg-studio-card"
+                  disabled={phase === "sending"}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-studio-text transition hover:bg-studio-card disabled:opacity-40"
                   aria-label={phase === "paused" ? "Продолжить" : "Стоп / пауза"}
                   title={phase === "paused" ? "Продолжить" : "Стоп"}
                 >
@@ -579,11 +608,15 @@ export default function ChatWindow({
                     }`}
                   />
                   <p className="truncate font-mono text-sm tabular-nums text-red-300">
-                    {formatRecordTime(recordMs)}
-                    <span className="text-red-300/50">
-                      {" "}
-                      / {formatRecordTime(maxMs)}
-                    </span>
+                    {phase === "sending"
+                      ? "Отправка…"
+                      : `${formatRecordTime(recordMs)}`}
+                    {phase !== "sending" && (
+                      <span className="text-red-300/50">
+                        {" "}
+                        / {formatRecordTime(maxMs)}
+                      </span>
+                    )}
                   </p>
                   {phase === "paused" && (
                     <span className="text-[10px] uppercase tracking-wide text-studio-muted">
@@ -594,7 +627,8 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={sendRecording}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-studio-accent text-white shadow-sm transition hover:opacity-90"
+                  disabled={phase === "sending"}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-studio-accent text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
                   aria-label="Отправить"
                   title="Отправить"
                 >
@@ -696,13 +730,16 @@ export default function ChatWindow({
               </div>
             </>
           )}
-          {recordError && (
-            <p className="mt-2 text-xs text-red-400">{recordError}</p>
+          {(recordError || sendError) && (
+            <p className="mt-2 text-xs text-red-400">{recordError || sendError}</p>
+          )}
+          {sending && phase === "idle" && (
+            <p className="mt-2 text-xs text-studio-muted">Отправка файла…</p>
           )}
           <input
             ref={galleryRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.heic,.heif,image/heic,image/heif"
             className="hidden"
             onChange={(event) => {
               sendImage(event.target.files?.[0]);
@@ -712,7 +749,7 @@ export default function ChatWindow({
           <input
             ref={cameraRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.heic,.heif,image/heic,image/heif"
             capture="environment"
             className="hidden"
             onChange={(event) => {
@@ -754,8 +791,9 @@ function ComposerIcon({
   );
 }
 
-/** Circle crop without overflow:hidden / border-radius on the <video> itself.
- *  WebKit paints a live camera layer as black when those CSS properties clip it. */
+/** Circle look without clipping the <video> itself.
+ *  overflow:hidden, border-radius and mask-image on a live camera layer
+ *  paint black on iPhone. Paint the corners as a sibling overlay instead. */
 function CircleVideoFrame({
   children,
   className,
@@ -764,16 +802,16 @@ function CircleVideoFrame({
   className?: string;
 }) {
   return (
-    <div
-      className={`overflow-visible bg-black ${className ?? ""}`}
-      style={{
-        WebkitMaskImage:
-          "radial-gradient(circle closest-side at center, #000 99.6%, transparent 100%)",
-        maskImage:
-          "radial-gradient(circle closest-side at center, #000 99.6%, transparent 100%)",
-      }}
-    >
+    <div className={`relative overflow-visible bg-black ${className ?? ""}`}>
       {children}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle closest-side at center, transparent 70%, rgb(var(--studio-surface)) 71%)",
+        }}
+        aria-hidden
+      />
     </div>
   );
 }

@@ -59,7 +59,8 @@ const VIDEO_CONSTRAINT_ATTEMPTS: MediaStreamConstraints[] = [
 ];
 
 export async function getChatMediaStream(
-  kind: "voice" | "video"
+  kind: "voice" | "video",
+  preview?: HTMLVideoElement | null
 ): Promise<MediaStream> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     throw new Error("unsupported");
@@ -73,7 +74,7 @@ export async function getChatMediaStream(
   let lastError: unknown;
   for (const constraints of VIDEO_CONSTRAINT_ATTEMPTS) {
     try {
-      const stream = await getChatMediaStreamOnce(constraints);
+      const stream = await openChatCamera(constraints, preview ?? null);
       holdIosCapture(stream);
       return stream;
     } catch (err) {
@@ -85,51 +86,61 @@ export async function getChatMediaStream(
     : new Error("Не удалось включить камеру");
 }
 
-async function getChatMediaStreamOnce(
-  constraints: MediaStreamConstraints
+/**
+ * Keep the original MediaStream that getUserMedia returned. Wrapping tracks in
+ * a new MediaStream after the fact is a common iOS black-preview trigger.
+ * Mic tracks are added onto that same stream once the preview is painting.
+ */
+async function openChatCamera(
+  constraints: MediaStreamConstraints,
+  preview: HTMLVideoElement | null
 ): Promise<MediaStream> {
-  if (!isAppleWebKit()) {
-    return navigator.mediaDevices.getUserMedia(constraints);
-  }
-  // Standalone WKWebView often returns a live-but-black video track when
-  // audio+video are requested together. Open the camera first, attach later,
-  // then add the mic without replacing the video track.
   const videoConstraints =
     typeof constraints.video === "undefined" ? true : constraints.video;
   const audioConstraints =
     typeof constraints.audio === "undefined" ? true : constraints.audio;
 
+  if (!isAppleWebKit()) {
+    return navigator.mediaDevices.getUserMedia(constraints);
+  }
+
   const videoStream = await navigator.mediaDevices.getUserMedia({
     video: videoConstraints,
     audio: false,
   });
-  let audioStream: MediaStream | null = null;
   try {
-    audioStream = await navigator.mediaDevices.getUserMedia({
-      audio: audioConstraints,
-      video: false,
-    });
-  } catch {
+    if (preview) {
+      await attachPreviewStream(preview, videoStream);
+      if (preview.videoWidth === 0) {
+        throw new Error("black");
+      }
+    }
     try {
-      audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
         video: false,
       });
+      for (const track of audioStream.getAudioTracks()) {
+        videoStream.addTrack(track);
+      }
     } catch {
-      /* video-only still lets the student send a silent circle */
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        for (const track of audioStream.getAudioTracks()) {
+          videoStream.addTrack(track);
+        }
+      } catch {
+        /* video-only still lets the student send a silent circle */
+      }
     }
-  }
-  const mixed = new MediaStream([
-    ...videoStream.getVideoTracks(),
-    ...(audioStream?.getAudioTracks() ?? []),
-  ]);
-  const videoTrack = mixed.getVideoTracks()[0];
-  if (!videoTrack || videoTrack.readyState === "ended") {
+    return videoStream;
+  } catch (err) {
     stopMediaStream(videoStream);
-    stopMediaStream(audioStream);
-    return navigator.mediaDevices.getUserMedia(constraints);
+    throw err;
   }
-  return mixed;
 }
 
 /** Call synchronously in the tap handler so iOS unlocks autoplay. */
@@ -189,7 +200,7 @@ export async function attachPreviewStream(
     }
   }
 
-  if (video.videoWidth === 0) {
+  if (video.videoWidth === 0 && !isAppleWebKit()) {
     const track = stream.getVideoTracks()[0];
     if (track) {
       try {
@@ -309,11 +320,9 @@ export function createChatRecorder(
  * Android Chrome is happy with a 250ms timeslice. Safari's video/mp4
  * MediaRecorder often throws or yields an empty file if timeslice is set.
  */
-export function startChatRecorder(
-  recorder: MediaRecorder,
-  kind: "voice" | "video"
-) {
-  const useTimeslice = kind !== "video" || !isAppleWebKit();
+export function startChatRecorder(recorder: MediaRecorder, _kind: "voice" | "video") {
+  // Safari mp4 (voice and video) often yields an empty file if timeslice is set.
+  const useTimeslice = !isAppleWebKit();
   if (useTimeslice) {
     try {
       recorder.start(250);
