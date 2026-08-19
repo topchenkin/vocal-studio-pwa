@@ -135,7 +135,7 @@ const BOOT_SCRIPT = `(function(){
       try{localStorage.removeItem("uvs-sw-bust")}catch(x){}
       location.href="https://uniquevocal.ru/?_r="+Date.now();
     };
-  },4000);
+  },8000);
 })();`;
 
 export default function RootLayout({

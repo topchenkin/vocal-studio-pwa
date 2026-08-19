@@ -16,6 +16,7 @@ export default function AppProviders({
 }) {
   useEffect(() => {
     document.documentElement.setAttribute("data-uvs-ready", "1");
+    document.getElementById("uvs-boot-fail")?.remove();
   }, []);
 
   return (

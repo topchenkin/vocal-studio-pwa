@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { realtimeTopic } from "@/lib/client-instance";
+import { isIosDevice } from "@/lib/ios";
 import { supabase } from "@/lib/supabase";
 import type { AppNotification } from "@/types";
 
@@ -49,7 +50,8 @@ export default function NotificationBell() {
       isMockAdmin ||
       !publicKey ||
       !("serviceWorker" in navigator) ||
-      !("PushManager" in window)
+      !("PushManager" in window) ||
+      isIosDevice()
     ) {
       return;
     }
