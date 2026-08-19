@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
-import { supabase, supabaseReady } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import {
   mapBackendError,
   isLikelyUnreachableBackend,
@@ -152,9 +152,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | undefined;
 
     void (async () => {
-      await supabaseReady;
-      if (!mounted) return;
-
       try {
         const {
           data: { session },

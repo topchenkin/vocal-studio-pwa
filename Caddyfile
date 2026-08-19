@@ -1,0 +1,12 @@
+# Leftover Timeweb Frontend Apps (92.246.76.92) only.
+# Do NOT copy this file to the Moscow VPS — that host uses
+# deploy/sb-proxy/Caddyfile. Office/ISP caches still hitting Timeweb
+# must proxy to Moscow instead of serving index.html as JS/CSS.
+www.uniquevocal.ru, uniquevocal.ru {
+	reverse_proxy https://5.42.123.142 {
+		header_up Host {host}
+		transport http {
+			tls_server_name {host}
+		}
+	}
+}

@@ -2,10 +2,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import {
   getBrowserSupabaseUrl,
-  markProxyDown,
-  pickSupabaseOrigin,
-  setActiveSupabaseOrigin,
-  shouldSkipProxy,
   SUPABASE_PROJECT_URL,
   SUPABASE_PROXY_URL,
 } from "@/lib/supabase-origin";
@@ -14,6 +10,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const PROXY_TIMEOUT_MS = 2_500;
 const FETCH_TIMEOUT_MS = 12_000;
+const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
   if (process.env.NODE_ENV !== "production") {
@@ -46,11 +43,13 @@ function retarget(
   const url = requestUrl(input);
   if (!from || !url.startsWith(from)) return input;
   const next = `${to}${url.slice(from.length)}`;
-  if (typeof input !== "string" && !(input instanceof URL) && "url" in input) {
-    return new Request(next, input);
-  }
+  if (typeof input === "string") return next;
   if (input instanceof URL) return new URL(next);
-  return next;
+  return new Request(next, input);
+}
+
+function callerAborted(init?: RequestInit): boolean {
+  return Boolean(init?.signal?.aborted);
 }
 
 async function fetchOnce(
@@ -70,61 +69,42 @@ async function fetchOnce(
   }
 }
 
-function switchToDirect() {
-  if (!SUPABASE_PROJECT_URL) return;
-  markProxyDown();
-  setActiveSupabaseOrigin(SUPABASE_PROJECT_URL);
-  supabase = makeClient(SUPABASE_PROJECT_URL);
-}
-
+/**
+ * Keep a single supabase-js client (auth storage key is the origin).
+ * Proxy first; on network / gateway failure retry the same path on
+ * supabase.co. Do not persist the choice — VPN off must use the proxy again.
+ */
 async function fetchWithFallback(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
   const url = requestUrl(input);
-  const proxyLive =
-    Boolean(SUPABASE_PROXY_URL) && url.startsWith(SUPABASE_PROXY_URL);
-  const directLive =
-    Boolean(SUPABASE_PROJECT_URL) && url.startsWith(SUPABASE_PROJECT_URL);
-
-  if (
-    proxyLive &&
-    SUPABASE_PROJECT_URL &&
-    (shouldSkipProxy() || !SUPABASE_PROXY_URL)
-  ) {
-    switchToDirect();
-    return fetchOnce(
-      retarget(input, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL),
-      init,
-      FETCH_TIMEOUT_MS
-    );
-  }
+  const canFallback =
+    Boolean(SUPABASE_PROXY_URL) &&
+    Boolean(SUPABASE_PROJECT_URL) &&
+    url.startsWith(SUPABASE_PROXY_URL);
 
   try {
-    return await fetchOnce(
+    const response = await fetchOnce(
       input,
       init,
-      proxyLive ? PROXY_TIMEOUT_MS : FETCH_TIMEOUT_MS
+      canFallback ? PROXY_TIMEOUT_MS : FETCH_TIMEOUT_MS
     );
-  } catch (error) {
-    if (proxyLive && SUPABASE_PROJECT_URL) {
-      switchToDirect();
+    if (canFallback && PROXY_BAD_STATUS.has(response.status)) {
       return fetchOnce(
         retarget(input, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL),
         init,
         FETCH_TIMEOUT_MS
       );
     }
-    if (directLive && SUPABASE_PROXY_URL && !shouldSkipProxy()) {
-      setActiveSupabaseOrigin(SUPABASE_PROXY_URL);
-      supabase = makeClient(SUPABASE_PROXY_URL);
-      return fetchOnce(
-        retarget(input, SUPABASE_PROJECT_URL, SUPABASE_PROXY_URL),
-        init,
-        PROXY_TIMEOUT_MS
-      );
-    }
-    throw error;
+    return response;
+  } catch (error) {
+    if (!canFallback || callerAborted(init)) throw error;
+    return fetchOnce(
+      retarget(input, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL),
+      init,
+      FETCH_TIMEOUT_MS
+    );
   }
 }
 
@@ -135,12 +115,4 @@ function makeClient(url: string): SupabaseClient<Database> {
   });
 }
 
-export let supabase = makeClient(getBrowserSupabaseUrl());
-
-export const supabaseReady: Promise<void> =
-  typeof window === "undefined"
-    ? Promise.resolve()
-    : pickSupabaseOrigin().then((url) => {
-        setActiveSupabaseOrigin(url);
-        supabase = makeClient(url);
-      });
+export const supabase = makeClient(getBrowserSupabaseUrl());

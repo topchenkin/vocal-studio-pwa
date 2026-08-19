@@ -7,7 +7,8 @@
 
 ```
 ученик (РФ, без VPN) → https://sb.uniquevocal.ru  (Москва)
-ученик (с VPN)       → https://<проект>.supabase.co  (клиент переключается сам)
+ученик (с VPN)       → тот же клиент; если прокси не отвечает, запрос
+                       повторяется на https://<проект>.supabase.co
 ```
 
 ## Боевой запуск (без VPN)
@@ -61,9 +62,9 @@ Frontend Apps (`92.246.76.92` — там Caddy отдаёт HTML вместо JS
 | `www` | A | `5.42.123.142` |
 | `sb` | A | `5.42.123.142` |
 
-В корне репозитория **не** должно быть `Caddyfile`: App Platform Frontend
-подхватывает его и ломает статику. Боевой Caddy — `deploy/sb-proxy/Caddyfile`
-на VPS (статика + `sb` reverse_proxy).
+Корневой `Caddyfile` нужен старому Frontend Apps: кэш DNS ещё бьёт в
+`92.246.76.92`, и тот хост должен reverse-proxy на Москву, а не отдавать
+`index.html` вместо JS. На VPS заливается только `deploy/sb-proxy/Caddyfile`.
 
 Проверка **без VPN**:
 

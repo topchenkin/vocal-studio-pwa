@@ -58,8 +58,9 @@ if (process.env.NEXT_PHASE === "phase-production-build") {
 const DAY = 24 * 60 * 60;
 
 /**
- * Static hashed assets are CacheFirst (Timeweb IP is stable). HTML stays
- * NetworkFirst with a short timeout so updates appear without hanging.
+ * Static hashed assets are NetworkFirst so a poisoned HTML-as-JS cache
+ * (Timeweb SPA fallback) cannot stick. HTML stays NetworkFirst with a short
+ * timeout so updates appear without hanging.
  * Default next-pwa rules also cache Google Fonts and ALL cross-origin
  * traffic (including supabase.co) — that makes a blocked API look like a
  * hung PWA. Same-origin only; never cache the API.
@@ -76,7 +77,7 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v9",
+    cacheId: "uvs-moscow-v10",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
@@ -91,10 +92,11 @@ const withPWA = withPWAInit({
     runtimeCaching: [
       {
         urlPattern: /\/_next\/static.+\.(js|css)$/i,
-        handler: "CacheFirst",
+        handler: "NetworkFirst",
         options: {
           cacheName: "next-static-assets",
-          expiration: { maxEntries: 64, maxAgeSeconds: DAY * 30 },
+          networkTimeoutSeconds: 4,
+          expiration: { maxEntries: 64, maxAgeSeconds: DAY * 7 },
         },
       },
       {
