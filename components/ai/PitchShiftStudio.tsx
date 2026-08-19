@@ -17,12 +17,12 @@ import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import {
-  applyPitchTempoToSource,
   clampPitchShift,
   clampTempoPercent,
   decodeBlobToAudioBuffer,
   PITCH_SHIFT_MAX,
   PITCH_SHIFT_MIN,
+  processPitchTempoBuffer,
   renderPitchTempoWav,
   TEMPO_SHIFT_MAX,
   TEMPO_SHIFT_MIN,
@@ -42,42 +42,67 @@ function formatSigned(value: number, digits = 1) {
   return abs;
 }
 
-function Stepper({
+function NumberStepper({
   value,
-  display,
-  onMinus,
-  onPlus,
   min,
   max,
+  step,
   disabled,
+  onChange,
+  format,
+  inputMode = "decimal",
 }: {
   value: number;
-  display: string;
-  onMinus: () => void;
-  onPlus: () => void;
   min: number;
   max: number;
+  step: number;
   disabled?: boolean;
+  onChange: (next: number) => void;
+  format: (value: number) => string;
+  inputMode?: "decimal" | "numeric";
 }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? format(value);
+
+  const commit = (raw: string) => {
+    const parsed = Number(raw.replace(",", ".").replace(/[^\d.+-]/g, ""));
+    setDraft(null);
+    if (!Number.isFinite(parsed)) return;
+    onChange(Math.max(min, Math.min(max, parsed)));
+  };
+
   return (
     <div className="inline-flex items-center rounded-xl bg-studio-bg ring-1 ring-studio-border">
       <button
         type="button"
         aria-label="Уменьшить"
         disabled={disabled || value <= min}
-        onClick={onMinus}
+        onClick={() => onChange(Math.max(min, value - step))}
         className="px-3 py-2 text-sm font-semibold text-studio-muted transition hover:text-studio-text disabled:opacity-30"
       >
         −
       </button>
-      <span className="min-w-[3.25rem] text-center text-sm tabular-nums font-medium text-studio-text">
-        {display}
-      </span>
+      <input
+        type="text"
+        inputMode={inputMode}
+        aria-label="Значение"
+        disabled={disabled}
+        value={shown}
+        onFocus={() => setDraft(String(value))}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => commit(draft ?? String(value))}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+        className="w-[4.75rem] bg-transparent py-2 text-center text-sm tabular-nums font-medium text-studio-text outline-none disabled:opacity-50"
+      />
       <button
         type="button"
         aria-label="Увеличить"
         disabled={disabled || value >= max}
-        onClick={onPlus}
+        onClick={() => onChange(Math.min(max, value + step))}
         className="px-3 py-2 text-sm font-semibold text-studio-muted transition hover:text-studio-text disabled:opacity-30"
       >
         +
@@ -178,16 +203,16 @@ export default function PitchShiftStudio({ locked = false }: Props) {
     }
   };
 
-  const changePitch = (delta: number) => {
+  const changePitch = (next: number) => {
     stopPreview();
     clearResult();
-    setPitch((current) => clampPitchShift(current + delta));
+    setPitch(clampPitchShift(next));
   };
 
-  const changeTempo = (delta: number) => {
+  const changeTempo = (next: number) => {
     stopPreview();
     clearResult();
-    setTempo((current) => clampTempoPercent(current + delta));
+    setTempo(clampTempoPercent(next));
   };
 
   const togglePreview = async () => {
@@ -196,26 +221,34 @@ export default function PitchShiftStudio({ locked = false }: Props) {
       stopPreview();
       return;
     }
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-    if (ctx.state === "suspended") await ctx.resume();
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    applyPitchTempoToSource(source, pitch, tempo);
-    source.connect(ctx.destination);
-    source.onended = () => {
-      if (audioRef.current?.source === source) {
-        void ctx.close();
-        audioRef.current = null;
-        setPlaying(false);
-      }
-    };
-    audioRef.current = { ctx, source };
-    source.start(0);
-    setPlaying(true);
+    setRendering(true);
+    setError("");
+    try {
+      const processed = await processPitchTempoBuffer(buffer, pitch, tempo);
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      const ctx = new AudioCtx();
+      if (ctx.state === "suspended") await ctx.resume();
+      const source = ctx.createBufferSource();
+      source.buffer = processed;
+      source.connect(ctx.destination);
+      source.onended = () => {
+        if (audioRef.current?.source === source) {
+          void ctx.close();
+          audioRef.current = null;
+          setPlaying(false);
+        }
+      };
+      audioRef.current = { ctx, source };
+      source.start(0);
+      setPlaying(true);
+    } catch {
+      setError("Не удалось включить превью. Попробуйте другие значения.");
+    } finally {
+      setRendering(false);
+    }
   };
 
   const renderResult = async () => {
@@ -342,18 +375,19 @@ export default function PitchShiftStudio({ locked = false }: Props) {
                 <Music2 className="h-4 w-4 shrink-0 text-studio-accent" />
                 <span className="text-sm font-medium">Тональность</span>
               </div>
-              <Stepper
+              <NumberStepper
                 value={pitch}
-                display={formatSigned(pitch)}
                 min={PITCH_SHIFT_MIN}
                 max={PITCH_SHIFT_MAX}
+                step={0.5}
                 disabled={decoding || rendering}
-                onMinus={() => changePitch(-0.5)}
-                onPlus={() => changePitch(0.5)}
+                format={formatSigned}
+                onChange={changePitch}
               />
             </div>
             <p className="mt-2 text-[11px] text-studio-muted">
-              Шаг 0,5 полутона. {formatSigned(pitch)} —{" "}
+              Полутона, от {PITCH_SHIFT_MIN} до {PITCH_SHIFT_MAX}. Можно ввести
+              число вручную или шагать кнопками (±0,5). {formatSigned(pitch)} —{" "}
               {pitch === 0
                 ? "исходная тональность"
                 : pitch > 0
@@ -377,21 +411,23 @@ export default function PitchShiftStudio({ locked = false }: Props) {
                   <CircleHelp className="h-4 w-4" />
                 </button>
               </div>
-              <Stepper
+              <NumberStepper
                 value={tempo}
-                display={formatSigned(tempo)}
                 min={TEMPO_SHIFT_MIN}
                 max={TEMPO_SHIFT_MAX}
+                step={1}
+                inputMode="numeric"
                 disabled={decoding || rendering}
-                onMinus={() => changeTempo(-1)}
-                onPlus={() => changeTempo(1)}
+                format={(value) => formatSigned(value, 0)}
+                onChange={changeTempo}
               />
             </div>
             {showTempoHelp && (
               <p className="mt-2 text-[11px] leading-relaxed text-studio-muted">
-                0% — исходный темп. Плюс ускоряет, минус замедляет. Тональность
-                при этом не «уедет», если вы её отдельно не меняли. Длительность
-                результата ≈ {Math.max(1, Math.round(outDuration))} с.
+                0% — исходный темп. Плюс ускоряет и укорачивает, минус замедляет
+                и удлиняет, тональность при этом не «уедет». Можно ввести число
+                от {TEMPO_SHIFT_MIN} до {TEMPO_SHIFT_MAX}. Длительность результата
+                ≈ {Math.max(1, Math.round(outDuration))} с.
               </p>
             )}
           </div>
@@ -408,7 +444,7 @@ export default function PitchShiftStudio({ locked = false }: Props) {
               ) : (
                 <Play className="h-4 w-4" />
               )}
-              {playing ? "Стоп" : "Слушать с правками"}
+              {playing ? "Стоп" : rendering ? "Готовим…" : "Слушать с правками"}
             </Button>
             <Button
               className="flex-1"

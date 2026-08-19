@@ -24,6 +24,7 @@ import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import ContentManager from "@/components/admin/ContentManager";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
+import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import {
   CABINET_TAB_EVENT,
@@ -171,6 +172,7 @@ export default function AdminDashboardClient() {
                   <TimbreMatcher />
                   <MultitrackMixer />
                 </div>
+                <PitchShiftStudio />
               </div>
             )}
           </motion.div>

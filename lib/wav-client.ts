@@ -289,7 +289,10 @@ export const TEMPO_SHIFT_MAX = 50;
 
 export function clampPitchShift(value: number) {
   if (!Number.isFinite(value)) return 0;
-  return Math.max(PITCH_SHIFT_MIN, Math.min(PITCH_SHIFT_MAX, Math.round(value * 2) / 2));
+  return Math.max(
+    PITCH_SHIFT_MIN,
+    Math.min(PITCH_SHIFT_MAX, Math.round(value * 2) / 2)
+  );
 }
 
 export function clampTempoPercent(value: number) {
@@ -301,37 +304,101 @@ export function tempoToPlaybackRate(tempoPercent: number) {
   return Math.max(0.5, Math.min(2, 1 + clampTempoPercent(tempoPercent) / 100));
 }
 
-/** Cents to add so playbackRate does not also change musical key. */
-export function detuneForIndependentPitch(
-  pitchSemitones: number,
-  playbackRate: number
-) {
-  const rateSemis = 12 * Math.log2(Math.max(0.25, playbackRate));
-  return (clampPitchShift(pitchSemitones) - rateSemis) * 100;
+function hannWindow(size: number) {
+  const window = new Float32Array(size);
+  if (size <= 1) {
+    window[0] = 1;
+    return window;
+  }
+  for (let i = 0; i < size; i += 1) {
+    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+  }
+  return window;
 }
 
-export function applyPitchTempoToSource(
-  source: AudioBufferSourceNode,
-  pitchSemitones: number,
-  tempoPercent: number
-) {
-  const rate = tempoToPlaybackRate(tempoPercent);
-  source.playbackRate.value = rate;
-  source.detune.value = detuneForIndependentPitch(pitchSemitones, rate);
-  return rate;
+function copyBufferChannels(buffer: AudioBuffer): Float32Array[] {
+  const count = Math.min(2, Math.max(1, buffer.numberOfChannels));
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const src = buffer.getChannelData(Math.min(i, buffer.numberOfChannels - 1));
+    channels.push(new Float32Array(src));
+  }
+  return channels;
 }
 
-/** Render a new WAV with independent pitch (semitones) and tempo (%). */
-export async function renderPitchTempoWav(
+function audioBufferFromChannels(
+  channels: Float32Array[],
+  sampleRate: number
+): AudioBuffer {
+  const length = Math.max(1, channels[0]?.length ?? 1);
+  const ctx = getOfflineAudioContext(channels.length, 1, sampleRate);
+  const buffer = ctx.createBuffer(channels.length, length, sampleRate);
+  for (let i = 0; i < channels.length; i += 1) {
+    buffer.getChannelData(i).set(channels[i]!.subarray(0, length));
+  }
+  return buffer;
+}
+
+/**
+ * Pitch-preserving time stretch (OLA). stretch > 1 makes the clip longer
+ * (slower tempo), stretch < 1 shortens it. Detune cannot do this: in Web
+ * Audio, detune is multiplied into playbackRate and cancels speed changes.
+ */
+function olaTimeStretch(
+  channels: Float32Array[],
+  stretch: number
+): Float32Array[] {
+  const inputLen = channels[0]?.length ?? 0;
+  if (inputLen < 2 || !Number.isFinite(stretch) || Math.abs(stretch - 1) < 1e-4) {
+    return channels;
+  }
+  const winSize = Math.min(2048, Math.max(256, inputLen));
+  const hopIn = Math.max(64, Math.floor(winSize / 4));
+  const hopOut = Math.max(1, Math.round(hopIn * stretch));
+  const outputLen = Math.max(winSize, Math.round(inputLen * stretch));
+  const window = hannWindow(winSize);
+  const outputs = channels.map(() => new Float32Array(outputLen));
+  const weight = new Float32Array(outputLen);
+  const maxIters = Math.ceil(outputLen / hopOut) + 8;
+
+  let inPos = 0;
+  let outPos = 0;
+  for (let iter = 0; iter < maxIters && outPos < outputLen; iter += 1) {
+    for (let i = 0; i < winSize; i += 1) {
+      const dest = outPos + i;
+      if (dest >= outputLen) break;
+      const w = window[i] ?? 0;
+      weight[dest] += w;
+      const src = inPos + i;
+      for (let c = 0; c < channels.length; c += 1) {
+        const sample = src >= 0 && src < inputLen ? channels[c]![src] ?? 0 : 0;
+        outputs[c]![dest] += sample * w;
+      }
+    }
+    inPos += hopIn;
+    outPos += hopOut;
+  }
+
+  for (let i = 0; i < outputLen; i += 1) {
+    const w = weight[i] ?? 0;
+    if (w > 1e-8) {
+      for (let c = 0; c < outputs.length; c += 1) {
+        outputs[c]![i] /= w;
+      }
+    }
+  }
+  return outputs;
+}
+
+async function renderPlaybackRate(
   buffer: AudioBuffer,
-  pitchSemitones: number,
-  tempoPercent: number
-): Promise<Blob> {
-  const rate = tempoToPlaybackRate(tempoPercent);
+  rate: number
+): Promise<AudioBuffer> {
+  if (Math.abs(rate - 1) < 1e-6) return buffer;
   const sampleRate = buffer.sampleRate;
   const outLength = Math.max(
     1,
-    Math.ceil((buffer.duration / rate) * sampleRate)
+    Math.ceil((buffer.duration / Math.max(0.25, rate)) * sampleRate)
   );
   const ctx = getOfflineAudioContext(
     Math.min(2, Math.max(1, buffer.numberOfChannels)),
@@ -340,20 +407,62 @@ export async function renderPitchTempoWav(
   );
   const source = ctx.createBufferSource();
   source.buffer = buffer;
-  applyPitchTempoToSource(source, pitchSemitones, tempoPercent);
+  source.playbackRate.value = rate;
   source.connect(ctx.destination);
   source.start(0);
-  const rendered = await ctx.startRendering();
-  const left = new Float32Array(rendered.getChannelData(0));
+  return ctx.startRendering();
+}
+
+/** Independent pitch (semitones) and tempo (%). Tempo changes duration, pitch does not. */
+export async function processPitchTempoBuffer(
+  buffer: AudioBuffer,
+  pitchSemitones: number,
+  tempoPercent: number
+): Promise<AudioBuffer> {
+  const pitch = clampPitchShift(pitchSemitones);
+  const tempoRatio = tempoToPlaybackRate(tempoPercent);
+  const pitchRatio = 2 ** (pitch / 12);
+
+  let working = buffer;
+  if (Math.abs(pitch) > 1e-6) {
+    working = await renderPlaybackRate(buffer, pitchRatio);
+  }
+
+  const stretch = pitchRatio / tempoRatio;
+  if (Math.abs(stretch - 1) > 1e-4) {
+    const stretched = olaTimeStretch(copyBufferChannels(working), stretch);
+    working = audioBufferFromChannels(stretched, buffer.sampleRate);
+  }
+
+  const left = new Float32Array(working.getChannelData(0));
   const right = new Float32Array(
-    rendered.numberOfChannels > 1
-      ? rendered.getChannelData(1)
-      : rendered.getChannelData(0)
+    working.numberOfChannels > 1
+      ? working.getChannelData(1)
+      : working.getChannelData(0)
   );
   normalizeStereoInPlace(left, right);
-  return encodeWavBlob(
-    rendered.numberOfChannels > 1 ? [left, right] : [left],
-    sampleRate
+  return audioBufferFromChannels(
+    working.numberOfChannels > 1 ? [left, right] : [left],
+    buffer.sampleRate
   );
+}
+
+/** Render a new WAV with independent pitch (semitones) and tempo (%). */
+export async function renderPitchTempoWav(
+  buffer: AudioBuffer,
+  pitchSemitones: number,
+  tempoPercent: number
+): Promise<Blob> {
+  const rendered = await processPitchTempoBuffer(
+    buffer,
+    pitchSemitones,
+    tempoPercent
+  );
+  const left = rendered.getChannelData(0);
+  const channels =
+    rendered.numberOfChannels > 1
+      ? [left, rendered.getChannelData(1)]
+      : [left];
+  return encodeWavBlob(channels, rendered.sampleRate);
 }
 
