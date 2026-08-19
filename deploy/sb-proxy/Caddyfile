@@ -26,6 +26,5 @@ www.uniquevocal.ru, uniquevocal.ru {
 }
 
 sb.uniquevocal.ru {
-	encode gzip
 	reverse_proxy 127.0.0.1:8787
 }

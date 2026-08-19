@@ -82,7 +82,11 @@ export default function AdminLoginPage() {
     if (result.error) {
       setSubmitting(false);
       setError(
-        "Пароль ещё не установлен или введён неверно. Для первого входа используйте кнопку ниже."
+        /invalid login|invalid credentials|invalid_grant|wrong password|email not confirmed/i.test(
+          result.error
+        )
+          ? "Пароль ещё не установлен или введён неверно. Для первого входа используйте кнопку ниже."
+          : result.error
       );
       return;
     }

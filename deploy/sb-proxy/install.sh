@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPABASE_ORIGIN="${SUPABASE_ORIGIN:-https://aeycfifglscmkotdpwiu.supabase.co}"
 PROXY_PUBLIC_ORIGIN="${PROXY_PUBLIC_ORIGIN:-https://sb.uniquevocal.ru}"
-ALLOW_ORIGIN="${ALLOW_ORIGIN:-https://www.uniquevocal.ru}"
+ALLOW_ORIGIN="${ALLOW_ORIGIN:-https://www.uniquevocal.ru,https://uniquevocal.ru}"
 
 apt-get update
 apt-get install -y ca-certificates curl gnupg debian-keyring debian-archive-keyring apt-transport-https ufw
