@@ -25,6 +25,7 @@ import {
   stopMediaStream,
   unlockInlineVideo,
 } from "@/lib/chat-capture";
+import { armIosCapture, cancelArmedIosCapture } from "@/lib/ios-audio-session";
 import { isAppleWebKit } from "@/lib/mic-audio";
 import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
@@ -246,32 +247,27 @@ export default function ChatWindow({
         setRecordError("Запись не поддерживается в этом браузере");
         return;
       }
-      // Mount a visible preview <video> during the tap. iOS will not start
-      // the camera on a missing / display:none element, and play() after an
-      // await is no longer a user gesture unless we unlock the node first.
-      flushSync(() => {
-        setRecordKind(kind);
-        if (kind === "video") {
+      armIosCapture();
+      if (kind === "video") {
+        // Mount a visible preview <video> during the tap. iOS will not start
+        // the camera on a missing / display:none element.
+        flushSync(() => {
+          setRecordKind("video");
           setPhase("recording");
           setRecordMs(0);
+        });
+        if (previewRef.current) {
+          unlockInlineVideo(previewRef.current);
         }
-      });
-      if (kind === "video" && previewRef.current) {
-        unlockInlineVideo(previewRef.current);
-        previewRef.current.scrollIntoView({ block: "nearest" });
+      } else {
+        setRecordKind("voice");
       }
 
       const stream = await getChatMediaStream(kind, previewRef.current);
       streamRef.current = stream;
 
-      if (kind === "video") {
-        const preview = previewRef.current;
-        if (!preview) {
-          throw new Error("preview missing");
-        }
-        if (preview.srcObject !== stream) {
-          await attachPreviewStream(preview, stream);
-        }
+      if (kind === "video" && previewRef.current) {
+        void attachPreviewStream(previewRef.current, stream);
       }
 
       const { recorder, mime } = createChatRecorder(stream, kind);
@@ -338,6 +334,7 @@ export default function ChatWindow({
       setRecordMs(0);
       startTimer();
     } catch (err) {
+      cancelArmedIosCapture();
       stopMediaStream(streamRef.current);
       streamRef.current = null;
       mediaRecorderRef.current = null;
@@ -791,9 +788,7 @@ function ComposerIcon({
   );
 }
 
-/** Circle look without clipping the <video> itself.
- *  overflow:hidden, border-radius and mask-image on a live camera layer
- *  paint black on iPhone. Paint the corners as a sibling overlay instead. */
+/** Live camera must not be clipped — overflow/radius/mask paint black on iPhone. */
 function CircleVideoFrame({
   children,
   className,
@@ -801,17 +796,5 @@ function CircleVideoFrame({
   children: React.ReactNode;
   className?: string;
 }) {
-  return (
-    <div className={`relative overflow-visible bg-black ${className ?? ""}`}>
-      {children}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle closest-side at center, transparent 70%, rgb(var(--studio-surface)) 71%)",
-        }}
-        aria-hidden
-      />
-    </div>
-  );
+  return <div className={`bg-black ${className ?? ""}`}>{children}</div>;
 }

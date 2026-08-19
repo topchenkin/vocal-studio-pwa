@@ -24,6 +24,7 @@ function safariSession(): SafariAudioSession | null {
 }
 
 let captureCount = 0;
+let pendingArm = false;
 
 function apply(type: SessionType) {
   const session = safariSession();
@@ -39,6 +40,25 @@ function apply(type: SessionType) {
 export function beginIosCapture() {
   captureCount += 1;
   apply("play-and-record");
+}
+
+/**
+ * Switch Safari to play-and-record *before* getUserMedia.
+ * Without this, iOS throws NotAllowedError even when the site already
+ * has microphone permission (and does not show another prompt).
+ */
+export function armIosCapture() {
+  apply("play-and-record");
+  if (captureCount === 0) {
+    captureCount = 1;
+    pendingArm = true;
+  }
+}
+
+export function cancelArmedIosCapture() {
+  if (!pendingArm) return;
+  pendingArm = false;
+  endIosCapture();
 }
 
 /** Call after every live audio track is stopped. */
@@ -63,7 +83,12 @@ const heldStreams = new WeakSet<MediaStream>();
 export function holdIosCapture(stream: MediaStream) {
   if (heldStreams.has(stream)) return;
   heldStreams.add(stream);
-  beginIosCapture();
+  if (pendingArm) {
+    pendingArm = false;
+  } else {
+    beginIosCapture();
+  }
+  apply("play-and-record");
 }
 
 export function releaseIosCapture(stream: MediaStream | null | undefined) {

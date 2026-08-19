@@ -1,17 +1,18 @@
 /**
  * Chat voice/video capture — kept separate from singing-analysis helpers.
  *
- * iPhone/WebKit will not reuse tuner constraints here: echoCancellation:false
- * + a second camera+mic stream (or leftover live tracks) makes getUserMedia
- * fail even when the user already granted permission. Android is lenient.
- *
- * A successful getUserMedia is not enough on iOS: the camera stays black until
- * a visible inline <video> is actually playing, and MediaRecorder will persist
- * that black track if it starts too early.
+ * iPhone will not reuse tuner constraints here. A second getUserMedia
+ * (camera already open, then mic) often hangs forever in WKWebView — the
+ * green "Камера используется" pill stays on and the timer never starts.
  */
 
 import { isAppleWebKit } from "@/lib/mic-audio";
-import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
+import {
+  armIosCapture,
+  cancelArmedIosCapture,
+  holdIosCapture,
+  releaseIosCapture,
+} from "@/lib/ios-audio-session";
 import { pickVideoRecorderMime, pickVoiceRecorderMime } from "@/lib/media-mime";
 
 export function stopMediaStream(stream: MediaStream | null | undefined) {
@@ -25,39 +26,6 @@ export function stopMediaStream(stream: MediaStream | null | undefined) {
   releaseIosCapture(stream);
 }
 
-/**
- * Do not lead with portrait 720×1280. WebKit often accepts those `ideal`
- * sizes (so nothing throws) then delivers a live track with no frames.
- * Native / landscape sizes first; tiny VGA last.
- */
-const VIDEO_CONSTRAINT_ATTEMPTS: MediaStreamConstraints[] = [
-  {
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-    video: { facingMode: { ideal: "user" } },
-  },
-  {
-    audio: { echoCancellation: true },
-    video: {
-      facingMode: { ideal: "user" },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-    },
-  },
-  {
-    audio: true,
-    video: {
-      facingMode: { ideal: "user" },
-      width: { ideal: 640 },
-      height: { ideal: 480 },
-    },
-  },
-  { audio: true, video: true },
-];
-
 export async function getChatMediaStream(
   kind: "voice" | "video",
   preview?: HTMLVideoElement | null
@@ -65,82 +33,96 @@ export async function getChatMediaStream(
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     throw new Error("unsupported");
   }
-  if (kind === "voice") {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  armIosCapture();
+  try {
+    const stream =
+      kind === "voice"
+        ? await getVoiceStream()
+        : await getVideoStream(preview ?? null);
     holdIosCapture(stream);
+    return stream;
+  } catch (error) {
+    cancelArmedIosCapture();
+    throw error;
+  }
+}
+
+async function getVoiceStream(): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
+    });
+  } catch (first) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+    } catch {
+      throw first;
+    }
+  }
+}
+
+async function getVideoStream(
+  preview: HTMLVideoElement | null
+): Promise<MediaStream> {
+  if (isAppleWebKit()) {
+    // One combined request. Never open the camera and then ask for the mic.
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode: "user" },
+      });
+    } catch {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true,
+        });
+      }
+    }
+    bindPreview(preview, stream);
     return stream;
   }
 
-  let lastError: unknown;
-  for (const constraints of VIDEO_CONSTRAINT_ATTEMPTS) {
-    try {
-      const stream = await openChatCamera(constraints, preview ?? null);
-      holdIosCapture(stream);
-      return stream;
-    } catch (err) {
-      lastError = err;
-    }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: { facingMode: { ideal: "user" } },
+    });
+    bindPreview(preview, stream);
+    return stream;
+  } catch {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: true,
+    });
+    bindPreview(preview, stream);
+    return stream;
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Не удалось включить камеру");
 }
 
-/**
- * Keep the original MediaStream that getUserMedia returned. Wrapping tracks in
- * a new MediaStream after the fact is a common iOS black-preview trigger.
- * Mic tracks are added onto that same stream once the preview is painting.
- */
-async function openChatCamera(
-  constraints: MediaStreamConstraints,
-  preview: HTMLVideoElement | null
-): Promise<MediaStream> {
-  const videoConstraints =
-    typeof constraints.video === "undefined" ? true : constraints.video;
-  const audioConstraints =
-    typeof constraints.audio === "undefined" ? true : constraints.audio;
-
-  if (!isAppleWebKit()) {
-    return navigator.mediaDevices.getUserMedia(constraints);
-  }
-
-  const videoStream = await navigator.mediaDevices.getUserMedia({
-    video: videoConstraints,
-    audio: false,
-  });
-  try {
-    if (preview) {
-      await attachPreviewStream(preview, videoStream);
-      if (preview.videoWidth === 0) {
-        throw new Error("black");
-      }
-    }
-    try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints,
-        video: false,
-      });
-      for (const track of audioStream.getAudioTracks()) {
-        videoStream.addTrack(track);
-      }
-    } catch {
-      try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-        for (const track of audioStream.getAudioTracks()) {
-          videoStream.addTrack(track);
-        }
-      } catch {
-        /* video-only still lets the student send a silent circle */
-      }
-    }
-    return videoStream;
-  } catch (err) {
-    stopMediaStream(videoStream);
-    throw err;
-  }
+function bindPreview(preview: HTMLVideoElement | null, stream: MediaStream) {
+  if (!preview) return;
+  prepareInlineVideo(preview);
+  preview.srcObject = stream;
+  void preview.play().catch(() => undefined);
 }
 
 /** Call synchronously in the tap handler so iOS unlocks autoplay. */
@@ -166,143 +148,39 @@ function prepareInlineVideo(video: HTMLVideoElement) {
   }
 }
 
-/** iOS will not start the camera until a visible inline <video> is playing. */
+/** Best-effort play(); never block the recorder on metadata. */
 export async function attachPreviewStream(
   video: HTMLVideoElement,
   stream: MediaStream
 ): Promise<void> {
-  prepareInlineVideo(video);
-  for (const track of stream.getVideoTracks()) {
-    track.enabled = true;
-  }
-
-  if (video.srcObject !== stream) {
-    video.srcObject = stream;
-  }
-
-  await waitForTrackUnmute(stream);
-  await waitForVideoMetadata(video);
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      await video.play();
-      break;
-    } catch {
-      await sleep(60 * (attempt + 1));
-    }
-  }
-
-  if (video.paused) {
-    try {
-      await video.play();
-    } catch {
-      /* muted + playsInline usually allows autoplay */
-    }
-  }
-
-  if (video.videoWidth === 0 && !isAppleWebKit()) {
-    const track = stream.getVideoTracks()[0];
-    if (track) {
-      try {
-        await track.applyConstraints({
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        });
-      } catch {
-        /* ignore */
-      }
-      try {
-        await video.play();
-      } catch {
-        /* ignore */
-      }
-      await waitForVideoMetadata(video, 1200);
-    }
-  }
-
-  await waitForPlaying(video);
-  await nextPaint();
-}
-
-function waitForTrackUnmute(stream: MediaStream): Promise<void> {
-  const track = stream.getVideoTracks()[0];
-  if (!track || !track.muted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(resolve, 1500);
-    track.addEventListener(
-      "unmute",
-      () => {
-        window.clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
-  });
-}
-
-function waitForVideoMetadata(
-  video: HTMLVideoElement,
-  timeoutMs = 2500
-): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      if (video.videoWidth > 0 || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        settled = true;
-        window.clearTimeout(timer);
-        video.removeEventListener("loadedmetadata", done);
-        video.removeEventListener("loadeddata", done);
-        video.removeEventListener("canplay", done);
-        resolve();
-      }
-    };
-    const timer = window.setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      video.removeEventListener("loadedmetadata", done);
-      video.removeEventListener("loadeddata", done);
-      video.removeEventListener("canplay", done);
-      resolve();
-    }, timeoutMs);
-    video.addEventListener("loadedmetadata", done);
-    video.addEventListener("loadeddata", done);
-    video.addEventListener("canplay", done);
-    done();
-  });
-}
-
-function waitForPlaying(video: HTMLVideoElement): Promise<void> {
-  if (!video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(resolve, 1500);
-    video.addEventListener(
-      "playing",
-      () => {
-        window.clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
-  });
-}
-
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+  bindPreview(video, stream);
 }
 
 export function createChatRecorder(
   stream: MediaStream,
   kind: "voice" | "video"
 ): { recorder: MediaRecorder; mime: string } {
+  if (kind === "voice" && stream.getAudioTracks().length === 0) {
+    throw new Error("no-audio-track");
+  }
+  if (kind === "video" && stream.getVideoTracks().length === 0) {
+    throw new Error("no-video-track");
+  }
+
+  if (isAppleWebKit()) {
+    try {
+      const recorder = new MediaRecorder(stream);
+      return {
+        recorder,
+        mime:
+          recorder.mimeType ||
+          (kind === "video" ? "video/mp4" : "audio/mp4"),
+      };
+    } catch {
+      /* fall through to typed mime */
+    }
+  }
+
   const mime =
     kind === "video" ? pickVideoRecorderMime() : pickVoiceRecorderMime();
   try {
@@ -320,8 +198,10 @@ export function createChatRecorder(
  * Android Chrome is happy with a 250ms timeslice. Safari's video/mp4
  * MediaRecorder often throws or yields an empty file if timeslice is set.
  */
-export function startChatRecorder(recorder: MediaRecorder, _kind: "voice" | "video") {
-  // Safari mp4 (voice and video) often yields an empty file if timeslice is set.
+export function startChatRecorder(
+  recorder: MediaRecorder,
+  _kind: "voice" | "video"
+) {
   const useTimeslice = !isAppleWebKit();
   if (useTimeslice) {
     try {
@@ -334,15 +214,44 @@ export function startChatRecorder(recorder: MediaRecorder, _kind: "voice" | "vid
   recorder.start();
 }
 
+function errorName(err: unknown) {
+  if (err instanceof DOMException) return err.name;
+  if (err instanceof Error) return err.name;
+  return "";
+}
+
+function errorText(err: unknown) {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err ?? "");
+}
+
 export function chatCaptureErrorMessage(
   kind: "voice" | "video",
   err: unknown
 ): string {
-  const name = err instanceof DOMException ? err.name : "";
+  const name = errorName(err);
+  const text = errorText(err);
   if (kind === "voice") {
+    if (text === "unsupported" || name === "NotSupportedError") {
+      return "Этот браузер не умеет записывать голос. Откройте Safari.";
+    }
+    if (text === "no-audio-track") {
+      return "Микрофон включился без дорожки. Нажмите ещё раз.";
+    }
     if (name === "NotFoundError") return "Микрофон не найден";
-    if (name === "NotReadableError") return "Микрофон занят другим приложением";
-    return "Нужен доступ к микрофону";
+    if (name === "NotReadableError") {
+      return "Микрофон занят. Закройте тюнер или другое приложение и нажмите ещё раз";
+    }
+    if (name === "AbortError") {
+      return "Safari прервал микрофон. Нажмите на голосовое ещё раз";
+    }
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return "Safari не отдал микрофон этому окну. Закройте тюнер, откройте чат ещё раз и нажмите на микрофон — запрос должен появиться сразу";
+    }
+    if (name === "InvalidStateError") {
+      return "Не удалось начать запись. Нажмите на микрофон ещё раз";
+    }
+    return "Не удалось включить микрофон. Нажмите ещё раз";
   }
   if (name === "NotFoundError") return "Камера не найдена";
   if (name === "NotReadableError") {
@@ -351,6 +260,9 @@ export function chatCaptureErrorMessage(
   if (name === "OverconstrainedError") {
     return "Не удалось включить камеру на этом устройстве";
   }
-  if (name === "NotAllowedError") return "Нужен доступ к камере и микрофону";
-  return "Не удалось включить камеру. Разрешите доступ и попробуйте снова";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "Нужен доступ к камере и микрофону. Нажмите ещё раз сразу после открытия чата";
+  }
+  if (text === "no-video-track") return "Камера не дала картинку. Нажмите ещё раз";
+  return "Не удалось включить камеру. Нажмите ещё раз";
 }
