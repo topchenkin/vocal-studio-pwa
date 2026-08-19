@@ -77,7 +77,15 @@ export default function StudentDashboardClient() {
     return () => window.removeEventListener(CABINET_TAB_EVENT, onTab);
   }, [router]);
 
-  if (loading || !user || isAdmin) {
+  if ((loading && !user) || isAdmin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-studio-bg">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />

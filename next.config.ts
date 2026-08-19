@@ -77,7 +77,7 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v18",
+    cacheId: "uvs-moscow-v19",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
@@ -92,10 +92,9 @@ const withPWA = withPWAInit({
     runtimeCaching: [
       {
         urlPattern: /\/_next\/static.+\.(js|css)$/i,
-        handler: "NetworkFirst",
+        handler: "StaleWhileRevalidate",
         options: {
           cacheName: "next-static-assets",
-          networkTimeoutSeconds: 8,
           expiration: { maxEntries: 64, maxAgeSeconds: DAY * 7 },
         },
       },
@@ -124,7 +123,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc-prefetch",
-          networkTimeoutSeconds: 8,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -136,7 +135,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages-rsc",
-          networkTimeoutSeconds: 8,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },
@@ -146,7 +145,7 @@ const withPWA = withPWAInit({
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
-          networkTimeoutSeconds: 8,
+          networkTimeoutSeconds: 2,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
         },
       },

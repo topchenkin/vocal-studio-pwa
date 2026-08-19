@@ -5,12 +5,24 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { realtimeTopic } from "@/lib/client-instance";
-import { supabase, resyncSupabaseTransport } from "@/lib/supabase";
+import {
+  hasCachedSession,
+  readCachedProfile,
+  readCachedUser,
+  writeCachedProfile,
+} from "@/lib/session-cache";
+import {
+  installNetworkGuards,
+  recoverSupabaseRoute,
+  supabase,
+} from "@/lib/supabase";
 import {
   mapBackendError,
   isLikelyUnreachableBackend,
@@ -30,6 +42,7 @@ interface AuthContextValue {
   profile: StudentProfile | null;
   profileError: string | null;
   backendError: string | null;
+  reconnecting: boolean;
   role: UserRole;
   tier: AppSubscriptionTier;
   loading: boolean;
@@ -48,8 +61,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const MOCK_ADMIN_KEY = "uvs_mock_admin";
-const AUTH_BOOT_MS = 12_000;
-const PROFILE_MS = 12_000;
+const AUTH_BOOT_MS = 8_000;
+const PROFILE_MS = 8_000;
 
 const mockAdminProfile: StudentProfile = {
   id: "mock-admin",
@@ -109,12 +122,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const [isMockAdmin, setIsMockAdmin] = useState(false);
+  const profileRef = useRef<StudentProfile | null>(null);
+  profileRef.current = profile;
 
   const loadProfile = useCallback(
     async (authUser: User | null, quiet = false) => {
       if (!authUser) {
+        if (hasCachedSession()) return;
         setProfile(null);
+        writeCachedProfile(null);
         setProfileError(null);
         return;
       }
@@ -123,13 +141,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         authUser.id
       );
       if (unreachable) {
-        if (!quiet) {
+        setReconnecting(true);
+        const kept = profileRef.current ?? readCachedProfile();
+        if (kept) setProfile(kept);
+        else if (!quiet) {
           setBackendError(SUPABASE_UNREACHABLE_RU);
           setProfileError(SUPABASE_UNREACHABLE_RU);
         }
         return;
       }
       setProfile(loadedProfile);
+      writeCachedProfile(loadedProfile);
+      setReconnecting(false);
       setBackendError(null);
       setProfileError(
         loadedProfile
@@ -140,8 +163,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  useLayoutEffect(() => {
+    const cachedUser = readCachedUser();
+    const cachedProfile = readCachedProfile();
+    if (cachedUser) {
+      setUser(cachedUser);
+      if (cachedProfile) setProfile(cachedProfile);
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
+    installNetworkGuards();
 
     if (
       process.env.NODE_ENV === "development" &&
@@ -163,17 +197,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: { session },
         } = await withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS);
         if (!mounted) return;
-        setUser(session?.user ?? null);
-        await loadProfile(session?.user ?? null);
+        const nextUser = session?.user ?? readCachedUser();
+        setUser(nextUser);
+        await loadProfile(nextUser, true);
         if (mounted) {
-          if (!session) setBackendError(null);
+          if (!nextUser) setBackendError(null);
           setLoading(false);
         }
-      } catch (error) {
+      } catch {
         if (!mounted) return;
-        setUser(null);
-        setProfile(null);
-        setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
+        const cachedUser = readCachedUser();
+        if (cachedUser) {
+          setUser(cachedUser);
+          const cachedProfile = readCachedProfile();
+          if (cachedProfile) setProfile(cachedProfile);
+          setReconnecting(true);
+        } else {
+          setBackendError(SUPABASE_UNREACHABLE_RU);
+        }
         setLoading(false);
       }
 
@@ -182,9 +223,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         data: { subscription: nextSub },
       } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "TOKEN_REFRESHED") return;
+        if (
+          (event === "SIGNED_OUT" || !session) &&
+          hasCachedSession()
+        ) {
+          return;
+        }
         const nextUser = session?.user ?? null;
         setUser(nextUser);
-        void loadProfile(nextUser).finally(() => setLoading(false));
+        void loadProfile(nextUser, true).finally(() => setLoading(false));
       });
       subscription = nextSub;
     })();
@@ -209,44 +256,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           filter: `id=eq.${user.id}`,
         },
         (payload) => {
-          setProfile(payload.new as StudentProfile);
+          const next = payload.new as StudentProfile;
+          setProfile(next);
+          writeCachedProfile(next);
           setProfileError(null);
           window.dispatchEvent(new Event("uvs-profile-updated"));
         }
       )
       .subscribe();
 
-    const refreshQuiet = () => {
-      resyncSupabaseTransport();
+    const onRecovered = () => {
       void loadProfile(user, true).then(() => {
         window.dispatchEvent(new Event("uvs-profile-updated"));
       });
     };
+    const onReconnecting = () => setReconnecting(true);
 
-    let hiddenAt = 0;
-    const onVisible = () => {
-      if (document.visibilityState === "hidden") {
-        hiddenAt = Date.now();
-        return;
-      }
-      if (hiddenAt && Date.now() - hiddenAt < 8_000) return;
-      refreshQuiet();
-    };
-
-    const onOnline = () => {
-      resyncSupabaseTransport();
-      void loadProfile(user, false).then(() => {
-        window.dispatchEvent(new Event("uvs-profile-updated"));
-      });
-    };
-
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onOnline);
+    window.addEventListener("uvs-route-recovered", onRecovered);
+    window.addEventListener("uvs-reconnecting", onReconnecting);
 
     return () => {
       void supabase.removeChannel(channel);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onOnline);
+      window.removeEventListener("uvs-route-recovered", onRecovered);
+      window.removeEventListener("uvs-reconnecting", onReconnecting);
     };
   }, [isMockAdmin, loadProfile, user]);
 
@@ -306,12 +338,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     sessionStorage.removeItem(MOCK_ADMIN_KEY);
+    writeCachedProfile(null);
     setIsMockAdmin(false);
     await supabase.auth.signOut({ scope: "local" });
     setUser(null);
     setProfile(null);
     setProfileError(null);
     setBackendError(null);
+    setReconnecting(false);
   }, []);
 
   const enableMockAdmin = useCallback(() => {
@@ -327,8 +361,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     try {
-      resyncSupabaseTransport();
-      if (!user) {
+      await recoverSupabaseRoute();
+      const authUser = user ?? readCachedUser();
+      if (!authUser) {
         const {
           data: { session },
         } = await withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS);
@@ -336,9 +371,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await loadProfile(session?.user ?? null);
         return;
       }
-      await loadProfile(user);
+      setUser(authUser);
+      await loadProfile(authUser);
     } catch (error) {
-      setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
+      if (!profileRef.current && !readCachedProfile()) {
+        setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
+      } else {
+        setReconnecting(true);
+      }
     }
   }, [loadProfile, user]);
 
@@ -351,6 +391,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile,
       profileError,
       backendError,
+      reconnecting,
       role,
       tier,
       loading,
@@ -371,6 +412,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile,
       profileError,
       backendError,
+      reconnecting,
       role,
       tier,
       loading,

@@ -10,7 +10,7 @@ export default function StudentProtectedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isAdmin, loading } = useAuth();
+  const { isAuthenticated, isAdmin, loading, user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -19,7 +19,15 @@ export default function StudentProtectedLayout({
     else if (isAdmin) router.replace("/dashboard/admin");
   }, [isAdmin, isAuthenticated, loading, router]);
 
-  if (loading || !isAuthenticated || isAdmin) {
+  if (loading && !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+        <div className="h-9 w-9 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!loading && (!isAuthenticated || isAdmin)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-studio-bg">
         <div className="h-9 w-9 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />

@@ -1,5 +1,5 @@
 export const SUPABASE_UNREACHABLE_RU =
-  "Не удалось связаться с кабинетом. Без VPN должен открываться шлюз sb.uniquevocal.ru; с VPN — supabase.co. Обновите страницу; если VPN только что включили или выключили, подождите несколько секунд.";
+  "Не удалось связаться с кабинетом. Если только что включили или выключили VPN — подождите пару секунд и нажмите «Повторить подключение».";
 
 export function isLikelyUnreachableBackend(error: unknown): boolean {
   const raw =

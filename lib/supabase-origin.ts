@@ -1,13 +1,10 @@
 /**
  * Optional public origin for the browser (Moscow reverse-proxy).
- * NEXT_PUBLIC_SUPABASE_URL stays the real https://<ref>.supabase.co
- * (needed to rewrite signed storage URLs and as a VPN fallback).
+ * NEXT_PUBLIC_SUPABASE_URL stays the real https://<ref>.supabase.co.
  *
- * Origin is sticky per tab via sessionStorage (never localStorage):
- *   RU / no VPN → proxy (sb.uniquevocal.ru)
- *   VPN → after the first proxy failure, stay on supabase.co
- * Two devices / two tabs keep independent paths even on the same account.
- * Switch back only when the current origin fails. Do not probe /__health.
+ * Happy Eyeballs: after a network change the path is "uncertain" and both
+ * origins are raced at once. Once one wins, stick to it until the next flap.
+ * Preference is per tab (sessionStorage), never localStorage.
  */
 
 export const SUPABASE_PROJECT_URL = (
@@ -30,6 +27,7 @@ function readStoredOrigin(): boolean {
 }
 
 let useDirect = readStoredOrigin();
+let pathUncertain = true;
 
 function persistOrigin() {
   if (typeof window === "undefined") return;
@@ -56,6 +54,18 @@ export function isProxyUnreachable(): boolean {
   return useDirect;
 }
 
+export function isPathUncertain(): boolean {
+  return pathUncertain;
+}
+
+export function markPathUncertain() {
+  pathUncertain = true;
+}
+
+export function markPathCertain() {
+  pathUncertain = false;
+}
+
 export function markProxyUnreachable() {
   useDirect = true;
   persistOrigin();
@@ -66,9 +76,10 @@ export function markProxyReachable() {
   persistOrigin();
 }
 
-/** Next request tries the proxy first and hedges to supabase.co. */
+/** Next request races both origins (VPN just flipped). */
 export function clearOriginPreference() {
   useDirect = false;
+  pathUncertain = true;
   if (typeof window === "undefined") return;
   try {
     sessionStorage.removeItem(ORIGIN_KEY);

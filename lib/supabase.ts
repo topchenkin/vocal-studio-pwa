@@ -3,8 +3,11 @@ import type { Database } from "@/types";
 import {
   clearOriginPreference,
   getBrowserSupabaseUrl,
+  isPathUncertain,
   isProxyUnreachable,
   mapRealtimeUrl,
+  markPathCertain,
+  markPathUncertain,
   markProxyReachable,
   markProxyUnreachable,
   migrateAuthStorage,
@@ -15,10 +18,12 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const PROXY_TIMEOUT_MS = 4_000;
-const DIRECT_TIMEOUT_MS = 6_000;
-const HEDGE_MS = 350;
-const REALTIME_CONNECT_MS = 2_500;
+const PROXY_TIMEOUT_MS = 2_500;
+const DIRECT_TIMEOUT_MS = 2_500;
+const HEDGE_MS = 120;
+const REALTIME_CONNECT_MS = 3_000;
+const SETTLE_MS = 400;
+const PROBE_MS = 2_000;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -174,8 +179,17 @@ function isBadGateway(response: Response): boolean {
 }
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let lastReconnectAt = 0;
+let lastOriginFlipAt = 0;
+let recoverTimer: ReturnType<typeof setTimeout> | null = null;
+let guardsInstalled = false;
+let recovering = false;
+let recoverAgain = false;
 
 function reconnectRealtime() {
+  const now = Date.now();
+  if (now - lastReconnectAt < 1_200) return;
+  lastReconnectAt = now;
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -193,17 +207,130 @@ function reconnectRealtime() {
 }
 
 function stickToDirect(snapshotDirect: boolean) {
-  if (snapshotDirect !== isProxyUnreachable()) return;
-  if (isProxyUnreachable()) return;
+  if (snapshotDirect !== isProxyUnreachable()) {
+    markPathCertain();
+    return;
+  }
+  const changed = !isProxyUnreachable();
   markProxyUnreachable();
-  reconnectRealtime();
+  markPathCertain();
+  if (changed) reconnectRealtime();
 }
 
 function stickToProxy(snapshotDirect: boolean) {
-  if (snapshotDirect !== isProxyUnreachable()) return;
-  if (!isProxyUnreachable()) return;
+  if (snapshotDirect !== isProxyUnreachable()) {
+    markPathCertain();
+    return;
+  }
+  const changed = isProxyUnreachable();
   markProxyReachable();
-  reconnectRealtime();
+  markPathCertain();
+  if (changed) reconnectRealtime();
+}
+
+async function probeOrigin(origin: string): Promise<boolean> {
+  if (!origin || !supabaseAnonKey) return false;
+  try {
+    const response = await fetchOnce(
+      `${origin}/auth/v1/health`,
+      {
+        method: "GET",
+        headers: {
+          apikey: supabaseAnonKey,
+          accept: "application/json",
+        },
+      },
+      PROBE_MS
+    );
+    return response.ok || (response.status >= 400 && response.status < 500);
+  } catch {
+    return false;
+  }
+}
+
+function notifyReconnecting() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("uvs-reconnecting"));
+}
+
+function notifyRouteRecovered() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("uvs-route-recovered"));
+}
+
+export async function recoverSupabaseRoute() {
+  if (recovering) {
+    recoverAgain = true;
+    return;
+  }
+  recovering = true;
+  markPathUncertain();
+  notifyReconnecting();
+  try {
+    await delay(SETTLE_MS);
+    if (SUPABASE_PROXY_URL && SUPABASE_PROJECT_URL) {
+      const [proxyOk, directOk] = await Promise.all([
+        probeOrigin(SUPABASE_PROXY_URL),
+        probeOrigin(SUPABASE_PROJECT_URL),
+      ]);
+      if (directOk && !proxyOk) markProxyUnreachable();
+      else markProxyReachable();
+      if (proxyOk || directOk) markPathCertain();
+    }
+    reconnectRealtime();
+    notifyRouteRecovered();
+  } finally {
+    recovering = false;
+    if (recoverAgain) {
+      recoverAgain = false;
+      void recoverSupabaseRoute();
+    }
+  }
+}
+
+function scheduleRouteRecover() {
+  markPathUncertain();
+  notifyReconnecting();
+  if (recoverTimer) clearTimeout(recoverTimer);
+  recoverTimer = setTimeout(() => {
+    recoverTimer = null;
+    void recoverSupabaseRoute();
+  }, 450);
+}
+
+export function resyncSupabaseTransport() {
+  clearOriginPreference();
+  scheduleRouteRecover();
+}
+
+export function installNetworkGuards() {
+  if (guardsInstalled || typeof window === "undefined") return;
+  guardsInstalled = true;
+
+  window.addEventListener("offline", () => {
+    markPathUncertain();
+    notifyReconnecting();
+  });
+  window.addEventListener("online", scheduleRouteRecover);
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      hiddenAt = Date.now();
+      return;
+    }
+    if (hiddenAt && Date.now() - hiddenAt < 2_000) return;
+    scheduleRouteRecover();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) scheduleRouteRecover();
+  });
+
+  const connection = (
+    navigator as Navigator & {
+      connection?: { addEventListener?: (type: string, fn: () => void) => void };
+    }
+  ).connection;
+  connection?.addEventListener?.("change", scheduleRouteRecover);
 }
 
 type OriginAttempt = { response: Response; fromPrimary: boolean };
@@ -270,6 +397,7 @@ async function fetchWithFallback(
   const preferDirect = isProxyUnreachable();
   const primaryUrl = preferDirect ? directUrl : url;
   const secondaryUrl = preferDirect ? url : directUrl;
+  const hedgeMs = isPathUncertain() ? 0 : HEDGE_MS;
   const primaryTimeout = preferDirect ? DIRECT_TIMEOUT_MS : PROXY_TIMEOUT_MS;
   const secondaryTimeout = preferDirect ? PROXY_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
 
@@ -299,7 +427,7 @@ async function fetchWithFallback(
     primaryAbort.signal,
     true
   );
-  const secondaryP = delay(HEDGE_MS, hedgeAbort.signal).then(() =>
+  const secondaryP = delay(hedgeMs, hedgeAbort.signal).then(() =>
     asAttempt(secondaryUrl, secondaryTimeout, secondaryAbort.signal, false)
   );
 
@@ -308,6 +436,7 @@ async function fetchWithFallback(
     if (winner.fromPrimary) {
       hedgeAbort.abort();
       secondaryAbort.abort();
+      markPathCertain();
     } else {
       primaryAbort.abort();
       if (preferDirect) stickToProxy(preferDirect);
@@ -329,23 +458,26 @@ function FallbackWebSocket(
   const ws = new WebSocket(mapRealtimeUrl(String(url)), protocols);
   const timer = setTimeout(() => {
     if (ws.readyState !== WebSocket.CONNECTING) return;
-    if (isProxyUnreachable()) markProxyReachable();
-    else markProxyUnreachable();
+    const now = Date.now();
+    if (now - lastOriginFlipAt > 3_000) {
+      lastOriginFlipAt = now;
+      if (isProxyUnreachable()) markProxyReachable();
+      else markProxyUnreachable();
+      markPathUncertain();
+    }
     try {
       ws.close();
     } catch {
       /* ignore */
     }
   }, REALTIME_CONNECT_MS);
-  ws.addEventListener("open", () => clearTimeout(timer));
+  ws.addEventListener("open", () => {
+    clearTimeout(timer);
+    markPathCertain();
+  });
   ws.addEventListener("close", () => clearTimeout(timer));
   ws.addEventListener("error", () => clearTimeout(timer));
   return ws;
-}
-
-export function resyncSupabaseTransport() {
-  clearOriginPreference();
-  reconnectRealtime();
 }
 
 function makeClient(url: string): SupabaseClient<Database> {
@@ -354,6 +486,9 @@ function makeClient(url: string): SupabaseClient<Database> {
     global: { fetch: fetchWithFallback },
     realtime: {
       transport: FallbackWebSocket as unknown as typeof WebSocket,
+      timeout: 8_000,
+      heartbeatIntervalMs: 20_000,
+      reconnectAfterMs: (tries: number) => Math.min(800 * 2 ** tries, 8_000),
     },
   });
 }

@@ -43,12 +43,7 @@ export default function AiToolsPage() {
   const { isAuthenticated, isAdmin, loading, tier } = useAuth();
   const router = useRouter();
   const [tab, setTab] = useState<ToolTab>("tuner");
-  const [mounted, setMounted] = useState(false);
   const [access, setAccess] = useState<AiToolAccessMap>(defaultAiToolAccessMap);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -66,7 +61,7 @@ export default function AiToolsPage() {
     };
   }, [isAuthenticated]);
 
-  if (loading || !mounted) {
+  if (loading && !isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-studio-bg">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
@@ -74,7 +69,13 @@ export default function AiToolsPage() {
     );
   }
 
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
+      </div>
+    );
+  }
 
   const locked = (tool: AiToolId) =>
     !canAccessAiTool(tool, tier, isAdmin, access);

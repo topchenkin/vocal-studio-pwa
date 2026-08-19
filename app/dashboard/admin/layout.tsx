@@ -10,7 +10,7 @@ export default function AdminProtectedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { isAdmin, loading } = useAuth();
+  const { isAdmin, loading, user } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -19,7 +19,18 @@ export default function AdminProtectedLayout({
     }
   }, [isAdmin, loading, router]);
 
-  if (loading || !isAdmin) {
+  if (loading && !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+        <div
+          className="h-9 w-9 animate-spin rounded-full border-2 border-studio-accent border-t-transparent"
+          aria-label="Проверка прав доступа"
+        />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-studio-bg">
         <div
