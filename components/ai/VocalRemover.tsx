@@ -18,6 +18,7 @@ import { getChatSessionToken } from "@/lib/chat-media";
 import { splitStereoCenterCancel } from "@/lib/wav-client";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import MediaAudio from "@/components/media/MediaAudio";
+import { downloadAudioUrl } from "@/lib/student-audio";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const API_TIMEOUT_MS = 240_000;
@@ -54,6 +55,10 @@ class AuthSeparateError extends Error {
     super(message);
     this.name = "AuthSeparateError";
   }
+}
+
+function revokeIfBlob(url?: string | null) {
+  if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
 function abortAfter(ms: number) {
@@ -168,19 +173,15 @@ export default function VocalRemover({ locked = false }: Props) {
 
   useEffect(
     () => () => {
-      if (result) {
-        URL.revokeObjectURL(result.minusUrl);
-        URL.revokeObjectURL(result.vocalUrl);
-      }
+      revokeIfBlob(result?.minusUrl);
+      revokeIfBlob(result?.vocalUrl);
     },
     [result]
   );
 
   const clearResult = () => {
-    if (result) {
-      URL.revokeObjectURL(result.minusUrl);
-      URL.revokeObjectURL(result.vocalUrl);
-    }
+    revokeIfBlob(result?.minusUrl);
+    revokeIfBlob(result?.vocalUrl);
     setResult(null);
   };
 
@@ -479,6 +480,22 @@ function ResultTrack({
   source: "remover_minus" | "remover_vocal";
   saveTitle: string;
 }) {
+  const [downloading, setDownloading] = useState(false);
+
+  const onDownload = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadAudioUrl(src, filename);
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : "Не удалось скачать файл"
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -488,14 +505,15 @@ function ResultTrack({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <SaveToLibraryButton url={src} source={source} title={saveTitle} />
-          <a
-            href={src}
-            download={filename}
-            className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white"
+          <button
+            type="button"
+            onClick={() => void onDownload()}
+            disabled={downloading}
+            className="rounded-lg p-2 text-studio-muted hover:bg-studio-surface hover:text-white disabled:opacity-40"
             aria-label={`Скачать ${title}`}
           >
             <Download className="h-4 w-4" />
-          </a>
+          </button>
         </div>
       </div>
       <MediaAudio controls src={src} className="h-10 w-full" />

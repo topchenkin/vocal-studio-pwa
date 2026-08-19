@@ -158,6 +158,10 @@ async function uploadToSpace(host, file) {
 }
 
 function fileDataToUrl(host, data) {
+  if (typeof data === "string") {
+    if (data.startsWith("http")) return data;
+    return new URL(data, host).href;
+  }
   if (!data || typeof data !== "object") return null;
   if (data.url && typeof data.url === "string") {
     return data.url.startsWith("http") ? data.url : new URL(data.url, host).href;
@@ -230,6 +234,14 @@ async function callGradio(host, endpoint, data) {
   return parsed;
 }
 
+function unwrapOutputs(parsed) {
+  let out = parsed;
+  while (Array.isArray(out) && out.length === 1 && Array.isArray(out[0])) {
+    out = out[0];
+  }
+  return Array.isArray(out) ? out : [];
+}
+
 async function downloadBinary(url) {
   const response = await fetch(url, {
     headers: hfHeaders(),
@@ -238,48 +250,96 @@ async function downloadBinary(url) {
   if (!response.ok) {
     throw new Error(`Stem download ${response.status}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (!sniffAudio(buf)) {
+    throw new Error(`Stem is not audio (${buf.subarray(0, 24).toString("latin1")})`);
+  }
+  return buf;
 }
 
-async function uploadStem(userId, kind, buffer) {
-  const objectPath = `ai-stems/${userId}/${kind}-${randomUUID()}.wav`;
-  const upload = await sbFetch(`/storage/v1/object/chat-media/${objectPath}`, {
-    method: "POST",
-    headers: { "content-type": "audio/wav" },
-    body: buffer,
+const STEMS = new Map();
+const STEM_TTL_MS = 45 * 60 * 1000;
+const MAX_STEM_JOBS = 6;
+
+function pruneStems() {
+  const now = Date.now();
+  for (const [id, job] of STEMS) {
+    if (job.exp < now) STEMS.delete(id);
+  }
+  while (STEMS.size > MAX_STEM_JOBS) {
+    const oldest = STEMS.keys().next().value;
+    if (!oldest) break;
+    STEMS.delete(oldest);
+  }
+}
+
+function sniffAudio(buf) {
+  if (!buf || buf.length < 16) return null;
+  const ascii = buf.subarray(0, 12).toString("latin1");
+  if (ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WAVE") return "audio/wav";
+  if (ascii.startsWith("ID3")) return "audio/mpeg";
+  if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return "audio/mpeg";
+  if (ascii.slice(4, 8) === "ftyp") return "audio/mp4";
+  return null;
+}
+
+function rememberStems(vocalBuf, minusBuf) {
+  const vocalMime = sniffAudio(vocalBuf);
+  const minusMime = sniffAudio(minusBuf);
+  if (!vocalMime || !minusMime) {
+    throw new Error("Нейросеть вернула не аудио (пустой или битый файл)");
+  }
+  pruneStems();
+  const id = randomUUID();
+  STEMS.set(id, {
+    vocal: vocalBuf,
+    minus: minusBuf,
+    vocalMime,
+    minusMime,
+    exp: Date.now() + STEM_TTL_MS,
   });
-  if (!upload.ok) {
-    const text = await upload.text().catch(() => "");
-    throw new Error(`Storage upload failed: ${text.slice(0, 160)}`);
+  return id;
+}
+
+function sendBuffer(req, res, buf, mime) {
+  const total = buf.length;
+  const range = String(req.headers.range || "");
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  res.setHeader("content-type", mime);
+  res.setHeader("accept-ranges", "bytes");
+  res.setHeader("cache-control", "private, max-age=1800");
+  if (match) {
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Number(match[2]) : total - 1;
+    if (start >= total || end >= total || start > end) {
+      res.writeHead(416, { "content-range": `bytes */${total}` });
+      res.end();
+      return;
+    }
+    res.writeHead(206, {
+      "content-range": `bytes ${start}-${end}/${total}`,
+      "content-length": end - start + 1,
+    });
+    res.end(buf.subarray(start, end + 1));
+    return;
   }
-  const sign = await sbFetch(`/storage/v1/object/sign/chat-media/${objectPath}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ expiresIn: 60 * 60 * 24 }),
-  });
-  const signed = await sign.json().catch(() => ({}));
-  const path = signed.signedURL || signed.signedUrl;
-  if (!sign.ok || !path) {
-    throw new Error("Signed URL failed");
-  }
-  const url = path.startsWith("http") ? path : `${SUPABASE_URL}${path}`;
-  if (SUPABASE_URL && url.startsWith(SUPABASE_URL)) {
-    return { url: `${PROXY_PUBLIC_ORIGIN}${url.slice(SUPABASE_URL.length)}`, path: objectPath };
-  }
-  return { url, path: objectPath };
+  res.writeHead(200, { "content-length": total });
+  res.end(buf);
 }
 
 async function separateOnSpace(space, file) {
   await wakeSpace(space.host);
   const uploadedPath = await uploadToSpace(space.host, file);
-  const outputs = await callGradio(space.host, space.endpoint, [
-    {
-      path: uploadedPath,
-      meta: { _type: "gradio.FileData" },
-      orig_name: file.name,
-      mime_type: file.type || "audio/mpeg",
-    },
-  ]);
+  const outputs = unwrapOutputs(
+    await callGradio(space.host, space.endpoint, [
+      {
+        path: uploadedPath,
+        meta: { _type: "gradio.FileData" },
+        orig_name: file.name,
+        mime_type: file.type || "audio/mpeg",
+      },
+    ])
+  );
   const vocalUrl = fileDataToUrl(space.host, outputs[0]);
   const minusUrl = fileDataToUrl(space.host, outputs[1]);
   if (!vocalUrl || !minusUrl) {
@@ -348,18 +408,15 @@ async function handleSeparate(req, res) {
     try {
       console.info(`[demucs] trying ${space.id}`);
       const separated = await separateOnSpace(space, file);
-      const [vocal, minus] = await Promise.all([
-        uploadStem(auth.user.id, "vocal", separated.vocalBuf),
-        uploadStem(auth.user.id, "minus", separated.minusBuf),
-      ]);
+      const jobId = rememberStems(separated.vocalBuf, separated.minusBuf);
       return json(res, 200, {
         mode: "demucs",
         model: separated.model,
         space: space.id,
-        vocalUrl: vocal.url,
-        minusUrl: minus.url,
-        vocalMime: "audio/wav",
-        minusMime: "audio/wav",
+        vocalUrl: `/api/ai/stem/${jobId}/vocal`,
+        minusUrl: `/api/ai/stem/${jobId}/minus`,
+        vocalMime: STEMS.get(jobId)?.vocalMime || "audio/wav",
+        minusMime: STEMS.get(jobId)?.minusMime || "audio/wav",
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -383,6 +440,29 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && (path === "/api/ai/__health" || path === "/__health")) {
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
     res.end("ok");
+    return;
+  }
+  const stem = /^\/api\/ai\/stem\/([^/]+)\/(vocal|minus)$/.exec(path);
+  if (stem && (req.method === "GET" || req.method === "HEAD")) {
+    pruneStems();
+    const job = STEMS.get(stem[1]);
+    if (!job) {
+      json(res, 404, { error: "Файл уже истёк. Разделите трек ещё раз." });
+      return;
+    }
+    const kind = stem[2];
+    const buf = kind === "vocal" ? job.vocal : job.minus;
+    const mime = kind === "vocal" ? job.vocalMime : job.minusMime;
+    if (req.method === "HEAD") {
+      res.writeHead(200, {
+        "content-type": mime,
+        "content-length": buf.length,
+        "accept-ranges": "bytes",
+      });
+      res.end();
+      return;
+    }
+    sendBuffer(req, res, buf, mime);
     return;
   }
   if (req.method === "POST" && path === "/api/ai/separate-vocal") {
