@@ -1,12 +1,13 @@
 /**
  * Optional public origin for the browser (Moscow reverse-proxy).
  * NEXT_PUBLIC_SUPABASE_URL stays the real https://<ref>.supabase.co
- * (needed to rewrite signed storage URLs and as a per-request VPN fallback).
+ * (needed to rewrite signed storage URLs and as a VPN fallback).
  *
- * Without VPN, Russian ISPs block supabase.co → browser talks to the proxy.
- * With VPN, the Moscow proxy is often unreachable. Fetch marks it down in
- * memory (not sessionStorage) and retries supabase.co; a background probe
- * brings the proxy back when VPN is switched off.
+ * Path is sticky in memory for this page load:
+ *   RU / no VPN → proxy (sb.uniquevocal.ru)
+ *   VPN → after the first proxy failure, stay on supabase.co
+ * Switch back only when the current origin fails (VPN off, supabase.co blocked).
+ * Do not probe /__health on a timer — that flapped VPN every few seconds.
  */
 
 export const SUPABASE_PROJECT_URL = (
@@ -17,10 +18,7 @@ export const SUPABASE_PROXY_URL = (
   process.env.NEXT_PUBLIC_SUPABASE_PROXY_URL || ""
 ).replace(/\/$/, "");
 
-const PROXY_DOWN_MS = 15_000;
-const PROXY_PROBE_MS = 1_500;
-
-let proxyDownUntil = 0;
+let useDirect = false;
 
 function browserOrigin() {
   return (
@@ -35,15 +33,15 @@ export function getBrowserSupabaseUrl(): string {
 }
 
 export function isProxyUnreachable(): boolean {
-  return Date.now() < proxyDownUntil;
+  return useDirect;
 }
 
 export function markProxyUnreachable() {
-  proxyDownUntil = Date.now() + PROXY_DOWN_MS;
+  useDirect = true;
 }
 
 export function markProxyReachable() {
-  proxyDownUntil = 0;
+  useDirect = false;
 }
 
 function rewriteTo(url: string, dest: string): string {
@@ -58,14 +56,14 @@ function rewriteTo(url: string, dest: string): string {
 
 export function rewriteSupabaseAssetUrl(url: string | null | undefined): string {
   if (!url) return "";
-  const dest = isProxyUnreachable()
+  const dest = useDirect
     ? SUPABASE_PROJECT_URL || SUPABASE_PROXY_URL
     : SUPABASE_PROXY_URL || SUPABASE_PROJECT_URL;
   return dest ? rewriteTo(url, dest) : url;
 }
 
 export function mapRealtimeUrl(url: string): string {
-  if (!isProxyUnreachable() || !SUPABASE_PROXY_URL || !SUPABASE_PROJECT_URL) {
+  if (!useDirect || !SUPABASE_PROXY_URL || !SUPABASE_PROJECT_URL) {
     return url;
   }
   const from = toWs(SUPABASE_PROXY_URL);
@@ -111,41 +109,4 @@ export function migrateAuthStorage(storageKey: string) {
   } catch {
     /* private mode */
   }
-}
-
-async function probeProxy(): Promise<boolean> {
-  if (!SUPABASE_PROXY_URL) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PROXY_PROBE_MS);
-  try {
-    const res = await fetch(`${SUPABASE_PROXY_URL}/__health`, {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (!res.ok) return false;
-    return (await res.text()).trim() === "ok";
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Recover the Moscow proxy after VPN is turned off, without blocking first paint. */
-export function startProxyHealthWatch() {
-  if (typeof window === "undefined" || !SUPABASE_PROXY_URL) return;
-
-  const recover = () => {
-    if (!isProxyUnreachable()) return;
-    void probeProxy().then((ok) => {
-      if (ok) markProxyReachable();
-    });
-  };
-
-  window.setInterval(recover, 8_000);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") recover();
-  });
-  window.addEventListener("online", recover);
 }

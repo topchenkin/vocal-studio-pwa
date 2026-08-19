@@ -1,9 +1,14 @@
 {
 	email iris.jar008@gmail.com
+	servers {
+		protocols h1 h2
+	}
 }
 
 # Static export. Never SPA-fallback /_next — that is the black-screen bug.
+# HTTP/3 (QUIC) is off: many VPNs drop UDP and the tab looks like it "fell off".
 (site) {
+	header Alt-Svc "clear"
 	root * /var/www/uniquevocal
 	encode gzip
 	handle /_next/* {

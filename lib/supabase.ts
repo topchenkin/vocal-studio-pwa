@@ -8,7 +8,6 @@ import {
   markProxyUnreachable,
   migrateAuthStorage,
   projectAuthStorageKey,
-  startProxyHealthWatch,
   SUPABASE_PROJECT_URL,
   SUPABASE_PROXY_URL,
 } from "@/lib/supabase-origin";
@@ -16,7 +15,7 @@ import {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const PROXY_TIMEOUT_MS = 1_500;
-const FETCH_TIMEOUT_MS = 12_000;
+const DIRECT_TIMEOUT_MS = 8_000;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -132,11 +131,38 @@ async function fetchOnce(
   }
 }
 
+function isBadGateway(response: Response): boolean {
+  return PROXY_BAD_STATUS.has(response.status);
+}
+
+function reconnectRealtime() {
+  try {
+    supabase.realtime.disconnect();
+  } catch {
+    /* ignore */
+  }
+  try {
+    supabase.realtime.connect();
+  } catch {
+    /* ignore */
+  }
+}
+
+function stickToDirect() {
+  if (isProxyUnreachable()) return;
+  markProxyUnreachable();
+  reconnectRealtime();
+}
+
+function stickToProxy() {
+  if (!isProxyUnreachable()) return;
+  markProxyReachable();
+  reconnectRealtime();
+}
+
 /**
- * Keep a single supabase-js client (auth storage key is the project ref).
- * Proxy first; on network / gateway failure remember that for ~15s and retry
- * the same path on supabase.co. Do not persist in sessionStorage — VPN off
- * must use the proxy again.
+ * One supabase-js client. Prefer the current working origin and only switch
+ * when that origin fails. Never flip back on a timer or /__health probe.
  */
 async function fetchWithFallback(
   input: RequestInfo | URL,
@@ -154,32 +180,41 @@ async function fetchWithFallback(
     ? retargetUrl(url, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL)
     : url;
 
-  if (canFallback && isProxyUnreachable()) {
-    return fetchOnce(directUrl, requestInit, FETCH_TIMEOUT_MS, callerSignal);
+  if (!canFallback) {
+    return fetchOnce(url, requestInit, DIRECT_TIMEOUT_MS, callerSignal);
   }
+
+  const preferDirect = isProxyUnreachable();
+  const firstUrl = preferDirect ? directUrl : url;
+  const secondUrl = preferDirect ? url : directUrl;
+  const firstTimeout = preferDirect ? DIRECT_TIMEOUT_MS : PROXY_TIMEOUT_MS;
+  const secondTimeout = preferDirect ? PROXY_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
 
   try {
     const response = await fetchOnce(
-      url,
+      firstUrl,
       requestInit,
-      canFallback ? PROXY_TIMEOUT_MS : FETCH_TIMEOUT_MS,
+      firstTimeout,
       callerSignal
     );
-    if (canFallback && PROXY_BAD_STATUS.has(response.status)) {
-      markProxyUnreachable();
-      return fetchOnce(
-        directUrl,
-        requestInit,
-        FETCH_TIMEOUT_MS,
-        callerSignal
-      );
+    if (isBadGateway(response)) {
+      throw new Error(`upstream ${response.status}`);
     }
-    if (canFallback) markProxyReachable();
     return response;
   } catch (error) {
-    if (!canFallback || callerAborted(callerSignal)) throw error;
-    markProxyUnreachable();
-    return fetchOnce(directUrl, requestInit, FETCH_TIMEOUT_MS, callerSignal);
+    if (callerAborted(callerSignal)) throw error;
+    const response = await fetchOnce(
+      secondUrl,
+      requestInit,
+      secondTimeout,
+      callerSignal
+    );
+    if (isBadGateway(response)) {
+      throw error;
+    }
+    if (preferDirect) stickToProxy();
+    else stickToDirect();
+    return response;
   }
 }
 
@@ -198,10 +233,6 @@ function makeClient(url: string): SupabaseClient<Database> {
       transport: FallbackWebSocket as unknown as typeof WebSocket,
     },
   });
-}
-
-if (typeof window !== "undefined") {
-  startProxyHealthWatch();
 }
 
 export const supabase = makeClient(getBrowserSupabaseUrl());
