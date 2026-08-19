@@ -19,7 +19,8 @@ const resolvers = [
 ];
 
 function classify(ip) {
-  if (ip === TIMEWEB_IP) return "timeweb";
+  if (ip === PROXY_IP) return "moscow-vps";
+  if (ip === TIMEWEB_IP) return "timeweb-frontend";
   if (ip.startsWith(GITHUB_PAGES_PREFIX)) return "github-pages";
   return "other";
 }
@@ -36,7 +37,7 @@ async function lookup(host, servers) {
 
 let failed = false;
 
-console.log(`Expected Timeweb IP: ${TIMEWEB_IP}\n`);
+console.log(`Expected site/proxy IP (Moscow VPS): ${PROXY_IP}\n`);
 
 for (const host of HOSTS) {
   console.log(`=== ${host} ===`);
@@ -53,8 +54,14 @@ for (const host of HOSTS) {
       for (const ip of aRecords) {
         const kind = classify(ip);
         const mark =
-          kind === "timeweb" ? "OK" : kind === "github-pages" ? "BAD" : "WARN";
-        if (kind !== "timeweb") failed = true;
+          kind === "moscow-vps"
+            ? "OK"
+            : kind === "github-pages"
+              ? "BAD"
+              : kind === "timeweb-frontend"
+                ? "WARN"
+                : "WARN";
+        if (kind !== "moscow-vps") failed = true;
         console.log(`  ${label}: ${ip} [${mark}]${cname}`);
       }
       if (aRecords.length === 0 && cnameRecords.length > 0) {
@@ -94,11 +101,11 @@ console.log("");
 
 if (failed) {
   console.error(
-    "DNS is NOT clean everywhere. Site: A @ and www → 92.246.76.92. Proxy: A sb → 5.42.123.142."
+    "DNS is NOT clean everywhere. Site and proxy: A @, www, sb → 5.42.123.142 (Moscow VPS)."
   );
   process.exit(1);
 }
 
 console.log(
-  "Site and sb.uniquevocal.ru point to Timeweb Russia. If a phone still shows GitHub Pages 404, clear Safari/PWA cache or wait for ISP DNS TTL."
+  "uniquevocal.ru, www, and sb point to the Moscow VPS. If a phone still shows a black screen, wait for DNS TTL or flush the resolver cache."
 );

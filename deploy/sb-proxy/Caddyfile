@@ -2,9 +2,27 @@
 	email iris.jar008@gmail.com
 }
 
-# Bootstrap until DNS A sb → this Moscow VPS (Let's Encrypt needs the name).
+# Static export. Next.js already emitted .html per route — do not SPA-fallback
+# missing assets to /index.html (that is what black-screened Timeweb).
+(site) {
+	root * /var/www/uniquevocal
+	encode gzip
+	try_files {path} {path}.html {path}/index.html
+	file_server
+}
+
+# Preview by IP and HTTP-01. Proxy health stays on /__health.
 http://5.42.123.142 {
-	reverse_proxy 127.0.0.1:8787
+	handle /__health {
+		reverse_proxy 127.0.0.1:8787
+	}
+	handle {
+		import site
+	}
+}
+
+www.uniquevocal.ru, uniquevocal.ru {
+	import site
 }
 
 sb.uniquevocal.ru {

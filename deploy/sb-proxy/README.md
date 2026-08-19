@@ -1,9 +1,9 @@
 # Шлюз Supabase
 
 Ученики в РФ не ходят на `*.supabase.co` (Cloudflare / TSPU).
-Браузер должен бить в **российский IP Timeweb** (`92.246.76.92`), тот же,
-что и сайт. Амстердам (`147.45.136.24`) доходит **только с VPN** — как
-вход для учеников он не подходит.
+Браузер должен бить в **московский VPS** (`5.42.123.142`) — тот же IP, что
+и сайт. Амстердам (`147.45.136.24`) доходит **только с VPN** — как вход
+для учеников он не подходит.
 
 ```
 ученик (РФ) → https://sb.uniquevocal.ru   (IP 5.42.123.142, VPS Москва)
@@ -53,17 +53,18 @@ SUPABASE_ORIGIN=http://147.45.136.24
 
 ### 2. DNS (reg.ru)
 
-A-запись **sb** должна смотреть на сайт, не на Амстердам:
+A-записи сайта и шлюза смотрят на московский VPS, не на Амстердам и не на
+Frontend Apps (`92.246.76.92` — там Caddy отдаёт HTML вместо JS):
 
 | Имя | Тип | Значение |
 |-----|-----|----------|
+| `@` | A | `5.42.123.142` |
+| `www` | A | `5.42.123.142` |
 | `sb` | A | `5.42.123.142` |
 
-`@` и `www` не меняйте (тоже `92.246.76.92`).
-
 В корне репозитория **не** должно быть `Caddyfile`: App Platform Frontend
-подхватывает его и ломает статику (JS/CSS отдают HTML). Прокси живёт только
-на VPS, файл `deploy/sb-proxy/Caddyfile`.
+подхватывает его и ломает статику. Боевой Caddy — `deploy/sb-proxy/Caddyfile`
+на VPS (статика + `sb` reverse_proxy).
 
 Проверка **без VPN**:
 
@@ -74,13 +75,11 @@ nslookup sb.uniquevocal.ru 8.8.8.8
 Нужно `5.42.123.142`. Затем в браузере без VPN:
 `https://sb.uniquevocal.ru/__health` → `ok`.
 
-### 3. Frontend UniqueVocal
+### 3. Сборка сайта на VPS
 
-Когда health без VPN = `ok`:
-
-`NEXT_PUBLIC_SUPABASE_PROXY_URL` = `https://sb.uniquevocal.ru`
-
-Пересобрать Frontend.
+Статику собирают локально (`NEXT_PUBLIC_SUPABASE_PROXY_URL=https://sb.uniquevocal.ru npm run build`)
+и заливают в `/var/www/uniquevocal` скриптом `scripts/deploy-site-vps.py`.
+Timeweb Frontend UniqueVocal больше не публикует сайт.
 
 ## Амстердамский VPS (не публичный вход)
 

@@ -40,6 +40,8 @@ chmod 640 /etc/uniquevocal/sb-proxy.env
 
 install -m 644 "$SCRIPT_DIR/sb-proxy.service" /etc/systemd/system/sb-proxy.service
 install -m 644 "$SCRIPT_DIR/Caddyfile" /etc/caddy/Caddyfile
+mkdir -p /var/www/uniquevocal
+chown -R www-data:www-data /var/www/uniquevocal
 
 ufw allow OpenSSH
 ufw allow 80/tcp
