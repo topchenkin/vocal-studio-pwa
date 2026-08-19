@@ -7,6 +7,14 @@
 
 # Static export. Never SPA-fallback /_next — that is the black-screen bug.
 # HTTP/3 (QUIC) is off: many VPNs drop UDP and the tab looks like it "fell off".
+# TLS 1.3 ClientHello is dropped on some RU/VPN paths (TCP 443 opens, handshake
+# hangs). TLS 1.2 still completes. Browsers all speak 1.2.
+(tls12) {
+	tls {
+		protocols tls1.2 tls1.2
+	}
+}
+
 (site) {
 	header Alt-Svc "clear"
 	root * /var/www/uniquevocal
@@ -30,10 +38,12 @@ http://5.42.123.142 {
 }
 
 www.uniquevocal.ru, uniquevocal.ru {
+	import tls12
 	import site
 }
 
 sb.uniquevocal.ru {
+	import tls12
 	header Alt-Svc "clear"
 	reverse_proxy 127.0.0.1:8787
 }
