@@ -1,5 +1,5 @@
 export const SUPABASE_UNREACHABLE_RU =
-  "Недоступен Supabase (supabase.co). Сайт отдаёт Timeweb в России, но вход, чат и кабинет ходят в зарубежное облако и часто блокируются. Проверьте, что supabase.co открывается без VPN, либо подключите свой домен или прокси до Supabase.";
+  "Не удалось связаться с кабинетом. Без VPN должен открываться шлюз sb.uniquevocal.ru; с VPN — supabase.co. Обновите страницу; если VPN только что включили или выключили, подождите несколько секунд.";
 
 export function isLikelyUnreachableBackend(error: unknown): boolean {
   const raw =

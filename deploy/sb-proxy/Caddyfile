@@ -29,5 +29,6 @@ www.uniquevocal.ru, uniquevocal.ru {
 }
 
 sb.uniquevocal.ru {
+	header Alt-Svc "clear"
 	reverse_proxy 127.0.0.1:8787
 }
