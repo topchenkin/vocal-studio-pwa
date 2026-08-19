@@ -1,5 +1,7 @@
 /** Browser-safe WAV encode/mix helpers. */
 
+import { phaseVocoderStretchChannels } from "./phase-vocoder";
+
 export function encodeWavBlob(
   channels: Float32Array[],
   sampleRate: number
@@ -304,18 +306,6 @@ export function tempoToPlaybackRate(tempoPercent: number) {
   return Math.max(0.5, Math.min(2, 1 + clampTempoPercent(tempoPercent) / 100));
 }
 
-function hannWindow(size: number) {
-  const window = new Float32Array(size);
-  if (size <= 1) {
-    window[0] = 1;
-    return window;
-  }
-  for (let i = 0; i < size; i += 1) {
-    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
-  }
-  return window;
-}
-
 function copyBufferChannels(buffer: AudioBuffer): Float32Array[] {
   const count = Math.min(2, Math.max(1, buffer.numberOfChannels));
   const channels: Float32Array[] = [];
@@ -337,57 +327,6 @@ function audioBufferFromChannels(
     buffer.getChannelData(i).set(channels[i]!.subarray(0, length));
   }
   return buffer;
-}
-
-/**
- * Pitch-preserving time stretch (OLA). stretch > 1 makes the clip longer
- * (slower tempo), stretch < 1 shortens it. Detune cannot do this: in Web
- * Audio, detune is multiplied into playbackRate and cancels speed changes.
- */
-function olaTimeStretch(
-  channels: Float32Array[],
-  stretch: number
-): Float32Array[] {
-  const inputLen = channels[0]?.length ?? 0;
-  if (inputLen < 2 || !Number.isFinite(stretch) || Math.abs(stretch - 1) < 1e-4) {
-    return channels;
-  }
-  const winSize = Math.min(2048, Math.max(256, inputLen));
-  const hopIn = Math.max(64, Math.floor(winSize / 4));
-  const hopOut = Math.max(1, Math.round(hopIn * stretch));
-  const outputLen = Math.max(winSize, Math.round(inputLen * stretch));
-  const window = hannWindow(winSize);
-  const outputs = channels.map(() => new Float32Array(outputLen));
-  const weight = new Float32Array(outputLen);
-  const maxIters = Math.ceil(outputLen / hopOut) + 8;
-
-  let inPos = 0;
-  let outPos = 0;
-  for (let iter = 0; iter < maxIters && outPos < outputLen; iter += 1) {
-    for (let i = 0; i < winSize; i += 1) {
-      const dest = outPos + i;
-      if (dest >= outputLen) break;
-      const w = window[i] ?? 0;
-      weight[dest] += w;
-      const src = inPos + i;
-      for (let c = 0; c < channels.length; c += 1) {
-        const sample = src >= 0 && src < inputLen ? channels[c]![src] ?? 0 : 0;
-        outputs[c]![dest] += sample * w;
-      }
-    }
-    inPos += hopIn;
-    outPos += hopOut;
-  }
-
-  for (let i = 0; i < outputLen; i += 1) {
-    const w = weight[i] ?? 0;
-    if (w > 1e-8) {
-      for (let c = 0; c < outputs.length; c += 1) {
-        outputs[c]![i] /= w;
-      }
-    }
-  }
-  return outputs;
 }
 
 async function renderPlaybackRate(
@@ -413,7 +352,12 @@ async function renderPlaybackRate(
   return ctx.startRendering();
 }
 
-/** Independent pitch (semitones) and tempo (%). Tempo changes duration, pitch does not. */
+/**
+ * Independent pitch (semitones) and tempo (%).
+ * Tempo changes duration only; pitch transposes the whole mix together.
+ * Time-stretch the original first (phase vocoder), then resample for pitch.
+ * Do not use BufferSource.detune — it is multiplied into playbackRate.
+ */
 export async function processPitchTempoBuffer(
   buffer: AudioBuffer,
   pitchSemitones: number,
@@ -422,16 +366,19 @@ export async function processPitchTempoBuffer(
   const pitch = clampPitchShift(pitchSemitones);
   const tempoRatio = tempoToPlaybackRate(tempoPercent);
   const pitchRatio = 2 ** (pitch / 12);
+  const stretch = pitchRatio / tempoRatio;
 
   let working = buffer;
-  if (Math.abs(pitch) > 1e-6) {
-    working = await renderPlaybackRate(buffer, pitchRatio);
-  }
-
-  const stretch = pitchRatio / tempoRatio;
   if (Math.abs(stretch - 1) > 1e-4) {
-    const stretched = olaTimeStretch(copyBufferChannels(working), stretch);
+    const stretched = await phaseVocoderStretchChannels(
+      copyBufferChannels(working),
+      stretch,
+      buffer.sampleRate
+    );
     working = audioBufferFromChannels(stretched, buffer.sampleRate);
+  }
+  if (Math.abs(pitchRatio - 1) > 1e-6) {
+    working = await renderPlaybackRate(working, pitchRatio);
   }
 
   const left = new Float32Array(working.getChannelData(0));

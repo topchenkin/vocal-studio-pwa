@@ -422,12 +422,16 @@ export default function PitchShiftStudio({ locked = false }: Props) {
                 onChange={changeTempo}
               />
             </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-studio-muted">
+              Только скорость воспроизведения, без сдвига тональности. 0% — как
+              в файле, плюс ускоряет и укорачивает, минус замедляет и удлиняет.
+              Можно ввести число от {TEMPO_SHIFT_MIN} до {TEMPO_SHIFT_MAX}.
+              Длительность результата ≈ {Math.max(1, Math.round(outDuration))} с.
+            </p>
             {showTempoHelp && (
               <p className="mt-2 text-[11px] leading-relaxed text-studio-muted">
-                0% — исходный темп. Плюс ускоряет и укорачивает, минус замедляет
-                и удлиняет, тональность при этом не «уедет». Можно ввести число
-                от {TEMPO_SHIFT_MIN} до {TEMPO_SHIFT_MAX}. Длительность результата
-                ≈ {Math.max(1, Math.round(outDuration))} с.
+                Тумблер не связан с полутонами: сначала меняется длительность,
+                затем — отдельно высота всего микса целиком.
               </p>
             )}
           </div>
