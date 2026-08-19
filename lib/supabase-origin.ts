@@ -5,6 +5,9 @@
  *
  * Without VPN, Russian ISPs block supabase.co → use the proxy.
  * With VPN, the Moscow proxy is often unreachable → use supabase.co.
+ * Do not race the two: Cloudflare is faster from abroad, so a race
+ * would pick supabase.co even when the proxy still works, and the
+ * old "both failed → proxy" fallback left VPN users on a dead origin.
  */
 export const SUPABASE_PROJECT_URL = (
   process.env.NEXT_PUBLIC_SUPABASE_URL || ""
@@ -13,6 +16,9 @@ export const SUPABASE_PROJECT_URL = (
 export const SUPABASE_PROXY_URL = (
   process.env.NEXT_PUBLIC_SUPABASE_PROXY_URL || ""
 ).replace(/\/$/, "");
+
+const SKIP_PROXY_KEY = "uvs-sb-skip-proxy";
+const SKIP_PROXY_MS = 2 * 60 * 1000;
 
 let activeOrigin =
   SUPABASE_PROXY_URL ||
@@ -39,11 +45,35 @@ export function rewriteSupabaseAssetUrl(url: string | null | undefined): string 
   return url;
 }
 
-function probe(
-  url: string,
-  ms: number,
-  isOk: (res: Response) => Promise<boolean> | boolean
-): Promise<boolean> {
+export function shouldSkipProxy(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const until = Number(sessionStorage.getItem(SKIP_PROXY_KEY) || 0);
+    return Number.isFinite(until) && Date.now() < until;
+  } catch {
+    return false;
+  }
+}
+
+export function markProxyDown() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(SKIP_PROXY_KEY, String(Date.now() + SKIP_PROXY_MS));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export function markProxyUp() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(SKIP_PROXY_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function probe(url: string, ms: number): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return fetch(url, {
@@ -51,54 +81,36 @@ function probe(
     cache: "no-store",
     signal: controller.signal,
   })
-    .then((res) => isOk(res))
+    .then(async (res) => {
+      if (!res.ok) return false;
+      return (await res.text()).trim() === "ok";
+    })
     .catch(() => false)
     .finally(() => clearTimeout(timer));
 }
 
-function isJsonResponse(res: Response): boolean {
-  return (res.headers.get("content-type") || "").includes("json");
-}
-
 /**
- * Prefer whichever origin answers first with a real API/health body.
- * Moscow proxy wins on a Russian ISP; supabase.co wins when a VPN makes
- * the proxy unreachable.
+ * Try Moscow first (works in RU without VPN). If it is down, use
+ * supabase.co (works through a foreign VPN). Never keep a dead proxy.
  */
 export async function pickSupabaseOrigin(): Promise<string> {
   if (typeof window === "undefined") return activeOrigin;
   if (!SUPABASE_PROXY_URL) return SUPABASE_PROJECT_URL || activeOrigin;
   if (!SUPABASE_PROJECT_URL) return SUPABASE_PROXY_URL;
 
-  const proxyOk = probe(`${SUPABASE_PROXY_URL}/__health`, 2500, async (res) => {
-    if (!res.ok) return false;
-    return (await res.text()).trim() === "ok";
-  });
-  const directOk = probe(
-    `${SUPABASE_PROJECT_URL}/auth/v1/health`,
-    2500,
-    isJsonResponse
-  );
+  if (shouldSkipProxy()) {
+    activeOrigin = SUPABASE_PROJECT_URL;
+    return SUPABASE_PROJECT_URL;
+  }
 
-  return new Promise((resolve) => {
-    let pending = 2;
-    let settled = false;
-    const finish = (url: string | null) => {
-      pending -= 1;
-      if (settled) return;
-      if (url) {
-        settled = true;
-        activeOrigin = url;
-        resolve(url);
-        return;
-      }
-      if (pending === 0) {
-        settled = true;
-        activeOrigin = SUPABASE_PROXY_URL;
-        resolve(SUPABASE_PROXY_URL);
-      }
-    };
-    void proxyOk.then((ok) => finish(ok ? SUPABASE_PROXY_URL : null));
-    void directOk.then((ok) => finish(ok ? SUPABASE_PROJECT_URL : null));
-  });
+  const proxyOk = await probe(`${SUPABASE_PROXY_URL}/__health`, 2000);
+  if (proxyOk) {
+    markProxyUp();
+    activeOrigin = SUPABASE_PROXY_URL;
+    return SUPABASE_PROXY_URL;
+  }
+
+  markProxyDown();
+  activeOrigin = SUPABASE_PROJECT_URL;
+  return SUPABASE_PROJECT_URL;
 }

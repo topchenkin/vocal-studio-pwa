@@ -1,10 +1,14 @@
 {
 	email iris.jar008@gmail.com
+	servers {
+		protocols h1 h2
+	}
 }
 
 # Static export. Next.js already emitted .html per route — do not SPA-fallback
 # missing assets to /index.html (that is what black-screened Timeweb).
 (site) {
+	header Alt-Svc "clear"
 	root * /var/www/uniquevocal
 	encode gzip
 	try_files {path} {path}.html {path}/index.html
@@ -26,5 +30,6 @@ www.uniquevocal.ru, uniquevocal.ru {
 }
 
 sb.uniquevocal.ru {
+	header Alt-Svc "clear"
 	reverse_proxy 127.0.0.1:8787
 }
