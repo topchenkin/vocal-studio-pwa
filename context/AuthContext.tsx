@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseReady } from "@/lib/supabase";
 import {
   mapBackendError,
   isLikelyUnreachableBackend,
@@ -149,8 +149,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS)
-      .then(async ({ data: { session } }) => {
+    let subscription: { unsubscribe: () => void } | undefined;
+
+    void (async () => {
+      await supabaseReady;
+      if (!mounted) return;
+
+      try {
+        const {
+          data: { session },
+        } = await withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS);
         if (!mounted) return;
         setUser(session?.user ?? null);
         await loadProfile(session?.user ?? null);
@@ -158,26 +166,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!session) setBackendError(null);
           setLoading(false);
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         if (!mounted) return;
         setUser(null);
         setProfile(null);
         setBackendError(mapBackendError(error, SUPABASE_UNREACHABLE_RU));
         setLoading(false);
-      });
+      }
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const nextUser = session?.user ?? null;
-      setUser(nextUser);
-      void loadProfile(nextUser).finally(() => setLoading(false));
-    });
+      if (!mounted) return;
+      const {
+        data: { subscription: nextSub },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        const nextUser = session?.user ?? null;
+        setUser(nextUser);
+        void loadProfile(nextUser).finally(() => setLoading(false));
+      });
+      subscription = nextSub;
+    })();
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, [loadProfile]);
 

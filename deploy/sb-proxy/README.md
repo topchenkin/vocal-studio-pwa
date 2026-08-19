@@ -6,9 +6,8 @@
 для учеников он не подходит.
 
 ```
-ученик (РФ) → https://sb.uniquevocal.ru   (IP 5.42.123.142, VPS Москва)
-            → Node sb-proxy
-            → https://<проект>.supabase.co
+ученик (РФ, без VPN) → https://sb.uniquevocal.ru  (Москва)
+ученик (с VPN)       → https://<проект>.supabase.co  (клиент переключается сам)
 ```
 
 ## Боевой запуск (без VPN)
