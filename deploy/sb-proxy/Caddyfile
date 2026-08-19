@@ -2,8 +2,8 @@
 	email iris.jar008@gmail.com
 }
 
-# Bootstrap until DNS A sb → this IP is live (Let's Encrypt needs the name).
-http://147.45.136.24 {
+# Bootstrap until DNS A sb → this Moscow VPS (Let's Encrypt needs the name).
+http://5.42.123.142 {
 	reverse_proxy 127.0.0.1:8787
 }
 

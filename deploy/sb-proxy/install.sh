@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run as root on the Amsterdam VPS after DNS A sb.uniquevocal.ru → this IP.
+# Run as root on the Moscow VPS after DNS A sb.uniquevocal.ru → this IP.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 

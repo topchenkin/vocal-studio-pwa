@@ -6,7 +6,7 @@
 import dns from "node:dns/promises";
 
 const TIMEWEB_IP = "92.246.76.92";
-const PROXY_IP = "92.246.76.92";
+const PROXY_IP = "5.42.123.142";
 const HOSTS = ["uniquevocal.ru", "www.uniquevocal.ru"];
 const PROXY_HOST = "sb.uniquevocal.ru";
 const GITHUB_PAGES_PREFIX = "185.199.";
@@ -94,7 +94,7 @@ console.log("");
 
 if (failed) {
   console.error(
-    "DNS is NOT clean everywhere. Site and proxy: A @, www, sb → 92.246.76.92. Remove any CNAME www → github.io."
+    "DNS is NOT clean everywhere. Site: A @ and www → 92.246.76.92. Proxy: A sb → 5.42.123.142."
   );
   process.exit(1);
 }
