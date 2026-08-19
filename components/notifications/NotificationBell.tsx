@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { realtimeTopic } from "@/lib/client-instance";
-import { isIosDevice } from "@/lib/ios";
 import { supabase } from "@/lib/supabase";
 import type { AppNotification } from "@/types";
 
@@ -16,6 +15,19 @@ function formatNotificationDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function previewNotificationMessage(raw: string) {
+  if (
+    /"v"\s*:\s*1/.test(raw) ||
+    raw.includes("overallScore") ||
+    raw.includes("Отчёт вокалиста") ||
+    raw.includes("Отчет вокалиста")
+  ) {
+    const sender = raw.split(":")[0]?.trim();
+    return sender ? `${sender}: Отчет от ученика` : "Отчет от ученика";
+  }
+  return raw;
 }
 
 function urlBase64ToUint8Array(value: string) {
@@ -50,8 +62,7 @@ export default function NotificationBell() {
       isMockAdmin ||
       !publicKey ||
       !("serviceWorker" in navigator) ||
-      !("PushManager" in window) ||
-      isIosDevice()
+      !("PushManager" in window)
     ) {
       return;
     }
@@ -321,7 +332,9 @@ export default function NotificationBell() {
                           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-studio-accent" />
                         )}
                         <div className={!item.is_read ? "" : "pl-4"}>
-                          <p className="text-sm">{item.message}</p>
+                          <p className="text-sm">
+                            {previewNotificationMessage(item.message)}
+                          </p>
                           <p className="mt-1 text-[10px] text-studio-muted/70">
                             {formatNotificationDate(item.created_at)}
                           </p>

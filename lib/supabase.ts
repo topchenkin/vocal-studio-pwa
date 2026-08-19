@@ -162,8 +162,15 @@ async function fetchOnce(
   }
 }
 
+function isPoisonResponse(response: Response): boolean {
+  if (PROXY_BAD_STATUS.has(response.status)) return true;
+  if (response.status !== 404 && response.status !== 403) return false;
+  const type = response.headers.get("content-type") || "";
+  return type.includes("text/html") || type.includes("text/plain");
+}
+
 function isBadGateway(response: Response): boolean {
-  return PROXY_BAD_STATUS.has(response.status);
+  return isPoisonResponse(response);
 }
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -289,6 +296,18 @@ export function installNetworkGuards() {
   void chooseRoute().catch(() => {
     /* both paths down; the next request races again */
   });
+  const onPathChange = () => {
+    if (netTimer) {
+      clearTimeout(netTimer);
+      netTimer = null;
+    }
+    clearChosenRoute();
+    notifyReconnecting();
+    netTimer = setTimeout(() => {
+      netTimer = null;
+      void recoverSupabaseRoute();
+    }, 400);
+  };
   window.addEventListener("offline", () => {
     if (netTimer) {
       clearTimeout(netTimer);
@@ -297,13 +316,29 @@ export function installNetworkGuards() {
     clearChosenRoute();
     notifyReconnecting();
   });
-  window.addEventListener("online", () => {
-    if (netTimer) clearTimeout(netTimer);
-    netTimer = setTimeout(() => {
-      netTimer = null;
-      void recoverSupabaseRoute();
-    }, 1_500);
+  window.addEventListener("online", onPathChange);
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) onPathChange();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const dest = getChosenRoute();
+    const origin =
+      dest === "direct" ? SUPABASE_PROJECT_URL : SUPABASE_PROXY_URL;
+    if (!origin) {
+      onPathChange();
+      return;
+    }
+    void probeOrigin(origin).then((ok) => {
+      if (!ok) onPathChange();
+    });
+  });
+  const connection = (
+    navigator as Navigator & {
+      connection?: EventTarget & { addEventListener: typeof window.addEventListener };
+    }
+  ).connection;
+  connection?.addEventListener("change", onPathChange);
 }
 
 function bindCallerAbort(local: AbortController, caller?: AbortSignal) {

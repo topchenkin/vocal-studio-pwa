@@ -1361,6 +1361,21 @@ using (
   )
 );
 
+create or replace function public.chat_notification_preview(raw text)
+returns text
+language sql
+immutable
+as $$
+  select case
+    when coalesce(raw, '') ~ '\{"v"\s*:\s*1'
+      or coalesce(raw, '') like '%"overallScore"%'
+      or coalesce(raw, '') like '%Отчёт вокалиста%'
+      or coalesce(raw, '') like '%Отчет вокалиста%'
+    then 'Отчет от ученика'
+    else left(coalesce(raw, ''), 450)
+  end;
+$$;
+
 create or replace function public.notify_chat_recipient()
 returns trigger
 language plpgsql
@@ -1376,7 +1391,7 @@ begin
       profile.id,
       'admin',
       'Новое сообщение',
-      new.sender_name || ': ' || left(new.message, 450),
+      new.sender_name || ': ' || public.chat_notification_preview(new.message),
       'chat',
       '/dashboard/admin?tab=chat',
       now() + interval '5 minutes'
@@ -1390,7 +1405,7 @@ begin
       new.student_id,
       'student',
       'Новое сообщение',
-      new.sender_name || ': ' || left(new.message, 450),
+      new.sender_name || ': ' || public.chat_notification_preview(new.message),
       'chat',
       '/dashboard/student?tab=chat',
       now() + interval '5 minutes'
@@ -1562,6 +1577,7 @@ set search_path = public
 as $$
 declare
   group_title text;
+  preview text := public.chat_notification_preview(new.message);
 begin
   select title into group_title from public.group_chats where id = new.group_id;
 
@@ -1572,7 +1588,7 @@ begin
     member.student_id,
     'student',
     coalesce(group_title, 'Групповой чат'),
-    new.sender_name || ': ' || left(new.message, 450),
+    new.sender_name || ': ' || preview,
     'chat',
     '/dashboard/student?tab=chat&group=' || new.group_id::text,
     now() + interval '5 minutes'
@@ -1590,7 +1606,7 @@ begin
       profile.id,
       'admin',
       coalesce(group_title, 'Групповой чат'),
-      new.sender_name || ': ' || left(new.message, 450),
+      new.sender_name || ': ' || preview,
       'chat',
       '/dashboard/admin?tab=chat&group=' || new.group_id::text,
       now() + interval '5 minutes'

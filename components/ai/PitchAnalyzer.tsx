@@ -95,22 +95,18 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       );
       setReport(built);
       setReportOpen(true);
-      if (!built.tooQuiet) {
-        void persistAndSend(built);
+      if (!built.tooQuiet && user && !isAdmin) {
+        void saveResult(built);
       }
     } catch {
       // analyzer surfaces a user-facing error via `analyzer.error`
     }
   };
 
-  const persistAndSend = async (built: VocalReport) => {
-    if (!user || isAdmin || built.tooQuiet || sendingReport) return;
-    setSendingReport(true);
-    setSendNote("");
-    let saved = false;
+  const saveResult = async (built: VocalReport) => {
+    if (!user || isAdmin || built.tooQuiet) return;
     try {
       await saveVocalTestResult(user.id, built);
-      saved = true;
       window.dispatchEvent(new Event("uvs-vocal-test-saved"));
     } catch (err) {
       setSendNote(
@@ -119,6 +115,12 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
           : "Не удалось сохранить результат в кабинете"
       );
     }
+  };
+
+  const sendToTeacher = async (built: VocalReport) => {
+    if (!user || isAdmin || built.tooQuiet || sendingReport) return;
+    setSendingReport(true);
+    if (!sendNote.includes("Таблиц")) setSendNote("");
     try {
       await sendVocalReportToChat({
         studentId: user.id,
@@ -127,17 +129,11 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         report: built,
       });
       setSentOk(true);
-      setSendNote(
-        saved
-          ? "Результат сохранён в кабинете и отправлен преподавателю."
-          : "Отчёт отправлен преподавателю. Сохранение в кабинете не удалось — выполните SQL vocal-test-results в Supabase."
-      );
+      setSendNote("Отчёт отправлен преподавателю.");
     } catch (err) {
       setSentOk(false);
-      const chatError =
-        err instanceof Error ? err.message : "Не удалось отправить отчёт в чат";
       setSendNote(
-        saved ? `Результат сохранён в кабинете. ${chatError}` : chatError
+        err instanceof Error ? err.message : "Не удалось отправить отчёт в чат"
       );
     } finally {
       setSendingReport(false);
@@ -498,22 +494,21 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
               <>
                 {sentOk ? (
                   <p className="text-center text-sm text-emerald-400">
-                    {sendNote ||
-                      "Результат сохранён в кабинете и отправлен преподавателю."}
+                    {sendNote || "Отчёт отправлен преподавателю."}
                   </p>
                 ) : (
                   <Button
                     fullWidth
                     size="lg"
                     disabled={sendingReport}
-                    onClick={() => void persistAndSend(report)}
+                    onClick={() => void sendToTeacher(report)}
                   >
                     <Send className="h-4 w-4" />
                     {sendingReport
                       ? "Отправляем…"
-                      : sendNote
-                        ? "Повторить отправку в чат"
-                        : "Отправить отчет в чат преподавателю"}
+                      : sendNote.includes("чат") || sendNote.includes("Не удалось")
+                        ? "Повторить отправку"
+                        : "Отправить преподавателю"}
                   </Button>
                 )}
                 {!sentOk && sendNote && (

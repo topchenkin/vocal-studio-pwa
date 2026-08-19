@@ -27,7 +27,14 @@
 		header Cache-Control "no-store"
 		file_server
 	}
-	handle /api/* {
+	handle /uvs-push/* {
+		reverse_proxy 127.0.0.1:8789 {
+			transport http {
+				versions 1.1
+				dial_timeout 5s
+			}
+		}
+	}
 		reverse_proxy 127.0.0.1:8788 {
 			transport http {
 				versions 1.1

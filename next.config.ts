@@ -77,11 +77,11 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v22",
+    cacheId: "uvs-moscow-v23",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
-    navigateFallbackDenylist: [/^\/api\//],
+    navigateFallbackDenylist: [/^\/api\//, /^\/uvs-push/],
     exclude: [
       /\.map$/,
       /^manifest.*\.js$/,
@@ -96,6 +96,7 @@ const withPWA = withPWAInit({
         options: {
           cacheName: "next-static-assets",
           expiration: { maxEntries: 64, maxAgeSeconds: DAY * 7 },
+          cacheableResponse: { statuses: [200] },
         },
       },
       {
@@ -104,6 +105,7 @@ const withPWA = withPWAInit({
         options: {
           cacheName: "next-static-fonts",
           expiration: { maxEntries: 16, maxAgeSeconds: DAY * 30 },
+          cacheableResponse: { statuses: [200] },
         },
       },
       {
@@ -112,41 +114,33 @@ const withPWA = withPWAInit({
         options: {
           cacheName: "app-icons",
           expiration: { maxEntries: 16, maxAgeSeconds: DAY * 30 },
+          cacheableResponse: { statuses: [200] },
         },
       },
       {
-        urlPattern: ({ request, url: { pathname }, sameOrigin }) =>
-          request.headers.get("RSC") === "1" &&
-          request.headers.get("Next-Router-Prefetch") === "1" &&
-          sameOrigin &&
-          !pathname.startsWith("/api/"),
-        handler: "NetworkFirst",
-        options: {
-          cacheName: "pages-rsc-prefetch",
-          networkTimeoutSeconds: 2,
-          expiration: { maxEntries: 32, maxAgeSeconds: DAY },
-        },
+        urlPattern: ({ request, sameOrigin }: { request: Request; sameOrigin: boolean }) =>
+          sameOrigin && request.mode === "navigate",
+        handler: "NetworkOnly",
       },
       {
-        urlPattern: ({ request, url: { pathname }, sameOrigin }) =>
+        urlPattern: ({ request, url: { pathname }, sameOrigin }: { request: Request; url: { pathname: string }; sameOrigin: boolean }) =>
           request.headers.get("RSC") === "1" &&
           sameOrigin &&
           !pathname.startsWith("/api/"),
-        handler: "NetworkFirst",
-        options: {
-          cacheName: "pages-rsc",
-          networkTimeoutSeconds: 2,
-          expiration: { maxEntries: 32, maxAgeSeconds: DAY },
-        },
+        handler: "NetworkOnly",
       },
       {
-        urlPattern: ({ url: { pathname }, sameOrigin }) =>
-          sameOrigin && !pathname.startsWith("/api/"),
+        urlPattern: ({ url: { pathname }, sameOrigin, request }: { url: { pathname: string }; sameOrigin: boolean; request: Request }) =>
+          sameOrigin &&
+          !pathname.startsWith("/api/") &&
+          request.mode !== "navigate" &&
+          request.destination !== "document",
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
-          networkTimeoutSeconds: 2,
+          networkTimeoutSeconds: 4,
           expiration: { maxEntries: 32, maxAgeSeconds: DAY },
+          cacheableResponse: { statuses: [200] },
         },
       },
     ],
