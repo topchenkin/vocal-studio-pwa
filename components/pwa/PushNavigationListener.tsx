@@ -102,9 +102,7 @@ export default function PushNavigationListener() {
     };
     document.addEventListener("visibilitychange", onVisible);
     const onPageShow = () => void consumePendingNav();
-    const onFocus = () => void consumePendingNav();
     window.addEventListener("pageshow", onPageShow);
-    window.addEventListener("focus", onFocus);
 
     // iOS sometimes opens the app a beat after SW writes the cache.
     const timers = [400, 1200, 2500].map((ms) =>
@@ -117,7 +115,6 @@ export default function PushNavigationListener() {
       }
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pageshow", onPageShow);
-      window.removeEventListener("focus", onFocus);
       timers.forEach((id) => window.clearTimeout(id));
     };
   }, []);

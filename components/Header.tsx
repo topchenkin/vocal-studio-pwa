@@ -35,10 +35,10 @@ export default function Header({ showNav = true }: HeaderProps) {
       : "/";
 
   return (
-    <header className="relative flex items-center justify-between animate-fade-in opacity-0 [animation-fill-mode:forwards]">
-      <Link href="/" className="flex items-center gap-3">
+    <header className="relative flex w-full min-w-0 items-center justify-between animate-fade-in opacity-0 [animation-fill-mode:forwards]">
+      <Link href="/" className="flex min-w-0 items-center gap-3">
         <Logo size={48} />
-        <BrandWordmark subtitle="Студия вокала" />
+        <BrandWordmark className="min-w-0" subtitle="Студия вокала" />
       </Link>
 
       <div className="flex items-center gap-1 sm:gap-2">

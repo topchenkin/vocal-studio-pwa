@@ -14,8 +14,8 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const PROXY_TIMEOUT_MS = 1_500;
-const DIRECT_TIMEOUT_MS = 8_000;
+const PROXY_TIMEOUT_MS = 5_000;
+const DIRECT_TIMEOUT_MS = 10_000;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {

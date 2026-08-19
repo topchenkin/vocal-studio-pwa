@@ -24,7 +24,7 @@ export default function BrandWordmark({
     <div className={className}>
       <p
         className={cn(
-          "font-display font-semibold leading-tight tracking-wide",
+          "font-display font-semibold leading-tight tracking-wide break-words",
           titleSize[size]
         )}
       >

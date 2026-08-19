@@ -46,27 +46,22 @@ export default function DashboardLayout({
       >
         <Header />
 
-        <div className={cn(compact ? "mt-4 shrink-0" : "mt-8")}>
-          <Link
-            href="/"
-            className="mb-4 inline-flex items-center gap-1.5 text-sm text-studio-muted transition-colors hover:text-studio-text"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            На главную
-          </Link>
+        {!compact && (
+          <div className="mt-8">
+            <Link
+              href="/"
+              className="mb-4 inline-flex items-center gap-1.5 text-sm text-studio-muted transition-colors hover:text-studio-text"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              На главную
+            </Link>
 
-          <h1
-            className={cn(
-              "font-display font-semibold",
-              compact ? "text-xl" : "text-3xl sm:text-4xl"
-            )}
-          >
-            {title}
-          </h1>
-          {subtitle && (
-            <p className="mt-2 text-studio-muted">{subtitle}</p>
-          )}
-        </div>
+            <h1 className="font-display text-3xl font-semibold sm:text-4xl">
+              {title}
+            </h1>
+            {subtitle && <p className="mt-2 text-studio-muted">{subtitle}</p>}
+          </div>
+        )}
 
         <div className={cn(compact ? "mt-3 flex min-h-0 flex-1 flex-col" : "mt-8")}>
           {children}

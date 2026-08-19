@@ -110,29 +110,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [isMockAdmin, setIsMockAdmin] = useState(false);
 
-  const loadProfile = useCallback(async (authUser: User | null) => {
-    if (!authUser) {
-      setProfile(null);
-      setProfileError(null);
-      return;
-    }
+  const loadProfile = useCallback(
+    async (authUser: User | null, quiet = false) => {
+      if (!authUser) {
+        setProfile(null);
+        setProfileError(null);
+        return;
+      }
 
-    const { profile: loadedProfile, unreachable } = await fetchProfile(
-      authUser.id
-    );
-    setProfile(loadedProfile);
-    if (unreachable) {
-      setBackendError(SUPABASE_UNREACHABLE_RU);
-      setProfileError(SUPABASE_UNREACHABLE_RU);
-      return;
-    }
-    setBackendError(null);
-    setProfileError(
-      loadedProfile
-        ? null
-        : "Профиль ученика не найден в базе. Администратору нужно выполнить backfill-миграцию."
-    );
-  }, []);
+      const { profile: loadedProfile, unreachable } = await fetchProfile(
+        authUser.id
+      );
+      if (unreachable) {
+        if (!quiet) {
+          setBackendError(SUPABASE_UNREACHABLE_RU);
+          setProfileError(SUPABASE_UNREACHABLE_RU);
+        }
+        return;
+      }
+      setProfile(loadedProfile);
+      setBackendError(null);
+      setProfileError(
+        loadedProfile
+          ? null
+          : "Профиль ученика не найден в базе. Администратору нужно выполнить backfill-миграцию."
+      );
+    },
+    []
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -174,7 +179,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       const {
         data: { subscription: nextSub },
-      } = supabase.auth.onAuthStateChange((_event, session) => {
+      } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === "TOKEN_REFRESHED") return;
         const nextUser = session?.user ?? null;
         setUser(nextUser);
         void loadProfile(nextUser).finally(() => setLoading(false));
@@ -209,29 +215,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
-    const refresh = () => {
-      void loadProfile(user).then(() => {
+    const refreshQuiet = () => {
+      void loadProfile(user, true).then(() => {
         window.dispatchEvent(new Event("uvs-profile-updated"));
       });
     };
 
+    let hiddenAt = 0;
     const onVisible = () => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt && Date.now() - hiddenAt < 8_000) return;
+      refreshQuiet();
     };
 
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("online", refresh);
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
-    }, 20_000);
+    window.addEventListener("online", refreshQuiet);
 
     return () => {
       void supabase.removeChannel(channel);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("online", refresh);
-      window.clearInterval(intervalId);
+      window.removeEventListener("online", refreshQuiet);
     };
   }, [isMockAdmin, loadProfile, user]);
 

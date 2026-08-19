@@ -47,6 +47,7 @@ interface ChatWindowProps {
   onDelete?: (messageId: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  flush?: boolean;
 }
 
 export default function ChatWindow({
@@ -58,6 +59,7 @@ export default function ChatWindow({
   onDelete,
   placeholder = "Напишите сообщение...",
   disabled,
+  flush = false,
 }: ChatWindowProps) {
   const [text, setText] = useState("");
   const [panel, setPanel] = useState<"none" | "emoji" | "sticker">("none");
@@ -320,7 +322,13 @@ export default function ChatWindow({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-2xl bg-studio-surface ring-1 ring-studio-border">
+    <div
+      className={`flex h-full min-h-0 flex-col ${
+        flush
+          ? "bg-transparent"
+          : "rounded-2xl bg-studio-surface ring-1 ring-studio-border"
+      }`}
+    >
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {chatMessages.length === 0 ? (
           <p className="py-8 text-center text-sm text-studio-muted">
@@ -349,7 +357,7 @@ export default function ChatWindow({
                 }`}
               >
                 <div
-                  className={`relative max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  className={`relative min-w-0 max-w-[80%] rounded-2xl px-4 py-2.5 ${
                     isAnnouncement
                       ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
                       : isOwn
@@ -411,7 +419,7 @@ export default function ChatWindow({
                       ) : null}
                     </div>
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm">{msg.text}</p>
                   )}
                   <p className="mt-1 text-[10px] opacity-60">
                     {formatTime(msg.createdAt)}
@@ -576,7 +584,7 @@ export default function ChatWindow({
             </div>
           ) : (
             <>
-              <div className="mb-2 flex gap-1">
+              <div className="mb-2 flex flex-wrap gap-1">
                 <ComposerIcon
                   active={panel === "emoji"}
                   label="Смайлики"

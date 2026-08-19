@@ -18,7 +18,7 @@ const items = [
   },
   {
     href: "/dashboard/student/ai-tools",
-    label: "Нейросети Premium",
+    label: "Нейросети",
     icon: Sparkles,
   },
 ];
@@ -27,7 +27,7 @@ export default function StudentNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-4 flex shrink-0 gap-1 overflow-x-auto rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
+    <nav className="mb-4 grid shrink-0 grid-cols-4 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
       {items.map((item) => {
         const Icon = item.icon;
         const active =
@@ -39,14 +39,14 @@ export default function StudentNav() {
           <Link
             key={item.href}
             href={item.href}
-            className={`flex min-w-max flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center text-[11px] font-medium leading-tight transition sm:flex-row sm:gap-1.5 sm:text-sm ${
               active
                 ? "bg-studio-accent/20 text-studio-accent-light"
                 : "text-studio-muted hover:text-studio-text"
             }`}
           >
-            <Icon className="h-4 w-4" />
-            {item.label}
+            <Icon className="h-4 w-4 shrink-0" />
+            <span className="max-w-full break-words">{item.label}</span>
           </Link>
         );
       })}

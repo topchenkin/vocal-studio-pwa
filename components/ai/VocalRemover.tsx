@@ -342,7 +342,7 @@ export default function VocalRemover({ locked = false }: Props) {
         }`}
       >
         <Upload className="h-8 w-8 text-studio-accent" />
-        <span className="mt-3 text-sm font-medium">
+        <span className="mt-3 max-w-full break-words px-2 text-sm font-medium leading-snug">
           {file ? file.name : "Перетащите MP3 / WAV сюда"}
         </span>
         <span className="mt-1 text-xs text-studio-muted">

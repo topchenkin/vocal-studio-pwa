@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { UsersRound } from "lucide-react";
 import ChatWindow from "@/components/chat/ChatWindow";
 import PaywallOverlay from "@/components/ui/PaywallOverlay";
 import { useAuth } from "@/context/AuthContext";
@@ -72,38 +71,64 @@ export default function StudentChatSection() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="mb-3 flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
-          <button
-            type="button"
-            onClick={() => setMode("teacher")}
-            className={cn(
-              "rounded-lg px-3 py-2 text-xs transition",
-              mode === "teacher"
-                ? "bg-studio-accent/20 text-studio-accent-light"
-                : "text-studio-muted"
-            )}
-          >
-            Преподаватель
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("groups")}
-            className={cn(
-              "rounded-lg px-3 py-2 text-xs transition",
-              mode === "groups"
-                ? "bg-studio-accent/20 text-studio-accent-light"
-                : "text-studio-muted"
-            )}
-          >
-            Группы
-          </button>
-        </div>
+      <div className="mb-2 flex shrink-0 gap-1">
+        <button
+          type="button"
+          onClick={() => setMode("teacher")}
+          className={cn(
+            "rounded-full px-3 py-1.5 text-xs font-medium transition",
+            mode === "teacher"
+              ? "bg-studio-accent/20 text-studio-accent-light"
+              : "text-studio-muted hover:text-studio-text"
+          )}
+        >
+          Преподаватель
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("groups")}
+          className={cn(
+            "rounded-full px-3 py-1.5 text-xs font-medium transition",
+            mode === "groups"
+              ? "bg-studio-accent/20 text-studio-accent-light"
+              : "text-studio-muted hover:text-studio-text"
+          )}
+        >
+          Группы
+        </button>
       </div>
+
+      {mode === "groups" && (
+        <div className="mb-2 flex shrink-0 gap-1 overflow-x-hidden">
+          <div className="flex max-w-full flex-wrap gap-1">
+            {groups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => setSelectedGroupId(group.id)}
+                className={cn(
+                  "max-w-full rounded-full px-3 py-1 text-xs leading-snug transition",
+                  activeGroupId === group.id
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "bg-studio-surface text-studio-muted"
+                )}
+              >
+                <span className="break-words">{group.title}</span>
+              </button>
+            ))}
+            {groups.length === 0 && (
+              <p className="px-1 py-1 text-xs text-studio-muted">
+                Вас пока не добавили в группы
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {mode === "teacher" ? (
           <ChatWindow
+            flush
             chatId={user.id}
             messages={teacherMessages}
             currentUser={localUser}
@@ -112,47 +137,21 @@ export default function StudentChatSection() {
             onDelete={(id) => void removeTeacher(id)}
             disabled={!hasChatAccess}
           />
+        ) : activeGroup ? (
+          <ChatWindow
+            flush
+            chatId={activeGroup.id}
+            messages={groupMessages}
+            currentUser={localUser}
+            onSend={(text) => void sendGroup(text)}
+            onEdit={(id, text) => void editGroup(id, text)}
+            onDelete={(id) => void removeGroup(id)}
+            disabled={!hasChatAccess}
+            placeholder={`Сообщение в «${activeGroup.title}»...`}
+          />
         ) : (
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[200px_1fr]">
-            <div className="max-h-28 overflow-y-auto rounded-2xl bg-studio-surface ring-1 ring-studio-border lg:max-h-none">
-              {groups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => setSelectedGroupId(group.id)}
-                  className={cn(
-                    "flex w-full items-center gap-2 border-b border-studio-border/50 px-3 py-3 text-left text-sm hover:bg-studio-card",
-                    activeGroupId === group.id && "bg-studio-accent/10"
-                  )}
-                >
-                  <UsersRound className="h-3.5 w-3.5 shrink-0 text-studio-accent" />
-                  <span className="truncate">{group.title}</span>
-                </button>
-              ))}
-              {groups.length === 0 && (
-                <p className="px-3 py-6 text-center text-xs text-studio-muted">
-                  Вас пока не добавили в группы
-                </p>
-              )}
-            </div>
-            {activeGroup ? (
-              <div className="min-h-0 flex-1">
-                <ChatWindow
-                  chatId={activeGroup.id}
-                  messages={groupMessages}
-                  currentUser={localUser}
-                  onSend={(text) => void sendGroup(text)}
-                  onEdit={(id, text) => void editGroup(id, text)}
-                  onDelete={(id) => void removeGroup(id)}
-                  disabled={!hasChatAccess}
-                  placeholder={`Сообщение в «${activeGroup.title}»...`}
-                />
-              </div>
-            ) : (
-              <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl bg-studio-surface ring-1 ring-studio-border">
-                <p className="text-sm text-studio-muted">Выберите группу</p>
-              </div>
-            )}
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <p className="text-sm text-studio-muted">Выберите группу</p>
           </div>
         )}
 

@@ -95,7 +95,7 @@ export default function AiToolsPage() {
     >
       <StudentNav />
 
-      <div className="mb-5 flex gap-1 overflow-x-auto rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-5">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
           const lock = aiToolLockLabel(item.id, access);
@@ -105,14 +105,16 @@ export default function AiToolsPage() {
               key={item.id}
               type="button"
               onClick={() => setTab(item.id)}
-              className={`flex min-w-max flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-medium leading-tight transition sm:text-xs ${
                 activeTab === item.id
                   ? "bg-studio-accent/20 text-studio-accent-light"
                   : "text-studio-muted hover:text-studio-text"
               }`}
             >
-              <Icon className="h-4 w-4" />
-              {access[item.id]?.title || item.label}
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="max-w-full break-words">
+                {access[item.id]?.title || item.label}
+              </span>
               {isLocked && lock && (
                 <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
                   {lock}
