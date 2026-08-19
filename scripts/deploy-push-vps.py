@@ -22,7 +22,7 @@ def run(client: paramiko.SSHClient, cmd: str, timeout: int = 180) -> None:
     if out:
         print(out[-8000:], flush=True)
     if err:
-        print(err[-4000:], flush=True)
+        print(err[-4000:].encode("utf-8", "replace").decode("utf-8"), flush=True)
     if code != 0:
         raise SystemExit(f"remote command failed ({code}): {cmd}")
 
