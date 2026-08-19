@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Layers, Mic, Stars, WandSparkles } from "lucide-react";
+import { Layers, Mic, Music2, Stars, WandSparkles } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
+import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
@@ -35,6 +36,7 @@ const TABS: Array<{
   { id: "remover", label: "Удаление вокала", icon: WandSparkles },
   { id: "timbre", label: "Звёздный двойник", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
+  { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
 ];
 
 export default function AiToolsPage() {
@@ -88,7 +90,7 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="Нейросети Premium"
-      subtitle="Анализ нот, минусовка, звёздный двойник и сведение дорожек"
+      subtitle="Анализ нот, тональность, минусовка, звёздный двойник и сведение"
       bottomInset
     >
       <StudentNav />
@@ -130,6 +132,9 @@ export default function AiToolsPage() {
       )}
       {activeTab === "mixer" && (
         <MultitrackMixer locked={locked("mixer")} />
+      )}
+      {activeTab === "pitchshift" && (
+        <PitchShiftStudio locked={locked("pitchshift")} />
       )}
     </DashboardLayout>
   );

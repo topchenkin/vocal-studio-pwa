@@ -1865,7 +1865,7 @@ end $$;
 
 create table if not exists public.ai_tool_access (
   tool_id text primary key
-    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer')),
+    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift')),
   min_tier text not null default 'none'
     check (min_tier in ('none', 'standard', 'premium', 'vip')),
   enabled boolean not null default true,
@@ -1893,7 +1893,8 @@ values
   ('tuner', 'none', true, 'Нейроанализатор нот'),
   ('remover', 'premium', true, 'Удаление вокала'),
   ('timbre', 'premium', true, 'Звёздный двойник'),
-  ('mixer', 'standard', true, 'Сведение дорожек')
+  ('mixer', 'standard', true, 'Сведение дорожек'),
+  ('pitchshift', 'standard', true, 'Изменение тональности')
 on conflict (tool_id) do nothing;
 
 update public.ai_tool_access
@@ -1929,7 +1930,7 @@ set public = false,
 create table if not exists public.student_audio_tracks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
-  source text not null check (source in ('remover_minus', 'remover_vocal', 'mixer')),
+  source text not null check (source in ('remover_minus', 'remover_vocal', 'mixer', 'pitchshift')),
   title text not null check (char_length(title) between 1 and 120),
   duration_sec numeric not null check (duration_sec > 0),
   storage_path text not null unique,

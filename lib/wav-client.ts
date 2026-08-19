@@ -282,3 +282,78 @@ export function audioBufferToMonoWav16k(buffer: AudioBuffer): Blob {
   return encodeWavBlob([mono], targetRate);
 }
 
+export const PITCH_SHIFT_MIN = -12;
+export const PITCH_SHIFT_MAX = 12;
+export const TEMPO_SHIFT_MIN = -50;
+export const TEMPO_SHIFT_MAX = 50;
+
+export function clampPitchShift(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(PITCH_SHIFT_MIN, Math.min(PITCH_SHIFT_MAX, Math.round(value * 2) / 2));
+}
+
+export function clampTempoPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(TEMPO_SHIFT_MIN, Math.min(TEMPO_SHIFT_MAX, Math.round(value)));
+}
+
+export function tempoToPlaybackRate(tempoPercent: number) {
+  return Math.max(0.5, Math.min(2, 1 + clampTempoPercent(tempoPercent) / 100));
+}
+
+/** Cents to add so playbackRate does not also change musical key. */
+export function detuneForIndependentPitch(
+  pitchSemitones: number,
+  playbackRate: number
+) {
+  const rateSemis = 12 * Math.log2(Math.max(0.25, playbackRate));
+  return (clampPitchShift(pitchSemitones) - rateSemis) * 100;
+}
+
+export function applyPitchTempoToSource(
+  source: AudioBufferSourceNode,
+  pitchSemitones: number,
+  tempoPercent: number
+) {
+  const rate = tempoToPlaybackRate(tempoPercent);
+  source.playbackRate.value = rate;
+  source.detune.value = detuneForIndependentPitch(pitchSemitones, rate);
+  return rate;
+}
+
+/** Render a new WAV with independent pitch (semitones) and tempo (%). */
+export async function renderPitchTempoWav(
+  buffer: AudioBuffer,
+  pitchSemitones: number,
+  tempoPercent: number
+): Promise<Blob> {
+  const rate = tempoToPlaybackRate(tempoPercent);
+  const sampleRate = buffer.sampleRate;
+  const outLength = Math.max(
+    1,
+    Math.ceil((buffer.duration / rate) * sampleRate)
+  );
+  const ctx = getOfflineAudioContext(
+    Math.min(2, Math.max(1, buffer.numberOfChannels)),
+    outLength,
+    sampleRate
+  );
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  applyPitchTempoToSource(source, pitchSemitones, tempoPercent);
+  source.connect(ctx.destination);
+  source.start(0);
+  const rendered = await ctx.startRendering();
+  const left = new Float32Array(rendered.getChannelData(0));
+  const right = new Float32Array(
+    rendered.numberOfChannels > 1
+      ? rendered.getChannelData(1)
+      : rendered.getChannelData(0)
+  );
+  normalizeStereoInPlace(left, right);
+  return encodeWavBlob(
+    rendered.numberOfChannels > 1 ? [left, right] : [left],
+    sampleRate
+  );
+}
+

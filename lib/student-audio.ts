@@ -18,6 +18,7 @@ export function formatTrackDuration(seconds: number): string {
 export function sourceLabel(source: StudentAudioSource): string {
   if (source === "remover_minus") return "Минусовка";
   if (source === "remover_vocal") return "Вокал";
+  if (source === "pitchshift") return "Тональность";
   return "Сведение";
 }
 

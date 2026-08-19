@@ -20,6 +20,7 @@ export const AI_TOOL_IDS: AiToolId[] = [
   "remover",
   "timbre",
   "mixer",
+  "pitchshift",
 ];
 
 /** Defaults used until DB rows load (and as seed values). */
@@ -31,6 +32,11 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
   remover: { min_tier: "premium", enabled: true, title: "Удаление вокала" },
   timbre: { min_tier: "premium", enabled: true, title: "Звёздный двойник" },
   mixer: { min_tier: "standard", enabled: true, title: "Сведение дорожек" },
+  pitchshift: {
+    min_tier: "standard",
+    enabled: true,
+    title: "Изменение тональности",
+  },
 };
 
 export type AiToolAccessMap = Record<
@@ -44,6 +50,7 @@ export function defaultAiToolAccessMap(): AiToolAccessMap {
     remover: { ...DEFAULT_AI_TOOL_ACCESS.remover },
     timbre: { ...DEFAULT_AI_TOOL_ACCESS.timbre },
     mixer: { ...DEFAULT_AI_TOOL_ACCESS.mixer },
+    pitchshift: { ...DEFAULT_AI_TOOL_ACCESS.pitchshift },
   };
 }
 
@@ -61,7 +68,8 @@ function isToolId(value: string): value is AiToolId {
     value === "tuner" ||
     value === "remover" ||
     value === "timbre" ||
-    value === "mixer"
+    value === "mixer" ||
+    value === "pitchshift"
   );
 }
 

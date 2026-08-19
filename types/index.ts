@@ -211,7 +211,11 @@ export interface PushSubscriptionRecord {
   created_at: string;
 }
 
-export type StudentAudioSource = "remover_minus" | "remover_vocal" | "mixer";
+export type StudentAudioSource =
+  | "remover_minus"
+  | "remover_vocal"
+  | "mixer"
+  | "pitchshift";
 
 export interface StudentAudioTrack {
   [key: string]: unknown;
@@ -226,7 +230,7 @@ export interface StudentAudioTrack {
   created_at: string;
 }
 
-export type AiToolId = "tuner" | "remover" | "timbre" | "mixer";
+export type AiToolId = "tuner" | "remover" | "timbre" | "mixer" | "pitchshift";
 
 export interface AiToolAccess {
   [key: string]: unknown;
