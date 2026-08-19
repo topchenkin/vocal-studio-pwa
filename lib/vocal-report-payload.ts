@@ -71,6 +71,16 @@ export function vocalReportChatText(payload: VocalReportPayload): string {
   );
 }
 
+export function isVocalReportText(raw: string) {
+  return (
+    /"v"\s*:\s*1/.test(raw) ||
+    raw.includes("overallScore") ||
+    raw.includes("Отчёт вокалиста") ||
+    raw.includes("Отчет вокалиста") ||
+    raw.includes("Отчет от ученика")
+  );
+}
+
 export function parseVocalReportPayload(
   raw: unknown
 ): VocalReportPayload | null {

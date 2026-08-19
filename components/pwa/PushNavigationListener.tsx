@@ -7,9 +7,22 @@ const PENDING_NAV_KEY = "/pending-nav";
 const PENDING_NAV_STORAGE = "uvs-pending-nav";
 
 function sameAppUrl(url: string) {
+  const text = url.trim();
+  if (
+    !text ||
+    text.startsWith("{") ||
+    text.startsWith("[") ||
+    text.includes("overallScore")
+  ) {
+    return "/dashboard/student?tab=chat";
+  }
   try {
-    const target = new URL(url, window.location.origin);
+    const target = new URL(text, window.location.origin);
     if (target.origin !== window.location.origin) return null;
+    target.pathname = target.pathname.replace(/\.(txt|json)$/i, "");
+    if (!target.pathname.startsWith("/dashboard")) {
+      return "/dashboard/student?tab=chat";
+    }
     return `${target.pathname}${target.search}${target.hash}`;
   } catch {
     return null;

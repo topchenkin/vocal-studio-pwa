@@ -36,7 +36,7 @@ begin
       'Новое сообщение',
       new.sender_name || ': ' || public.chat_notification_preview(new.message),
       'chat',
-      '/dashboard/admin?tab=chat',
+      '/dashboard/admin?tab=chat&student=' || new.student_id::text,
       now() + interval '5 minutes'
     from public.profiles as profile
     where profile.role = 'admin';
@@ -107,3 +107,17 @@ begin
   return new;
 end;
 $$;
+
+-- Repair old chat rows that stored JSON / empty action_url instead of a cabinet path.
+update public.notifications
+set action_url = case
+  when recipient_role = 'admin' then '/dashboard/admin?tab=chat'
+  else '/dashboard/student?tab=chat'
+end
+where (
+    kind = 'chat'
+    or message like '%overallScore%'
+    or message like '%Отчет от ученика%'
+    or message like '%Отчёт вокалиста%'
+  )
+  and coalesce(action_url, '') not like '/dashboard/%';

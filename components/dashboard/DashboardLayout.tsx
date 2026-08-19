@@ -40,7 +40,7 @@ export default function DashboardLayout({
 
       <div
         className={cn(
-          "relative mx-auto flex w-full max-w-6xl flex-col px-4 sm:px-6",
+          "relative mx-auto flex w-full max-w-6xl flex-col overflow-visible px-4 sm:px-6",
           compact ? "min-h-0 flex-1 pb-3 pt-3" : "pb-10 pt-6"
         )}
       >

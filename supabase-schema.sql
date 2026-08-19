@@ -1393,7 +1393,7 @@ begin
       'Новое сообщение',
       new.sender_name || ': ' || public.chat_notification_preview(new.message),
       'chat',
-      '/dashboard/admin?tab=chat',
+      '/dashboard/admin?tab=chat&student=' || new.student_id::text,
       now() + interval '5 minutes'
     from public.profiles as profile
     where profile.role = 'admin';

@@ -13,8 +13,22 @@ const PENDING_NAV_KEY = "/pending-nav";
 
 function resolveTargetUrl(raw: string | undefined): string {
   const fallback = "/dashboard/student?tab=chat";
+  const text = (raw || "").trim();
+  if (
+    !text ||
+    text.startsWith("{") ||
+    text.startsWith("[") ||
+    text.includes("overallScore")
+  ) {
+    return new URL(fallback, self.location.origin).href;
+  }
   try {
-    return new URL(raw || fallback, self.location.origin).href;
+    const url = new URL(text, self.location.origin);
+    url.pathname = url.pathname.replace(/\.(txt|json)$/i, "");
+    if (url.origin !== self.location.origin || !url.pathname.startsWith("/dashboard")) {
+      return new URL(fallback, self.location.origin).href;
+    }
+    return url.href;
   } catch {
     return new URL(fallback, self.location.origin).href;
   }

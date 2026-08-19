@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { realtimeTopic } from "@/lib/client-instance";
+import { resolveNotificationHref } from "@/lib/notification-href";
 import { supabase } from "@/lib/supabase";
+import { isVocalReportText } from "@/lib/vocal-report-payload";
 import type { AppNotification } from "@/types";
 
 function formatNotificationDate(value: string) {
@@ -18,14 +21,12 @@ function formatNotificationDate(value: string) {
 }
 
 function previewNotificationMessage(raw: string) {
-  if (
-    /"v"\s*:\s*1/.test(raw) ||
-    raw.includes("overallScore") ||
-    raw.includes("Отчёт вокалиста") ||
-    raw.includes("Отчет вокалиста")
-  ) {
+  if (isVocalReportText(raw)) {
     const sender = raw.split(":")[0]?.trim();
-    return sender ? `${sender}: Отчет от ученика` : "Отчет от ученика";
+    if (sender && !sender.includes("{") && sender.length < 80) {
+      return `${sender}: Отчет от ученика`;
+    }
+    return "Отчет от ученика";
   }
   return raw;
 }
@@ -54,6 +55,13 @@ export default function NotificationBell() {
     null
   );
   const [pushError, setPushError] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const [panelBox, setPanelBox] = useState({ top: 0, left: 0, width: 320 });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const subscribeToPush = useCallback(async () => {
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -202,6 +210,50 @@ export default function NotificationBell() {
     [notifications]
   );
 
+  const placePanel = useCallback(() => {
+    const rect = bellRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(320, Math.max(200, window.innerWidth - 24));
+    const left = Math.min(
+      Math.max(12, rect.right - width),
+      window.innerWidth - width - 12
+    );
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 120);
+    setPanelBox({ top, left, width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    placePanel();
+    window.addEventListener("resize", placePanel);
+    window.addEventListener("scroll", placePanel, true);
+    return () => {
+      window.removeEventListener("resize", placePanel);
+      window.removeEventListener("scroll", placePanel, true);
+    };
+  }, [open, placePanel]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const openNotification = (item: AppNotification) => {
+    void markNotificationRead(item.id);
+    setOpen(false);
+    const href = resolveNotificationHref({
+      actionUrl: item.action_url,
+      kind: item.kind,
+      message: item.message,
+      isAdmin,
+    });
+    window.location.assign(new URL(href, window.location.origin).href);
+  };
+
   const enablePush = async () => {
     if (!("Notification" in window)) return;
     const nextPermission = await window.Notification.requestPermission();
@@ -246,9 +298,99 @@ export default function NotificationBell() {
 
   if (!user) return null;
 
+  const panel =
+    mounted
+      ? createPortal(
+          <AnimatePresence>
+            {open && (
+              <>
+                <div
+                  className="fixed inset-0 z-[80]"
+                  onClick={() => setOpen(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  style={{
+                    top: panelBox.top,
+                    left: panelBox.left,
+                    width: panelBox.width,
+                  }}
+                  className="fixed z-[90] overflow-hidden rounded-xl bg-studio-card shadow-card ring-1 ring-studio-border"
+                >
+                  <div className="flex items-center justify-between border-b border-studio-border px-4 py-3">
+                    <span className="text-sm font-medium">Уведомления</span>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void markAllNotificationsRead()}
+                        className="text-xs text-studio-accent hover:underline"
+                      >
+                        Прочитать все
+                      </button>
+                    )}
+                  </div>
+
+                  {permission === "default" && (
+                    <button
+                      type="button"
+                      onClick={() => void enablePush()}
+                      className="w-full border-b border-studio-border bg-studio-accent/10 px-4 py-2.5 text-xs text-studio-accent-light hover:bg-studio-accent/15"
+                    >
+                      Включить системные push-уведомления
+                    </button>
+                  )}
+                  {pushError && (
+                    <p className="border-b border-studio-border px-4 py-2 text-xs text-red-400">
+                      Push: {pushError}
+                    </p>
+                  )}
+
+                  <div className="max-h-[min(18rem,calc(100dvh-8rem))] overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-sm text-studio-muted">
+                        Нет уведомлений
+                      </p>
+                    ) : (
+                      notifications.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => openNotification(item)}
+                          className={`w-full border-b border-studio-border/50 px-4 py-3 text-left transition-colors hover:bg-studio-surface ${
+                            !item.is_read ? "bg-studio-accent/5" : ""
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            {!item.is_read && (
+                              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-studio-accent" />
+                            )}
+                            <div className={!item.is_read ? "" : "pl-4"}>
+                              <p className="text-sm">
+                                {previewNotificationMessage(item.message)}
+                              </p>
+                              <p className="mt-1 text-[10px] text-studio-muted/70">
+                                {formatNotificationDate(item.created_at)}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>,
+          document.body
+        )
+      : null;
+
   return (
     <div className="relative">
       <button
+        ref={bellRef}
         type="button"
         onClick={() => {
           setOpen((current) => !current);
@@ -264,90 +406,7 @@ export default function NotificationBell() {
           </span>
         )}
       </button>
-
-      <AnimatePresence>
-        {open && (
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setOpen(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, y: -8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.95 }}
-              className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-studio-card ring-1 ring-studio-border shadow-card"
-            >
-              <div className="flex items-center justify-between border-b border-studio-border px-4 py-3">
-                <span className="text-sm font-medium">Уведомления</span>
-                {unreadCount > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void markAllNotificationsRead()}
-                    className="text-xs text-studio-accent hover:underline"
-                  >
-                    Прочитать все
-                  </button>
-                )}
-              </div>
-
-              {permission === "default" && (
-                <button
-                  type="button"
-                  onClick={() => void enablePush()}
-                  className="w-full border-b border-studio-border bg-studio-accent/10 px-4 py-2.5 text-xs text-studio-accent-light hover:bg-studio-accent/15"
-                >
-                  Включить системные push-уведомления
-                </button>
-              )}
-              {pushError && (
-                <p className="border-b border-studio-border px-4 py-2 text-xs text-red-400">
-                  Push: {pushError}
-                </p>
-              )}
-
-              <div className="max-h-72 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-sm text-studio-muted">
-                    Нет уведомлений
-                  </p>
-                ) : (
-                  notifications.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        void markNotificationRead(item.id).then(() => {
-                          if (item.action_url) {
-                            window.location.assign(item.action_url);
-                          }
-                        });
-                      }}
-                      className={`w-full border-b border-studio-border/50 px-4 py-3 text-left transition-colors hover:bg-studio-surface ${
-                        !item.is_read ? "bg-studio-accent/5" : ""
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        {!item.is_read && (
-                          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-studio-accent" />
-                        )}
-                        <div className={!item.is_read ? "" : "pl-4"}>
-                          <p className="text-sm">
-                            {previewNotificationMessage(item.message)}
-                          </p>
-                          <p className="mt-1 text-[10px] text-studio-muted/70">
-                            {formatNotificationDate(item.created_at)}
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {panel}
     </div>
   );
 }

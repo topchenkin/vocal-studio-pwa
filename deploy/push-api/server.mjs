@@ -60,20 +60,44 @@ function isVocalReportText(raw) {
   );
 }
 
+function safeActionUrl(row) {
+  const raw = String(row.action_url || "").trim();
+  const fallback =
+    row.recipient_role === "admin"
+      ? "/dashboard/admin?tab=chat"
+      : "/dashboard/student?tab=chat";
+  if (
+    !raw ||
+    raw.startsWith("{") ||
+    raw.startsWith("[") ||
+    raw.includes("overallScore")
+  ) {
+    return fallback;
+  }
+  try {
+    const url = new URL(raw, APP_ORIGIN);
+    const pathname = url.pathname.replace(/\.(txt|json)$/i, "");
+    if (!pathname.startsWith("/dashboard")) return fallback;
+    return `${pathname}${url.search}`;
+  } catch {
+    return fallback;
+  }
+}
+
 function previewPayload(row) {
   const message = String(row.message || "");
   if (isVocalReportText(message)) {
     return {
       title: row.title || "Иришка",
       body: "Отчет от ученика",
-      url: row.action_url || "/dashboard/admin?tab=chat",
+      url: safeActionUrl({ ...row, recipient_role: row.recipient_role || "admin" }),
     };
   }
   const body = message.replace(/\s+/g, " ").trim().slice(0, 140);
   return {
     title: row.title || "Иришка",
     body: body || "Новое уведомление",
-    url: row.action_url || "/dashboard/student",
+    url: safeActionUrl(row),
   };
 }
 
@@ -149,7 +173,7 @@ async function deliver(row, subscriptions) {
 
 async function pollOnce() {
   const response = await sb(
-    `/rest/v1/notifications?push_sent_at=is.null&select=id,recipient_id,title,message,action_url,created_at&order=created_at.asc&limit=25`
+    `/rest/v1/notifications?push_sent_at=is.null&select=id,recipient_id,recipient_role,title,message,action_url,created_at&order=created_at.asc&limit=25`
   );
   if (!response.ok) {
     const text = await response.text();
