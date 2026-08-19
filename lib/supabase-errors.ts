@@ -8,7 +8,7 @@ export function isLikelyUnreachableBackend(error: unknown): boolean {
       : error && typeof error === "object" && "message" in error
         ? String((error as { message: unknown }).message)
         : String(error ?? "");
-  return /failed to fetch|networkerror|abort|timeout|timed out|load failed|fetch failed|network request failed/i.test(
+  return /failed to fetch|networkerror|abort|timeout|timed out|load failed|fetch failed|network request failed|unreachable/i.test(
     raw
   );
 }

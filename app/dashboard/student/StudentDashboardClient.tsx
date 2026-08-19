@@ -16,7 +16,6 @@ import {
 } from "@/components/dashboard/CabinetTabLink";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
-import { reloadCabinet } from "@/lib/reload-app";
 
 const TABS = ["home", "notes", "chat", "lessons", "audio"] as const;
 type TabId = (typeof TABS)[number];
@@ -116,10 +115,6 @@ export default function StudentDashboardClient() {
             disabled={retrying}
             onClick={() => {
               setRetrying(true);
-              if (backendError) {
-                reloadCabinet();
-                return;
-              }
               void refreshProfile().finally(() => setRetrying(false));
             }}
           >

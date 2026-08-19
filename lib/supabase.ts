@@ -1,10 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
+import { isIosDevice } from "@/lib/ios";
 import {
   clearChosenRoute,
   getBrowserSupabaseUrl,
   getChosenRoute,
-  isProxyUnreachable,
   mapRealtimeUrl,
   markProxyReachable,
   markProxyUnreachable,
@@ -16,7 +16,6 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const RACE_MS = 1_000;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -32,6 +31,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 const AUTH_STORAGE_KEY = projectAuthStorageKey();
 migrateAuthStorage(AUTH_STORAGE_KEY);
+
+/** Happy-eyeballs budget: first success wins. iOS TLS+CORS is slower than 1s. */
+const RACE_MS = 1_000;
+const IOS_RACE_MS = 3_000;
+/** Real API calls (login, profile). Never reuse the race budget here. */
+const REQUEST_MS = 15_000;
+const WS_CONNECT_MS = 8_000;
+
+function raceBudget() {
+  return isIosDevice() ? IOS_RACE_MS : RACE_MS;
+}
 
 const authOptions = {
   persistSession: true,
@@ -158,7 +168,7 @@ function isBadGateway(response: Response): boolean {
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastReconnectAt = 0;
-let lastOriginFlipAt = 0;
+let netTimer: ReturnType<typeof setTimeout> | null = null;
 let guardsInstalled = false;
 let choosePromise: Promise<"direct" | "proxy"> | null = null;
 
@@ -190,18 +200,14 @@ function rememberRoute(route: "direct" | "proxy") {
 }
 
 async function probeOrigin(origin: string): Promise<boolean> {
-  if (!origin || !supabaseAnonKey) return false;
+  if (!origin) return false;
+  const path =
+    origin === SUPABASE_PROXY_URL ? "/__health" : "/auth/v1/health";
   try {
     const response = await fetchOnce(
-      `${origin}/auth/v1/health`,
-      {
-        method: "GET",
-        headers: {
-          apikey: supabaseAnonKey,
-          accept: "application/json",
-        },
-      },
-      RACE_MS
+      `${origin}${path}`,
+      { method: "GET", cache: "no-store" },
+      raceBudget()
     );
     return response.ok || (response.status >= 400 && response.status < 500);
   } catch {
@@ -266,11 +272,11 @@ export async function recoverSupabaseRoute() {
   notifyReconnecting();
   try {
     await chooseRoute();
+    notifyRouteRecovered();
   } catch {
-    /* next request will race again */
+    /* keep reconnecting; the next request races again */
   }
   reconnectRealtime();
-  notifyRouteRecovered();
 }
 
 export function resyncSupabaseTransport() {
@@ -284,11 +290,19 @@ export function installNetworkGuards() {
     /* both paths down; the next request races again */
   });
   window.addEventListener("offline", () => {
+    if (netTimer) {
+      clearTimeout(netTimer);
+      netTimer = null;
+    }
     clearChosenRoute();
     notifyReconnecting();
   });
   window.addEventListener("online", () => {
-    void recoverSupabaseRoute();
+    if (netTimer) clearTimeout(netTimer);
+    netTimer = setTimeout(() => {
+      netTimer = null;
+      void recoverSupabaseRoute();
+    }, 1_500);
   });
 }
 
@@ -308,18 +322,49 @@ function isIdempotent(method: string) {
 async function fetchKnown(
   target: string,
   init: RequestInit,
+  timeoutMs: number,
   callerSignal?: AbortSignal
 ): Promise<Response> {
-  const response = await fetchOnce(target, init, RACE_MS, callerSignal);
+  const response = await fetchOnce(target, init, timeoutMs, callerSignal);
   if (isBadGateway(response)) {
     throw new Error(`upstream ${response.status}`);
   }
   return response;
 }
 
+async function fetchOneThenOther(
+  firstUrl: string,
+  secondUrl: string,
+  firstRoute: "direct" | "proxy",
+  init: RequestInit,
+  callerSignal?: AbortSignal
+): Promise<Response> {
+  try {
+    const response = await fetchKnown(
+      firstUrl,
+      init,
+      REQUEST_MS,
+      callerSignal
+    );
+    rememberRoute(firstRoute);
+    return response;
+  } catch (error) {
+    if (callerAborted(callerSignal)) throw error;
+    const response = await fetchKnown(
+      secondUrl,
+      init,
+      REQUEST_MS,
+      callerSignal
+    );
+    rememberRoute(firstRoute === "direct" ? "proxy" : "direct");
+    return response;
+  }
+}
+
 /**
- * Happy Eyeballs in 1s: GET races both origins at once. Mutations go to the
- * last winner only (never double-POST), then fail over once.
+ * Happy Eyeballs: GET races both origins. Mutations go to the last winner
+ * only (never double-POST), then fail over once. The 1s/3s budget is only
+ * for choosing a path — login and profile use a full request timeout.
  */
 async function fetchWithFallback(
   input: RequestInfo | URL,
@@ -339,7 +384,7 @@ async function fetchWithFallback(
   const method = String(requestInit.method || "GET").toUpperCase();
 
   if (!canFallback) {
-    return fetchOnce(url, requestInit, RACE_MS, callerSignal);
+    return fetchOnce(url, requestInit, REQUEST_MS, callerSignal);
   }
 
   if (callerAborted(callerSignal)) {
@@ -351,35 +396,53 @@ async function fetchWithFallback(
     const directAbort = new AbortController();
     bindCallerAbort(proxyAbort, callerSignal);
     bindCallerAbort(directAbort, callerSignal);
-    const winner = await raceFirst(
-      fetchKnown(url, requestInit, proxyAbort.signal).then((response) => ({
-        response,
-        route: "proxy" as const,
-      })),
-      fetchKnown(directUrl, requestInit, directAbort.signal).then(
-        (response) => ({
+    try {
+      const winner = await raceFirst(
+        fetchKnown(url, requestInit, raceBudget(), proxyAbort.signal).then(
+          (response) => ({
+            response,
+            route: "proxy" as const,
+          })
+        ),
+        fetchKnown(
+          directUrl,
+          requestInit,
+          raceBudget(),
+          directAbort.signal
+        ).then((response) => ({
           response,
           route: "direct" as const,
-        })
-      )
-    );
-    if (winner.route === "direct") proxyAbort.abort();
-    else directAbort.abort();
-    rememberRoute(winner.route);
-    return winner.response;
+        }))
+      );
+      if (winner.route === "direct") proxyAbort.abort();
+      else directAbort.abort();
+      rememberRoute(winner.route);
+      return winner.response;
+    } catch {
+      proxyAbort.abort();
+      directAbort.abort();
+      return fetchOneThenOther(
+        url,
+        directUrl,
+        "proxy",
+        requestInit,
+        callerSignal
+      );
+    }
   }
 
-  const dest = getChosenRoute() ?? (await chooseRoute());
+  const dest =
+    getChosenRoute() ??
+    (await chooseRoute().catch(() => "proxy" as const));
   const firstUrl = dest === "direct" ? directUrl : url;
   const secondUrl = dest === "direct" ? url : directUrl;
-  try {
-    return await fetchKnown(firstUrl, requestInit, callerSignal);
-  } catch (error) {
-    if (callerAborted(callerSignal)) throw error;
-    const response = await fetchKnown(secondUrl, requestInit, callerSignal);
-    rememberRoute(dest === "direct" ? "proxy" : "direct");
-    return response;
-  }
+  return fetchOneThenOther(
+    firstUrl,
+    secondUrl,
+    dest,
+    requestInit,
+    callerSignal
+  );
 }
 
 function FallbackWebSocket(
@@ -388,19 +451,14 @@ function FallbackWebSocket(
 ) {
   const ws = new WebSocket(mapRealtimeUrl(String(url)), protocols);
   const timer = setTimeout(() => {
-    if (ws.readyState !== WebSocket.CONNECTING) return;
-    const now = Date.now();
-    if (now - lastOriginFlipAt > 1_000) {
-      lastOriginFlipAt = now;
-      if (isProxyUnreachable()) markProxyReachable();
-      else markProxyUnreachable();
+    if (ws.readyState === WebSocket.CONNECTING) {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
     }
-    try {
-      ws.close();
-    } catch {
-      /* ignore */
-    }
-  }, RACE_MS);
+  }, WS_CONNECT_MS);
   ws.addEventListener("open", () => clearTimeout(timer));
   ws.addEventListener("close", () => clearTimeout(timer));
   ws.addEventListener("error", () => clearTimeout(timer));

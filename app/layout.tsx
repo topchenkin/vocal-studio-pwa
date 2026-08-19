@@ -57,10 +57,6 @@ export const viewport: Viewport = {
 };
 
 const BOOT_SCRIPT = `(function(){
-  function ios(){
-    var ua=navigator.userAgent||"";
-    return /iP(hone|ad|od)/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
-  }
   function log(m){
     try{
       var a=JSON.parse(sessionStorage.getItem("uvs-logs")||"[]");
@@ -79,25 +75,24 @@ const BOOT_SCRIPT = `(function(){
     document.documentElement.style.colorScheme="dark";
     document.documentElement.style.backgroundColor="#0a0a0f";
   }
-  var VER="21";
+  var VER="22";
   try{
-    var kill=ios()||localStorage.getItem("uvs-sw-bust")!==VER;
-    if(kill){
-      var bust=false;
+    if(localStorage.getItem("uvs-sw-bust")!==VER){
+      var hadController=Boolean(navigator.serviceWorker&&navigator.serviceWorker.controller);
       var jobs=[];
       if(navigator.serviceWorker){
         jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){
-          if(rs.length){bust=true;return Promise.all(rs.map(function(r){return r.unregister()}));}
+          return Promise.all(rs.map(function(r){return r.unregister()}));
         }));
       }
       if(typeof caches!=="undefined"){
         jobs.push(caches.keys().then(function(keys){
-          if(keys.length){bust=true;return Promise.all(keys.map(function(k){return caches.delete(k)}));}
+          return Promise.all(keys.map(function(k){return caches.delete(k)}));
         }));
       }
       Promise.all(jobs).then(function(){
         try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}
-        if(bust) location.reload();
+        if(hadController) location.reload();
       }).catch(function(err){
         log(err);
         try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}
