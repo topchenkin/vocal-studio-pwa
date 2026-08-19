@@ -135,26 +135,34 @@ function isBadGateway(response: Response): boolean {
   return PROXY_BAD_STATUS.has(response.status);
 }
 
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
 function reconnectRealtime() {
-  try {
-    supabase.realtime.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    supabase.realtime.connect();
-  } catch {
-    /* ignore */
-  }
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    try {
+      supabase.realtime.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      supabase.realtime.connect();
+    } catch {
+      /* ignore */
+    }
+  }, 80);
 }
 
-function stickToDirect() {
+function stickToDirect(snapshotDirect: boolean) {
+  if (snapshotDirect !== isProxyUnreachable()) return;
   if (isProxyUnreachable()) return;
   markProxyUnreachable();
   reconnectRealtime();
 }
 
-function stickToProxy() {
+function stickToProxy(snapshotDirect: boolean) {
+  if (snapshotDirect !== isProxyUnreachable()) return;
   if (!isProxyUnreachable()) return;
   markProxyReachable();
   reconnectRealtime();
@@ -162,7 +170,9 @@ function stickToProxy() {
 
 /**
  * One supabase-js client. Prefer the current working origin and only switch
- * when that origin fails. Never flip back on a timer or /__health probe.
+ * when that origin fails AND the fallback actually works. Concurrent requests
+ * in this tab must not undo each other; other tabs/devices never share this
+ * origin flag (sessionStorage). Never flip on a timer or /__health probe.
  */
 async function fetchWithFallback(
   input: RequestInfo | URL,
@@ -203,18 +213,22 @@ async function fetchWithFallback(
     return response;
   } catch (error) {
     if (callerAborted(callerSignal)) throw error;
-    const response = await fetchOnce(
-      secondUrl,
-      requestInit,
-      secondTimeout,
-      callerSignal
-    );
-    if (isBadGateway(response)) {
+    try {
+      const response = await fetchOnce(
+        secondUrl,
+        requestInit,
+        secondTimeout,
+        callerSignal
+      );
+      if (isBadGateway(response)) {
+        throw error;
+      }
+      if (preferDirect) stickToProxy(preferDirect);
+      else stickToDirect(preferDirect);
+      return response;
+    } catch {
       throw error;
     }
-    if (preferDirect) stickToProxy();
-    else stickToDirect();
-    return response;
   }
 }
 

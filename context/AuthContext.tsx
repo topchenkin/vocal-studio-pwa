@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { User } from "@supabase/supabase-js";
+import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import {
   mapBackendError,
@@ -198,7 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user || isMockAdmin) return;
 
     const channel = supabase
-      .channel(`profile-live:${user.id}`)
+      .channel(realtimeTopic(`profile-live:${user.id}`))
       .on(
         "postgres_changes",
         {
@@ -298,7 +299,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     sessionStorage.removeItem(MOCK_ADMIN_KEY);
     setIsMockAdmin(false);
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     setUser(null);
     setProfile(null);
     setProfileError(null);

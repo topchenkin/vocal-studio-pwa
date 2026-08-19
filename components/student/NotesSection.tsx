@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { BookOpen, MessageSquare } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { LessonHomework } from "@/types";
 
@@ -27,7 +28,7 @@ export default function NotesSection() {
     if (!user) return;
 
     const channel = supabase
-      .channel(`homework:${user.id}`)
+      .channel(realtimeTopic(`homework:${user.id}`))
       .on(
         "postgres_changes",
         {

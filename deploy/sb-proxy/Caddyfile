@@ -45,5 +45,13 @@ www.uniquevocal.ru, uniquevocal.ru {
 sb.uniquevocal.ru {
 	import tls12
 	header Alt-Svc "clear"
-	reverse_proxy 127.0.0.1:8787
+	reverse_proxy 127.0.0.1:8787 {
+		flush_interval -1
+		transport http {
+			versions 1.1
+			read_timeout 0
+			write_timeout 0
+			dial_timeout 5s
+		}
+	}
 }

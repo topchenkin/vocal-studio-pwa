@@ -13,6 +13,7 @@ import {
   coerceChatMime,
   extensionForChatMedia,
 } from "@/lib/media-mime";
+import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
 
@@ -91,7 +92,7 @@ export function useChatMessages(studentId: string | null) {
     if (!studentId || isMockAdmin) return;
 
     const channel = supabase
-      .channel(`chat:${studentId}`)
+      .channel(realtimeTopic(`chat:${studentId}`))
       .on(
         "postgres_changes",
         {

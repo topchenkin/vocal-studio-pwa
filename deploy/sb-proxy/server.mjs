@@ -8,9 +8,13 @@
  *   node deploy/sb-proxy/server.mjs
  *
  * Bind 127.0.0.1 and put Caddy (HTTPS) in front. Do not expose this raw.
+ *
+ * Clients are isolated: aborting one request must not keep an upstream
+ * socket, and large storage/audio bodies are streamed — never buffered in
+ * RAM for every concurrent student.
  */
 import { createServer } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { Agent, request as httpsRequest } from "node:https";
 import tls from "node:tls";
 import {
   brotliDecompressSync,
@@ -31,6 +35,14 @@ const ALLOWED_ORIGINS = new Set(
     .map((s) => s.trim())
     .filter(Boolean)
 );
+const JSON_REWRITE_MAX = 2 * 1024 * 1024;
+
+const upstreamAgent = new Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 32,
+  timeout: 120_000,
+});
 
 const HOP = new Set([
   "connection",
@@ -116,6 +128,16 @@ function rewriteBody(text) {
   return text.split(SUPABASE_ORIGIN).join(PROXY_PUBLIC_ORIGIN);
 }
 
+function shouldRewriteBody(contentType) {
+  return /json|javascript|xml|text\/plain/i.test(String(contentType || ""));
+}
+
+function fail(req, res, status, message) {
+  if (res.headersSent) return;
+  res.writeHead(status, corsHeaders(req));
+  res.end(message);
+}
+
 function proxyHttp(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders(req));
@@ -151,35 +173,62 @@ function proxyHttp(req, res) {
       path: req.url || "/",
       method: req.method,
       headers,
+      agent: upstreamAgent,
     },
     (incoming) => {
+      const contentType = String(incoming.headers["content-type"] || "");
+      if (!shouldRewriteBody(contentType)) {
+        const outHeaders = sanitizeResponseHeaders(incoming.headers, req);
+        const len = incoming.headers["content-length"];
+        if (len) outHeaders["content-length"] = String(len);
+        res.writeHead(incoming.statusCode || 502, outHeaders);
+        incoming.pipe(res);
+        incoming.on("error", () => {
+          if (!res.writableEnded) res.destroy();
+        });
+        return;
+      }
+
       const chunks = [];
-      incoming.on("data", (chunk) => chunks.push(chunk));
+      let total = 0;
+      incoming.on("data", (chunk) => {
+        total += chunk.length;
+        if (total > JSON_REWRITE_MAX) {
+          incoming.destroy();
+          fail(req, res, 502, "upstream body too large to rewrite");
+          return;
+        }
+        chunks.push(chunk);
+      });
       incoming.on("end", () => {
+        if (res.headersSent) return;
         const raw = Buffer.concat(chunks);
         const decoded = decodeUpstreamBody(
           raw,
           incoming.headers["content-encoding"]
         );
-        const contentType = String(incoming.headers["content-type"] || "");
-        const rewrite = /json|javascript|xml|text\/plain/i.test(contentType);
-        const body = rewrite
-          ? rewriteBody(decoded.toString("utf8"))
-          : decoded;
+        const body = rewriteBody(decoded.toString("utf8"));
         const outHeaders = sanitizeResponseHeaders(incoming.headers, req);
         outHeaders["content-length"] = String(Buffer.byteLength(body));
         res.writeHead(incoming.statusCode || 502, outHeaders);
         res.end(body);
       });
+      incoming.on("error", () => fail(req, res, 502, "upstream read failed"));
     }
   );
 
+  upstream.setTimeout(120_000, () => upstream.destroy());
   upstream.on("error", (err) => {
     console.error("[sb-proxy]", err.message);
-    if (!res.headersSent) {
-      res.writeHead(502, corsHeaders(req));
-      res.end("Supabase upstream failed");
-    }
+    fail(req, res, 502, "Supabase upstream failed");
+  });
+
+  const abortUpstream = () => {
+    if (!res.writableEnded) upstream.destroy();
+  };
+  req.on("aborted", abortUpstream);
+  res.on("close", () => {
+    if (!res.writableEnded) abortUpstream();
   });
 
   req.pipe(upstream);
@@ -206,11 +255,14 @@ function proxyWs(req, socket, head) {
       socket.pipe(proxy);
     }
   );
+  proxy.setTimeout(0);
   proxy.on("error", () => socket.destroy());
   socket.on("error", () => proxy.destroy());
+  socket.on("close", () => proxy.destroy());
 }
 
 const server = createServer(proxyHttp);
+server.maxConnections = 500;
 server.on("upgrade", proxyWs);
 
 server.listen(PORT, BIND, () => {

@@ -3,11 +3,11 @@
  * NEXT_PUBLIC_SUPABASE_URL stays the real https://<ref>.supabase.co
  * (needed to rewrite signed storage URLs and as a VPN fallback).
  *
- * Path is sticky in memory for this page load:
+ * Origin is sticky per tab via sessionStorage (never localStorage):
  *   RU / no VPN → proxy (sb.uniquevocal.ru)
  *   VPN → after the first proxy failure, stay on supabase.co
- * Switch back only when the current origin fails (VPN off, supabase.co blocked).
- * Do not probe /__health on a timer — that flapped VPN every few seconds.
+ * Two devices / two tabs keep independent paths even on the same account.
+ * Switch back only when the current origin fails. Do not probe /__health.
  */
 
 export const SUPABASE_PROJECT_URL = (
@@ -18,7 +18,27 @@ export const SUPABASE_PROXY_URL = (
   process.env.NEXT_PUBLIC_SUPABASE_PROXY_URL || ""
 ).replace(/\/$/, "");
 
-let useDirect = false;
+const ORIGIN_KEY = "uvs-sb-origin";
+
+function readStoredOrigin(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(ORIGIN_KEY) === "direct";
+  } catch {
+    return false;
+  }
+}
+
+let useDirect = readStoredOrigin();
+
+function persistOrigin() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(ORIGIN_KEY, useDirect ? "direct" : "proxy");
+  } catch {
+    /* private mode */
+  }
+}
 
 function browserOrigin() {
   return (
@@ -38,10 +58,12 @@ export function isProxyUnreachable(): boolean {
 
 export function markProxyUnreachable() {
   useDirect = true;
+  persistOrigin();
 }
 
 export function markProxyReachable() {
   useDirect = false;
+  persistOrigin();
 }
 
 function rewriteTo(url: string, dest: string): string {

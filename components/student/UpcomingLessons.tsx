@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import MonthCalendar, { localDateKey } from "@/components/calendar/MonthCalendar";
 import { useAuth } from "@/context/AuthContext";
+import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
 
@@ -59,7 +60,7 @@ export default function UpcomingLessons() {
     }
 
     const channel = supabase
-      .channel(`student-lessons:${user.id}`)
+      .channel(realtimeTopic(`student-lessons:${user.id}`))
       .on(
         "postgres_changes",
         {

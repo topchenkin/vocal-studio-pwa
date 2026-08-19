@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Bell } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
 import type { AppNotification } from "@/types";
 
@@ -144,7 +145,7 @@ export default function NotificationBell() {
     if (!user || isMockAdmin) return;
 
     const channel = supabase
-      .channel(`notifications:${user.id}`)
+      .channel(realtimeTopic(`notifications:${user.id}`))
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications" },
