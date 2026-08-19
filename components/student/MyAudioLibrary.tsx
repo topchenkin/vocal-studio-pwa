@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Music2, Pencil, Trash2, X } from "lucide-react";
+import { Check, Download, Music2, Pencil, Trash2, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
   STUDENT_AUDIO_MAX_TRACKS,
+  audioDownloadName,
   deleteAudioTrack,
+  downloadAudioUrl,
   formatTrackDuration,
   listOwnAudioTracks,
   renameAudioTrack,
@@ -22,6 +24,7 @@ export default function MyAudioLibrary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -89,6 +92,23 @@ export default function MyAudioLibrary() {
       setError(err instanceof Error ? err.message : "Не удалось переименовать");
     } finally {
       setRenaming(false);
+    }
+  };
+
+  const onDownload = async (track: StudentAudioTrack) => {
+    const url = urls[track.id];
+    if (!url || downloadingId) return;
+    setDownloadingId(track.id);
+    setError("");
+    try {
+      await downloadAudioUrl(
+        url,
+        audioDownloadName(track.title, track.mime)
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось скачать");
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -194,6 +214,15 @@ export default function MyAudioLibrary() {
               </div>
               {editingId !== track.id && (
                 <div className="flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={!urls[track.id] || downloadingId === track.id}
+                    onClick={() => void onDownload(track)}
+                    className="rounded-lg p-2 text-studio-muted hover:bg-studio-card hover:text-studio-text disabled:opacity-40"
+                    aria-label="Скачать трек"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => startEdit(track)}

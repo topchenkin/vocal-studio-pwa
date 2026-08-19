@@ -20,7 +20,7 @@ import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const API_TIMEOUT_MS = 90_000;
+const API_TIMEOUT_MS = 240_000;
 
 const STEPS = [
   "1. Загружаем трек…",
@@ -125,7 +125,9 @@ async function separateViaApi(
       : "");
 
   if (!response.ok || !vocalUrl || !minusUrl) {
-    throw new Error("API_UNAVAILABLE");
+    throw new Error(
+      payload.error || "Нейросеть не вернула минусовку и вокал."
+    );
   }
 
   return {
@@ -243,7 +245,21 @@ export default function VocalRemover({ locked = false }: Props) {
             clearResult();
             return;
           }
-          // HTML/404, timeout, or Demucs down — fall through to local split
+          const aborted =
+            (err instanceof DOMException && err.name === "AbortError") ||
+            (err instanceof Error && /abort|timeout/i.test(err.message));
+          if (aborted) {
+            setError(
+              "Нейросеть обрабатывает трек дольше обычного. Попробуйте файл покороче или повторите через минуту."
+            );
+            clearResult();
+            return;
+          }
+          if (err instanceof Error && err.message !== "API_UNAVAILABLE") {
+            setError(err.message);
+            clearResult();
+            return;
+          }
         }
       }
 
@@ -251,7 +267,9 @@ export default function VocalRemover({ locked = false }: Props) {
         const local = await separateLocally(file);
         clearResult();
         setResult(local.tracks);
-        setNotice(local.notice);
+        setNotice(
+          "Нейросеть сейчас недоступна, поэтому минус собран упрощённо на телефоне. Попробуйте ещё раз через пару минут — тогда будет Demucs."
+        );
         setStepIndex(STEPS.length - 1);
       } catch {
         setError(

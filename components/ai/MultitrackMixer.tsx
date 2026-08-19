@@ -21,6 +21,7 @@ import {
   Sparkles,
   Square,
   Trash2,
+  Upload,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
@@ -437,6 +438,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const [mixPeaks, setMixPeaks] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -896,6 +899,55 @@ export default function MultitrackMixer({ locked = false }: Props) {
     stoppingRecRef.current = false;
   };
 
+  const addFromFile = async (file?: File | null) => {
+    if (!file || importing || recordingId) return;
+    if (tracks.length >= MAX_TRACKS) {
+      setError(`Можно добавить не больше ${MAX_TRACKS} дорожек`);
+      return;
+    }
+    setImporting(true);
+    setError("");
+    try {
+      const ctx = await ensureAudioCtx();
+      const buffer = await decodeWithCtx(ctx, file);
+      if (buffer.duration < MIN_CLIP_SEC) {
+        throw new Error("Файл слишком короткий");
+      }
+      const id = crypto.randomUUID();
+      const url = URL.createObjectURL(file);
+      setTracks((current) => {
+        const next: Track[] = [
+          ...current,
+          {
+            id,
+            name: file.name.replace(/\.\w+$/, "") || `Дорожка ${current.length + 1}`,
+            blob: file,
+            url,
+            sourceDurationSec: buffer.duration,
+            peaks: buildPeaks(buffer),
+            buffer,
+            offsetSec: 0,
+            trimStartSec: 0,
+            trimEndSec: buffer.duration,
+            pitchSemitones: 0,
+          },
+        ];
+        setMonitorIds((ids) => [...ids, id]);
+        setSelectedId(id);
+        return next;
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Не удалось прочитать файл. Попробуйте MP3 или WAV."
+      );
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const mixAll = async () => {
     if (tracks.length === 0 || mixing || recordingId) return;
     setMixing(true);
@@ -968,8 +1020,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
         <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed sm:text-sm">
           <li>Наденьте наушники — иначе микрофон поймает эхо колонок.</li>
           <li>
-            Нажмите «Записать первую дорожку» или загрузите минусовку, если
-            она уже есть.
+            Нажмите «Записать первую дорожку» или «Загрузить файл» — минусовку
+            с телефона или компьютера.
           </li>
           <li>
             Линейка сверху — таймлайн. Поставьте курсор туда, откуда хотите
@@ -993,12 +1045,20 @@ export default function MultitrackMixer({ locked = false }: Props) {
         </ol>
       </div>
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.webm"
+        className="hidden"
+        onChange={(event) => void addFromFile(event.target.files?.[0])}
+      />
+
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {!recordingId ? (
           <Button
             fullWidth
             size="lg"
-            disabled={tracks.length >= MAX_TRACKS}
+            disabled={tracks.length >= MAX_TRACKS || importing}
             onPointerDown={() => {
               void ensureAudioCtx();
             }}
@@ -1015,6 +1075,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
             Стоп · {formatTime(playheadSec)}
           </Button>
         )}
+
+        <Button
+          fullWidth
+          size="lg"
+          variant="secondary"
+          disabled={tracks.length >= MAX_TRACKS || busy || importing}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Upload className="h-5 w-5" />
+          {importing ? "Читаем файл…" : "Загрузить файл"}
+        </Button>
 
         <Button
           fullWidth
@@ -1277,7 +1348,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
         {tracks.length === 0 && !recordingId && (
           <div className="rounded-2xl border border-dashed border-studio-border px-4 py-10 text-center text-sm text-studio-muted">
-            Запишите дорожки → подвигайте и обрежьте клипы → «Свести всё».
+            Загрузите минусовку с телефона или компьютера, либо запишите
+            дорожку с микрофона. Потом «Свести всё».
           </div>
         )}
       </div>

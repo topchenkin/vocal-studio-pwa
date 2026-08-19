@@ -27,6 +27,16 @@
 		header Cache-Control "no-store"
 		file_server
 	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8788 {
+			transport http {
+				versions 1.1
+				read_timeout 300s
+				write_timeout 300s
+				dial_timeout 10s
+			}
+		}
+	}
 	handle {
 		header Cache-Control "no-cache"
 		try_files {path} {path}.html {path}/index.html /index.html

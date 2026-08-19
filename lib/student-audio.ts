@@ -136,3 +136,26 @@ export async function saveAudioFromUrl(options: {
     throw new Error(insertError.message);
   }
 }
+
+export function audioDownloadName(title: string, mime?: string | null) {
+  const base =
+    title.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80) || "трек";
+  const ext = mime && /wav/i.test(mime) ? "wav" : "mp3";
+  return `${base}.${ext}`;
+}
+
+export async function downloadAudioUrl(url: string, filename: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error("Не удалось скачать трек");
+  }
+  const blob = await response.blob();
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(href), 2_000);
+}
