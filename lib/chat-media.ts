@@ -10,7 +10,7 @@ type MediaMessage = {
   sender_name: string;
   message: string;
   created_at: string;
-  message_type?: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | null;
+  message_type?: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | "vocal_report" | null;
   media_path?: string | null;
   media_duration_sec?: number | null;
   edited_at?: string | null;

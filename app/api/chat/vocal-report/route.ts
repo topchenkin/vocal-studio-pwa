@@ -6,8 +6,8 @@ import { getRequestUser } from "@/lib/server-auth";
 export const runtime = "nodejs";
 
 /**
- * Dedicated endpoint so ANY authenticated student can send a vocal-test report
- * to the teacher chat — even if app_sub_tier is "none" (chat paywall).
+ * Dedicated Next endpoint — unused on the static VPS host (Caddy `/api` is
+ * the AI service). The PWA sends reports via `sendVocalReportToChat`.
  */
 export async function POST(request: NextRequest) {
   try {

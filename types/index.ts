@@ -151,7 +151,7 @@ export interface ChatMessage {
   sender_name: string;
   message: string;
   created_at: string;
-  message_type: "text" | "voice" | "image" | "sticker" | "video" | "announcement";
+  message_type: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | "vocal_report";
   media_path: string | null;
   media_mime: string | null;
   media_duration_sec: number | null;
@@ -182,7 +182,7 @@ export interface GroupChatMessage {
   sender_name: string;
   message: string;
   created_at: string;
-  message_type: "text" | "voice" | "image" | "sticker" | "video" | "announcement";
+  message_type: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | "vocal_report";
   media_path: string | null;
   media_mime: string | null;
   media_duration_sec: number | null;
@@ -227,6 +227,22 @@ export interface StudentAudioTrack {
   storage_path: string;
   mime: string;
   size_bytes: number;
+  created_at: string;
+}
+
+export interface VocalTestResult {
+  [key: string]: unknown;
+  id: string;
+  user_id: string;
+  mode: "note" | "scale";
+  target_label: string;
+  duration_sec: number;
+  overall_score: number;
+  pitch_accuracy: number;
+  tone_stability: number;
+  breath_control: number;
+  too_quiet: boolean;
+  payload: Record<string, unknown>;
   created_at: string;
 }
 
@@ -527,6 +543,25 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Pick<StudentAudioTrack, "title">>;
+        Relationships: [];
+      };
+      vocal_test_results: {
+        Row: VocalTestResult;
+        Insert: {
+          id?: string;
+          user_id: string;
+          mode: VocalTestResult["mode"];
+          target_label: string;
+          duration_sec: number;
+          overall_score: number;
+          pitch_accuracy: number;
+          tone_stability: number;
+          breath_control: number;
+          too_quiet?: boolean;
+          payload?: Record<string, unknown>;
+          created_at?: string;
+        };
+        Update: Partial<Pick<VocalTestResult, "payload">>;
         Relationships: [];
       };
     };

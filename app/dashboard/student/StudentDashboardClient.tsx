@@ -7,6 +7,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SubscriptionStatus from "@/components/student/SubscriptionStatus";
 import UpcomingLessons from "@/components/student/UpcomingLessons";
 import NotesSection from "@/components/student/NotesSection";
+import VocalProgressSection from "@/components/student/VocalProgressSection";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import StudentNav from "@/components/student/StudentNav";
@@ -176,6 +177,7 @@ export default function StudentDashboardClient() {
                   </p>
                   <NotesSection />
                 </section>
+                <VocalProgressSection />
               </div>
             )}
             {activeTab === "lessons" && <UpcomingLessons />}

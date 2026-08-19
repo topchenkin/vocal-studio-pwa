@@ -39,7 +39,7 @@ export interface ChatMessage {
   senderName: string;
   text: string;
   createdAt: string;
-  messageType?: "text" | "voice" | "image" | "sticker" | "video" | "announcement";
+  messageType?: "text" | "voice" | "image" | "sticker" | "video" | "announcement" | "vocal_report";
   mediaUrl?: string | null;
   mediaDurationSec?: number | null;
   stickerId?: string | null;

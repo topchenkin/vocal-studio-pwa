@@ -31,6 +31,8 @@ import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers
 import type { ChatMessage, User } from "@/lib/types";
 import { formatTime } from "@/lib/storage";
 import MediaAudio from "@/components/media/MediaAudio";
+import VocalReportCard from "@/components/ai/VocalReportCard";
+import { parseVocalReportPayload } from "@/lib/vocal-report-payload";
 
 const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
@@ -340,6 +342,9 @@ export default function ChatWindow({
             const sticker = msg.stickerId ? getSticker(msg.stickerId) : null;
             const isAnnouncement = msg.messageType === "announcement";
             const isDeleted = Boolean(msg.deletedAt);
+            const vocalReport = !isDeleted
+              ? parseVocalReportPayload(msg.text)
+              : null;
             const canManage =
               !disabled &&
               !isAnnouncement &&
@@ -357,7 +362,9 @@ export default function ChatWindow({
                 }`}
               >
                 <div
-                  className={`relative min-w-0 max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  className={`relative min-w-0 rounded-2xl px-4 py-2.5 ${
+                    vocalReport ? "w-full max-w-sm" : "max-w-[80%]"
+                  } ${
                     isAnnouncement
                       ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
                       : isOwn
@@ -409,6 +416,8 @@ export default function ChatWindow({
                         </p>
                       ) : null}
                     </div>
+                  ) : vocalReport ? (
+                    <VocalReportCard payload={vocalReport} compact />
                   ) : msg.messageType === "voice" && msg.mediaUrl ? (
                     <div className="space-y-1">
                       <MediaAudio controls src={msg.mediaUrl} className="max-w-full" />
@@ -428,7 +437,8 @@ export default function ChatWindow({
                   {canManage && (
                     <div className="mt-1.5 flex gap-1 opacity-80 sm:absolute sm:-top-2 sm:right-2 sm:mt-0 sm:rounded-lg sm:bg-studio-bg/90 sm:p-1 sm:opacity-0 sm:ring-1 sm:ring-studio-border sm:group-hover:opacity-100">
                       {onEdit &&
-                        (!msg.messageType || msg.messageType === "text") && (
+                        (!msg.messageType || msg.messageType === "text") &&
+                        !vocalReport && (
                           <button
                             type="button"
                             className="rounded-md p-1.5 text-studio-muted hover:text-studio-text"

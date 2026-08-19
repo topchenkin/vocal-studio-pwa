@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  Cat,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -17,8 +16,8 @@ import {
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Link from "next/link";
+import VocalReportCard from "@/components/ai/VocalReportCard";
 import { useAuth } from "@/context/AuthContext";
-import { getChatSessionToken } from "@/lib/chat-media";
 import {
   describeNote,
   frequencyFromMidi,
@@ -29,13 +28,15 @@ import {
 } from "@/lib/pitch";
 import {
   buildVocalReport,
-  formatReportChatMessage,
-  mentorFeedback,
   targetNoteAtTime,
-  TEST_IN_TUNE_CENTS,
   type VocalReport,
   type VocalTestMode,
 } from "@/lib/vocal-metrics";
+import { toVocalReportPayload } from "@/lib/vocal-report-payload";
+import {
+  saveVocalTestResult,
+  sendVocalReportToChat,
+} from "@/lib/vocal-test-results";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
@@ -45,7 +46,7 @@ const IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
 const SCALE_STEPS = ["C4", "E4", "G4"] as const;
 
 export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const analyzer = useVocalAnalyzer();
 
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
@@ -53,9 +54,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const [report, setReport] = useState<VocalReport | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [sendingReport, setSendingReport] = useState(false);
+  const [sentOk, setSentOk] = useState(false);
   const [sendNote, setSendNote] = useState("");
-
-  const chartRef = useRef<HTMLCanvasElement>(null);
 
   const { listening, testing, testProgress, error, live } = analyzer;
 
@@ -80,6 +80,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
   const startProfessionalTest = async () => {
     setSendNote("");
+    setSentOk(false);
     setReport(null);
     const modeAtStart = testMode;
     const targetAtStart = targetNote;
@@ -94,94 +95,50 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       );
       setReport(built);
       setReportOpen(true);
+      if (!built.tooQuiet) {
+        void persistAndSend(built);
+      }
     } catch {
       // analyzer surfaces a user-facing error via `analyzer.error`
     }
   };
 
-  useEffect(() => {
-    if (!reportOpen || !report || !chartRef.current) return;
-    const canvas = chartRef.current;
-    const g = canvas.getContext("2d");
-    if (!g) return;
-    const { width, height } = canvas;
-    g.clearRect(0, 0, width, height);
-
-    // grid
-    g.strokeStyle = "rgba(255,255,255,0.08)";
-    g.lineWidth = 1;
-    for (const yCents of [-50, -25, 0, 25, 50]) {
-      const y = height / 2 - (yCents / 60) * (height / 2);
-      g.beginPath();
-      g.moveTo(0, y);
-      g.lineTo(width, y);
-      g.stroke();
-    }
-
-    // in-tune band (pro-test window)
-    const yTop = height / 2 - (TEST_IN_TUNE_CENTS / 60) * (height / 2);
-    const yBot = height / 2 + (TEST_IN_TUNE_CENTS / 60) * (height / 2);
-    g.fillStyle = "rgba(52, 211, 153, 0.12)";
-    g.fillRect(0, yTop, width, yBot - yTop);
-
-    const voiced = report.samples.filter((s) => s.centsToTarget !== null);
-    if (voiced.length === 0) return;
-
-    g.strokeStyle = "#c084fc";
-    g.lineWidth = 2;
-    g.beginPath();
-    voiced.forEach((sample, index) => {
-      const x = (index / Math.max(1, voiced.length - 1)) * width;
-      const centsVal = Math.max(-60, Math.min(60, sample.centsToTarget ?? 0));
-      const y = height / 2 - (centsVal / 60) * (height / 2);
-      if (index === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
-    });
-    g.stroke();
-  }, [report, reportOpen]);
-
-  const sendReportToTeacher = async () => {
-    if (!report || !user || sendingReport) return;
+  const persistAndSend = async (built: VocalReport) => {
+    if (!user || isAdmin || built.tooQuiet || sendingReport) return;
     setSendingReport(true);
     setSendNote("");
+    let saved = false;
     try {
-      const token = await getChatSessionToken();
-      if (!token) {
-        setSendNote("Сессия истекла. Войдите снова.");
-        return;
-      }
-      const message = `${formatReportChatMessage(report)}\n\n${mentorFeedback(
-        report.overallScore,
-        profile?.cat_level
-      )}`.slice(0, 2000);
-      const response = await fetch("/api/chat/vocal-report", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message,
-          overallScore: report.overallScore,
-        }),
+      await saveVocalTestResult(user.id, built);
+      saved = true;
+      window.dispatchEvent(new Event("uvs-vocal-test-saved"));
+    } catch (err) {
+      setSendNote(
+        err instanceof Error
+          ? err.message
+          : "Не удалось сохранить результат в кабинете"
+      );
+    }
+    try {
+      await sendVocalReportToChat({
+        studentId: user.id,
+        senderId: user.id,
+        senderName: profile?.full_name || "Ученик",
+        report: built,
       });
-      const raw = await response.text();
-      let payload: { error?: string } = {};
-      try {
-        payload = JSON.parse(raw) as { error?: string };
-      } catch {
-        setSendNote(
-          `Сервер вернул ошибку (${response.status}). Попробуйте ещё раз.`
-        );
-        return;
-      }
-      if (!response.ok) {
-        setSendNote(payload.error ?? `Не удалось отправить отчёт (${response.status})`);
-        return;
-      }
-      setSendNote("Отчёт отправлен преподавателю в чат.");
-    } catch {
-      setSendNote("Не удалось отправить отчёт. Проверьте интернет и войдите снова.");
+      setSentOk(true);
+      setSendNote(
+        saved
+          ? "Результат сохранён в кабинете и отправлен преподавателю."
+          : "Отчёт отправлен преподавателю. Сохранение в кабинете не удалось — выполните SQL vocal-test-results в Supabase."
+      );
+    } catch (err) {
+      setSentOk(false);
+      const chatError =
+        err instanceof Error ? err.message : "Не удалось отправить отчёт в чат";
+      setSendNote(
+        saved ? `Результат сохранён в кабинете. ${chatError}` : chatError
+      );
     } finally {
       setSendingReport(false);
     }
@@ -193,9 +150,6 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   }, [cents, zone]);
 
   const liveTargetHz = frequencyFromMidi(midiFromNoteLabel(targetNote));
-  const mentor = report
-    ? mentorFeedback(report.overallScore, profile?.cat_level)
-    : "";
 
   const cycleTargetNote = (dir: -1 | 1) => {
     const list = PRACTICE_NOTES as readonly string[];
@@ -536,95 +490,40 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
         {report && !report.tooQuiet && (
           <div className="space-y-5">
-            <div className="rounded-2xl bg-gradient-to-br from-studio-accent/20 via-studio-surface to-amber-500/10 p-5 text-center ring-1 ring-studio-border">
-              <p className="text-xs uppercase tracking-wide text-studio-muted">
-                Overall Score
-              </p>
-              <p className="mt-1 font-display text-5xl font-semibold">
-                {report.overallScore}
-                <span className="text-2xl text-studio-muted"> / 100</span>
-              </p>
-              <p className="mt-2 text-sm text-studio-muted">
-                {report.mode === "scale"
-                  ? "Гамма C4–E4–G4"
-                  : `Нота ${report.targetLabel}`}{" "}
-                · {report.durationSec}с · {report.samples.length} замеров
-              </p>
-            </div>
-
-            <MetricBar label="Точность нот" value={report.pitchAccuracy} />
-            <MetricBar label="Стабильность тона" value={report.toneStability} />
-            <MetricBar label="Удержание дыхания" value={report.breathControl} />
-
-            <div className="rounded-2xl bg-studio-bg/70 p-4 ring-1 ring-studio-border">
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                <Cat className="h-4 w-4 text-amber-300" />
-                Отзыв Котика-наставника
-              </div>
-              <p className="text-sm leading-relaxed text-studio-muted">
-                {mentor}
-              </p>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-studio-muted">
-                График девиации центов
-              </p>
-              <div className="overflow-hidden rounded-xl bg-studio-bg ring-1 ring-studio-border">
-                <canvas
-                  ref={chartRef}
-                  width={560}
-                  height={160}
-                  className="h-36 w-full"
-                />
-              </div>
-              <p className="mt-1 text-[11px] text-studio-muted">
-                Зелёная полоса — зона теста ±{TEST_IN_TUNE_CENTS}¢
-              </p>
-            </div>
-
-            <Button
-              fullWidth
-              size="lg"
-              disabled={sendingReport}
-              onClick={() => void sendReportToTeacher()}
-            >
-              <Send className="h-4 w-4" />
-              {sendingReport
-                ? "Отправляем…"
-                : "Отправить отчет в чат преподавателю"}
-            </Button>
-            {sendNote && (
-              <p
-                className={`text-center text-sm ${
-                  sendNote.includes("отправлен")
-                    ? "text-emerald-400"
-                    : "text-red-400"
-                }`}
-              >
-                {sendNote}
-              </p>
+            <VocalReportCard
+              payload={toVocalReportPayload(report)}
+              catLevel={profile?.cat_level}
+            />
+            {!isAdmin && (
+              <>
+                {sentOk ? (
+                  <p className="text-center text-sm text-emerald-400">
+                    {sendNote ||
+                      "Результат сохранён в кабинете и отправлен преподавателю."}
+                  </p>
+                ) : (
+                  <Button
+                    fullWidth
+                    size="lg"
+                    disabled={sendingReport}
+                    onClick={() => void persistAndSend(report)}
+                  >
+                    <Send className="h-4 w-4" />
+                    {sendingReport
+                      ? "Отправляем…"
+                      : sendNote
+                        ? "Повторить отправку в чат"
+                        : "Отправить отчет в чат преподавателю"}
+                  </Button>
+                )}
+                {!sentOk && sendNote && (
+                  <p className="text-center text-sm text-red-400">{sendNote}</p>
+                )}
+              </>
             )}
           </div>
         )}
       </Modal>
     </section>
-  );
-}
-
-function MetricBar({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <div className="mb-1 flex justify-between text-sm">
-        <span>{label}</span>
-        <span className="font-semibold text-studio-accent-light">{value}%</span>
-      </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-studio-bg">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-studio-accent to-violet-400 transition-all"
-          style={{ width: `${value}%` }}
-        />
-      </div>
-    </div>
   );
 }
