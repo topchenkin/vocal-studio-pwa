@@ -14,7 +14,9 @@ import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
 } from "@/components/dashboard/CabinetTabLink";
+import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { reloadCabinet } from "@/lib/reload-app";
 
 const TABS = ["home", "notes", "chat", "lessons", "audio"] as const;
 type TabId = (typeof TABS)[number];
@@ -37,6 +39,7 @@ export default function StudentDashboardClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>("home");
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     if (loading) return;
@@ -90,22 +93,30 @@ export default function StudentDashboardClient() {
         bottomInset
       >
         <StudentNav />
-        <div className="rounded-2xl bg-red-500/10 p-5 ring-1 ring-red-500/30">
-          <p className="font-medium text-red-300">
+        <div className="rounded-2xl bg-studio-card p-5 ring-1 ring-studio-border">
+          <p className="font-medium text-studio-text">
             {backendError ?? profileError ?? "Профиль ученика отсутствует"}
           </p>
-          <p className="mt-2 text-sm text-studio-muted">
-            {backendError
-              ? "Кабинет не может загрузиться, пока браузер не достучится до supabase.co."
-              : "После выполнения обновлённого supabase-schema.sql профиль будет создан автоматически из auth.users."}
-          </p>
-          <button
-            type="button"
-            onClick={() => void refreshProfile()}
-            className="mt-4 rounded-xl bg-studio-accent px-4 py-2.5 text-sm font-medium text-white"
+          {!backendError && (
+            <p className="mt-2 text-sm text-studio-muted">
+              После выполнения обновлённого supabase-schema.sql профиль будет
+              создан автоматически из auth.users.
+            </p>
+          )}
+          <Button
+            className="mt-4 min-h-11"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true);
+              if (backendError) {
+                reloadCabinet();
+                return;
+              }
+              void refreshProfile().finally(() => setRetrying(false));
+            }}
           >
-            Повторить загрузку
-          </button>
+            {retrying ? "Подключаем…" : "Повторить подключение"}
+          </Button>
         </div>
       </DashboardLayout>
     );

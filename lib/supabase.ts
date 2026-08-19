@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import {
+  clearOriginPreference,
   getBrowserSupabaseUrl,
   isProxyUnreachable,
   mapRealtimeUrl,
@@ -14,8 +15,10 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const PROXY_TIMEOUT_MS = 5_000;
-const DIRECT_TIMEOUT_MS = 10_000;
+const PROXY_TIMEOUT_MS = 4_000;
+const DIRECT_TIMEOUT_MS = 6_000;
+const HEDGE_MS = 350;
+const REALTIME_CONNECT_MS = 2_500;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -110,6 +113,25 @@ function callerAborted(signal?: AbortSignal): boolean {
   return Boolean(signal?.aborted);
 }
 
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const id = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(id);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * iOS Safari often ignores AbortController while a TLS handshake is stuck
+ * (VPN on/off). Reject on a timer even if fetch() never settles.
+ */
 async function fetchOnce(
   url: string,
   init: RequestInit,
@@ -120,13 +142,29 @@ async function fetchOnce(
     throw callerSignal.reason ?? new DOMException("Aborted", "AbortError");
   }
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const onAbort = () => controller.abort();
   callerSignal?.addEventListener("abort", onAbort, { once: true });
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await new Promise<Response>((resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new Error("timeout"));
+      }, timeoutMs);
+      fetch(url, { ...init, signal: controller.signal }).then(
+        (response) => {
+          if (timeoutId) clearTimeout(timeoutId);
+          resolve(response);
+        },
+        (error) => {
+          if (timeoutId) clearTimeout(timeoutId);
+          reject(error);
+        }
+      );
+    });
   } finally {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     callerSignal?.removeEventListener("abort", onAbort);
   }
 }
@@ -168,11 +206,42 @@ function stickToProxy(snapshotDirect: boolean) {
   reconnectRealtime();
 }
 
+type OriginAttempt = { response: Response; fromPrimary: boolean };
+
+function firstSettledOk(
+  primary: Promise<OriginAttempt>,
+  secondary: Promise<OriginAttempt>
+): Promise<OriginAttempt> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let remaining = 2;
+    const fail = (error: unknown) => {
+      remaining -= 1;
+      if (!settled && remaining === 0) reject(error);
+    };
+    const win = (value: OriginAttempt) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    primary.then(win, fail);
+    secondary.then(win, fail);
+  });
+}
+
+function bindCallerAbort(local: AbortController, caller?: AbortSignal) {
+  if (!caller) return;
+  if (caller.aborted) {
+    local.abort();
+    return;
+  }
+  caller.addEventListener("abort", () => local.abort(), { once: true });
+}
+
 /**
- * One supabase-js client. Prefer the current working origin and only switch
- * when that origin fails AND the fallback actually works. Concurrent requests
- * in this tab must not undo each other; other tabs/devices never share this
- * origin flag (sessionStorage). Never flip on a timer or /__health probe.
+ * Prefer the last working origin, but hedge the other after HEDGE_MS so a
+ * hung VPN/TLS path cannot freeze the tab. iOS does not abort stuck
+ * handshakes; the independent timer in fetchOnce is what unblocks us.
  */
 async function fetchWithFallback(
   input: RequestInfo | URL,
@@ -194,41 +263,62 @@ async function fetchWithFallback(
     return fetchOnce(url, requestInit, DIRECT_TIMEOUT_MS, callerSignal);
   }
 
-  const preferDirect = isProxyUnreachable();
-  const firstUrl = preferDirect ? directUrl : url;
-  const secondUrl = preferDirect ? url : directUrl;
-  const firstTimeout = preferDirect ? DIRECT_TIMEOUT_MS : PROXY_TIMEOUT_MS;
-  const secondTimeout = preferDirect ? PROXY_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
+  if (callerAborted(callerSignal)) {
+    throw callerSignal?.reason ?? new DOMException("Aborted", "AbortError");
+  }
 
-  try {
-    const response = await fetchOnce(
-      firstUrl,
-      requestInit,
-      firstTimeout,
-      callerSignal
-    );
+  const preferDirect = isProxyUnreachable();
+  const primaryUrl = preferDirect ? directUrl : url;
+  const secondaryUrl = preferDirect ? url : directUrl;
+  const primaryTimeout = preferDirect ? DIRECT_TIMEOUT_MS : PROXY_TIMEOUT_MS;
+  const secondaryTimeout = preferDirect ? PROXY_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
+
+  const primaryAbort = new AbortController();
+  const secondaryAbort = new AbortController();
+  const hedgeAbort = new AbortController();
+  bindCallerAbort(primaryAbort, callerSignal);
+  bindCallerAbort(secondaryAbort, callerSignal);
+  bindCallerAbort(hedgeAbort, callerSignal);
+
+  const asAttempt = async (
+    target: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+    fromPrimary: boolean
+  ): Promise<OriginAttempt> => {
+    const response = await fetchOnce(target, requestInit, timeoutMs, signal);
     if (isBadGateway(response)) {
       throw new Error(`upstream ${response.status}`);
     }
-    return response;
-  } catch (error) {
-    if (callerAborted(callerSignal)) throw error;
-    try {
-      const response = await fetchOnce(
-        secondUrl,
-        requestInit,
-        secondTimeout,
-        callerSignal
-      );
-      if (isBadGateway(response)) {
-        throw error;
-      }
+    return { response, fromPrimary };
+  };
+
+  const primaryP = asAttempt(
+    primaryUrl,
+    primaryTimeout,
+    primaryAbort.signal,
+    true
+  );
+  const secondaryP = delay(HEDGE_MS, hedgeAbort.signal).then(() =>
+    asAttempt(secondaryUrl, secondaryTimeout, secondaryAbort.signal, false)
+  );
+
+  try {
+    const winner = await firstSettledOk(primaryP, secondaryP);
+    if (winner.fromPrimary) {
+      hedgeAbort.abort();
+      secondaryAbort.abort();
+    } else {
+      primaryAbort.abort();
       if (preferDirect) stickToProxy(preferDirect);
       else stickToDirect(preferDirect);
-      return response;
-    } catch {
-      throw error;
     }
+    return winner.response;
+  } catch (error) {
+    hedgeAbort.abort();
+    primaryAbort.abort();
+    secondaryAbort.abort();
+    throw error;
   }
 }
 
@@ -236,7 +326,26 @@ function FallbackWebSocket(
   url: string | URL,
   protocols?: string | string[]
 ) {
-  return new WebSocket(mapRealtimeUrl(String(url)), protocols);
+  const ws = new WebSocket(mapRealtimeUrl(String(url)), protocols);
+  const timer = setTimeout(() => {
+    if (ws.readyState !== WebSocket.CONNECTING) return;
+    if (isProxyUnreachable()) markProxyReachable();
+    else markProxyUnreachable();
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+  }, REALTIME_CONNECT_MS);
+  ws.addEventListener("open", () => clearTimeout(timer));
+  ws.addEventListener("close", () => clearTimeout(timer));
+  ws.addEventListener("error", () => clearTimeout(timer));
+  return ws;
+}
+
+export function resyncSupabaseTransport() {
+  clearOriginPreference();
+  reconnectRealtime();
 }
 
 function makeClient(url: string): SupabaseClient<Database> {

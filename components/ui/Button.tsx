@@ -36,7 +36,7 @@ export default function Button({
     <button
       type="button"
       className={cn(
-        "inline-flex items-center justify-center gap-2 transition-all duration-300 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent disabled:opacity-50 disabled:pointer-events-none",
+        "inline-flex items-center justify-center gap-2 touch-manipulation transition-all duration-300 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent disabled:opacity-50 disabled:pointer-events-none",
         variants[variant],
         sizes[size],
         fullWidth && "w-full",

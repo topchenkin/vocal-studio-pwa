@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { realtimeTopic } from "@/lib/client-instance";
-import { supabase } from "@/lib/supabase";
+import { supabase, resyncSupabaseTransport } from "@/lib/supabase";
 import {
   mapBackendError,
   isLikelyUnreachableBackend,
@@ -48,8 +48,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const MOCK_ADMIN_KEY = "uvs_mock_admin";
-const AUTH_BOOT_MS = 25_000;
-const PROFILE_MS = 25_000;
+const AUTH_BOOT_MS = 12_000;
+const PROFILE_MS = 12_000;
 
 const mockAdminProfile: StudentProfile = {
   id: "mock-admin",
@@ -217,6 +217,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .subscribe();
 
     const refreshQuiet = () => {
+      resyncSupabaseTransport();
       void loadProfile(user, true).then(() => {
         window.dispatchEvent(new Event("uvs-profile-updated"));
       });
@@ -232,13 +233,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshQuiet();
     };
 
+    const onOnline = () => {
+      resyncSupabaseTransport();
+      void loadProfile(user, false).then(() => {
+        window.dispatchEvent(new Event("uvs-profile-updated"));
+      });
+    };
+
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", refreshQuiet);
+    window.addEventListener("online", onOnline);
 
     return () => {
       void supabase.removeChannel(channel);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", refreshQuiet);
+      window.removeEventListener("online", onOnline);
     };
   }, [isMockAdmin, loadProfile, user]);
 
@@ -319,13 +327,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     try {
+      resyncSupabaseTransport();
       if (!user) {
         const {
           data: { session },
         } = await withTimeout(supabase.auth.getSession(), AUTH_BOOT_MS);
         setUser(session?.user ?? null);
         await loadProfile(session?.user ?? null);
-        setBackendError(null);
         return;
       }
       await loadProfile(user);

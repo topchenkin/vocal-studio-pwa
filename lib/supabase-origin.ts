@@ -66,6 +66,17 @@ export function markProxyReachable() {
   persistOrigin();
 }
 
+/** Next request tries the proxy first and hedges to supabase.co. */
+export function clearOriginPreference() {
+  useDirect = false;
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(ORIGIN_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
 function rewriteTo(url: string, dest: string): string {
   if (SUPABASE_PROJECT_URL && url.startsWith(SUPABASE_PROJECT_URL)) {
     return `${dest}${url.slice(SUPABASE_PROJECT_URL.length)}`;
