@@ -18,22 +18,17 @@ import StudentsTable from "@/components/admin/StudentsTable";
 import ScheduleGrid from "@/components/admin/ScheduleGrid";
 import AdminChat from "@/components/admin/AdminChat";
 import NotificationForm from "@/components/admin/NotificationForm";
-import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
-import VocalRemover from "@/components/ai/VocalRemover";
-import MultitrackMixer from "@/components/ai/MultitrackMixer";
-import dynamic from "next/dynamic";
 import ContentManager from "@/components/admin/ContentManager";
-import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
-import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
+import AdminAiToolBody, {
+  AdminAiSubNav,
+  isAdminAiSubTab,
+  type AdminAiSubTab,
+} from "@/components/admin/AdminAiToolsPanel";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
 } from "@/components/dashboard/CabinetTabLink";
-
-const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
-  ssr: false,
-});
 
 const TABS = [
   { id: "students", label: "Ученики", icon: <Users className="h-4 w-4" /> },
@@ -71,6 +66,7 @@ function isAdminTab(value: string | null): boolean {
 
 export default function AdminDashboardClient() {
   const [activeTab, setActiveTab] = useState("students");
+  const [aiSubTab, setAiSubTab] = useState<AdminAiSubTab>("tuner");
   const { isMockAdmin } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -85,6 +81,8 @@ export default function AdminDashboardClient() {
         router.replace(`/dashboard/admin?tab=${tab}`, { scroll: false });
       }
     }
+    const fromAi = searchParams.get("ai");
+    if (isAdminAiSubTab(fromAi)) setAiSubTab(fromAi);
   }, [searchParams, router]);
 
   useEffect(() => {
@@ -102,10 +100,21 @@ export default function AdminDashboardClient() {
     setActiveTab(id);
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", id);
+    if (id === "ai-tools") params.set("ai", aiSubTab);
+    else params.delete("ai");
+    router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });
+  };
+
+  const changeAiSubTab = (id: AdminAiSubTab) => {
+    setAiSubTab(id);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "ai-tools");
+    params.set("ai", id);
     router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });
   };
 
   const isChat = activeTab === "chat";
+  const isAiTools = activeTab === "ai-tools";
   const title =
     activeTab === "chat"
       ? "Чат"
@@ -115,7 +124,9 @@ export default function AdminDashboardClient() {
   const subtitle =
     isChat || activeTab === "audio"
       ? undefined
-      : "Unique Vocal Studio — управление";
+      : isAiTools
+        ? "Доступ учеников и инструменты по вкладкам"
+        : "Unique Vocal Studio — управление";
 
   return (
     <DashboardLayout
@@ -136,12 +147,15 @@ export default function AdminDashboardClient() {
       )}
       <div
         className={
-          isChat
+          isChat || isAiTools
             ? "sticky top-0 z-20 shrink-0 bg-studio-bg/95 pb-3 backdrop-blur"
             : "shrink-0"
         }
       >
         <Tabs tabs={TABS} active={activeTab} onChange={changeTab} />
+        {isAiTools && (
+          <AdminAiSubNav active={aiSubTab} onChange={changeAiSubTab} />
+        )}
       </div>
 
       {isChat ? (
@@ -156,25 +170,14 @@ export default function AdminDashboardClient() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.25 }}
-            className="mt-6"
+            className={isAiTools ? "mt-3" : "mt-6"}
           >
             {activeTab === "students" && <StudentsTable />}
             {activeTab === "schedule" && <ScheduleGrid />}
             {activeTab === "notifications" && <NotificationForm />}
             {activeTab === "content" && <ContentManager />}
             {activeTab === "audio" && <MyAudioLibrary />}
-            {activeTab === "ai-tools" && (
-              <div className="space-y-5">
-                <AiToolsAccessSettings />
-                <div className="grid gap-5 lg:grid-cols-2">
-                  <PitchAnalyzer />
-                  <VocalRemover />
-                  <TimbreMatcher />
-                  <MultitrackMixer />
-                </div>
-                <PitchShiftStudio />
-              </div>
-            )}
+            {activeTab === "ai-tools" && <AdminAiToolBody active={aiSubTab} />}
           </motion.div>
         </AnimatePresence>
       )}
