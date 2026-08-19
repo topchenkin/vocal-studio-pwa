@@ -1,10 +1,13 @@
-# Leftover Timeweb Frontend Apps. Same as the repo-root Caddyfile:
-# reverse-proxy stale DNS traffic to the Moscow VPS. Do not SPA-fallback.
+# Leftover Timeweb Frontend Apps. Serve `out/` after `npm run build`.
+# Do not SPA-fallback /_next — that rewrites JS/CSS to index.html.
 www.uniquevocal.ru, uniquevocal.ru {
-	reverse_proxy https://5.42.123.142 {
-		header_up Host {host}
-		transport http {
-			tls_server_name {host}
-		}
+	root * out
+	encode gzip
+	handle /_next/* {
+		file_server
+	}
+	handle {
+		try_files {path} {path}.html {path}/index.html
+		file_server
 	}
 }

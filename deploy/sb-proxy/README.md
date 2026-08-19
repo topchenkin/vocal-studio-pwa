@@ -64,8 +64,9 @@ Frontend Apps (`92.246.76.92` — там Caddy отдаёт HTML вместо JS
 | `sb` | A | `5.42.123.142` |
 
 Корневой `Caddyfile` нужен старому Frontend Apps: кэш DNS ещё бьёт в
-`92.246.76.92`, и тот хост должен reverse-proxy на Москву, а не отдавать
-`index.html` вместо JS. На VPS заливается только `deploy/sb-proxy/Caddyfile`.
+`92.246.76.92`. Файл отдаёт статику из `out/` и не подменяет `/_next` на
+HTML. На VPS заливается только `deploy/sb-proxy/Caddyfile`. Старое Frontend
+UniqueVocal лучше остановить в панели Timeweb.
 
 Проверка **без VPN**:
 

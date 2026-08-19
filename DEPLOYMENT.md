@@ -7,8 +7,8 @@
 GitHub Pages **отключён**.
 
 Корневой `Caddyfile` — **только** для старого Frontend Apps (`92.246.76.92`):
-он reverse-proxy на московский VPS. Не копировать его на VPS (там
-`deploy/sb-proxy/Caddyfile`). Нельзя возвращать SPA `try_files … /index.html`.
+корень `out/`, `/_next` без SPA-fallback. Не копировать его на VPS (там
+`deploy/sb-proxy/Caddyfile`). Старое Frontend UniqueVocal лучше остановить.
 
 Не включайте SSR/`npm start` на старом Frontend UniqueVocal — без папки
 `out` сайт даёт пустой 404. После переноса DNS Frontend-приложение можно
