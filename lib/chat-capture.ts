@@ -11,6 +11,7 @@
  */
 
 import { isAppleWebKit } from "@/lib/mic-audio";
+import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
 import { pickVideoRecorderMime, pickVoiceRecorderMime } from "@/lib/media-mime";
 
 export function stopMediaStream(stream: MediaStream | null | undefined) {
@@ -21,6 +22,7 @@ export function stopMediaStream(stream: MediaStream | null | undefined) {
       /* already ended */
     }
   });
+  releaseIosCapture(stream);
 }
 
 /**
@@ -63,13 +65,17 @@ export async function getChatMediaStream(
     throw new Error("unsupported");
   }
   if (kind === "voice") {
-    return navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    holdIosCapture(stream);
+    return stream;
   }
 
   let lastError: unknown;
   for (const constraints of VIDEO_CONSTRAINT_ATTEMPTS) {
     try {
-      return await getChatMediaStreamOnce(constraints);
+      const stream = await getChatMediaStreamOnce(constraints);
+      holdIosCapture(stream);
+      return stream;
     } catch (err) {
       lastError = err;
     }

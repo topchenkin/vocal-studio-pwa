@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
+import { preferIosPlayback } from "@/lib/ios-audio-session";
 
 export default function ExerciseAudioPlayer({
   src,
@@ -36,6 +37,7 @@ export default function ExerciseAudioPlayer({
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
+      preferIosPlayback();
       await audio.play();
       setPlaying(true);
     } else {
@@ -66,6 +68,9 @@ export default function ExerciseAudioPlayer({
           ref={audioRef}
           src={src}
           preload="metadata"
+          playsInline
+          {...{ "webkit-playsinline": "true" }}
+          onPlay={() => preferIosPlayback()}
           onTimeUpdate={(event) => setProgress(event.currentTarget.currentTime)}
           onLoadedMetadata={(event) =>
             setDuration(event.currentTarget.duration || 120)

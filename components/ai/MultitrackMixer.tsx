@@ -28,6 +28,8 @@ import {
   decodeBlobToAudioBuffer,
   mixAudioBuffersWithOffsets,
 } from "@/lib/wav-client";
+import { holdIosCapture, preferIosPlayback, releaseIosCapture } from "@/lib/ios-audio-session";
+import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_TRACKS = 10;
 const PEAK_BUCKETS = 128;
@@ -495,10 +497,15 @@ export default function MultitrackMixer({ locked = false }: Props) {
     }
   };
 
+  const stopMicTracks = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    releaseIosCapture(streamRef.current);
+    streamRef.current = null;
+  };
+
   const releaseMicFully = () => {
     recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    stopMicTracks();
     setRecordingId(null);
   };
 
@@ -544,6 +551,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
         channelCount: 1,
       },
     });
+    holdIosCapture(stream);
     streamRef.current = stream;
     return stream;
   };
@@ -656,6 +664,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
     if (recordingId || monitorTracks.length === 0) return;
     const fromSec = playheadSecRef.current;
     stopPlayback({ keepPlayhead: true });
+    stopMicTracks();
+    preferIosPlayback();
     setError("");
     try {
       const ctx = await ensureAudioCtx();
@@ -720,9 +730,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
       recorder.onerror = () => {
         if (take !== takeIdRef.current) return;
         setError("Сбой записи микрофона. Попробуйте ещё раз.");
-        setRecordingId(null);
-        recorderRef.current = null;
         stopPlayback();
+        releaseMicFully();
       };
 
       recorder.onstop = () => {
@@ -733,6 +742,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           stopPlayback();
           setRecordingId(null);
           recorderRef.current = null;
+          releaseMicFully();
 
           if (chunks.length === 0) {
             setError("Пустая запись — микрофон не отдал данные. Попробуйте снова.");
@@ -991,7 +1001,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
             disabled={tracks.length >= MAX_TRACKS}
             onPointerDown={() => {
               void ensureAudioCtx();
-              void ensureMic().catch(() => undefined);
             }}
             onClick={() => void startOverdub()}
           >
@@ -1309,9 +1318,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
               ))}
             </div>
           )}
-          <audio
+          <MediaAudio
             controls
-            playsInline
             src={mixUrl}
             className="mt-3 h-10 w-full"
           />

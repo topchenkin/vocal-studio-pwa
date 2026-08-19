@@ -30,6 +30,7 @@ import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { ChatMessage, User } from "@/lib/types";
 import { formatTime } from "@/lib/storage";
+import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
@@ -402,7 +403,7 @@ export default function ChatWindow({
                     </div>
                   ) : msg.messageType === "voice" && msg.mediaUrl ? (
                     <div className="space-y-1">
-                      <audio controls src={msg.mediaUrl} className="max-w-full" />
+                      <MediaAudio controls src={msg.mediaUrl} className="max-w-full" />
                       {msg.mediaDurationSec ? (
                         <p className="text-[10px] opacity-60">
                           {msg.mediaDurationSec} сек

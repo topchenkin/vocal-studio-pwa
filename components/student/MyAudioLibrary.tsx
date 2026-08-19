@@ -13,6 +13,7 @@ import {
   sourceLabel,
 } from "@/lib/student-audio";
 import type { StudentAudioTrack } from "@/types";
+import MediaAudio from "@/components/media/MediaAudio";
 
 export default function MyAudioLibrary() {
   const { user, isAdmin } = useAuth();
@@ -214,9 +215,8 @@ export default function MyAudioLibrary() {
               )}
             </div>
             {urls[track.id] ? (
-              <audio
+              <MediaAudio
                 controls
-                playsInline
                 src={urls[track.id]}
                 className="h-10 w-full"
               />

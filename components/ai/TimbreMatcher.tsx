@@ -31,6 +31,7 @@ import {
   singingInputGainValue,
   singingMicConstraints,
 } from "@/lib/mic-audio";
+import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
 /**
@@ -166,6 +167,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
     }
     pcmSessionRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    releaseIosCapture(streamRef.current);
     streamRef.current = null;
     const ctx = audioContextRef.current;
     audioContextRef.current = null;
@@ -247,8 +249,10 @@ export default function TimbreMatcher({ locked = false }: Props) {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: singingMicConstraints(),
       });
+      holdIosCapture(stream);
       if (isStale(analysisId)) {
         stream.getTracks().forEach((t) => t.stop());
+        releaseIosCapture(stream);
         busyRef.current = false;
         return;
       }

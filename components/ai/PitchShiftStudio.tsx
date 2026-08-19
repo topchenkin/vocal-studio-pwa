@@ -16,6 +16,7 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
+import MediaAudio from "@/components/media/MediaAudio";
 import {
   clampPitchShift,
   clampTempoPercent,
@@ -491,7 +492,11 @@ export default function PitchShiftStudio({ locked = false }: Props) {
               </a>
             </div>
           </div>
-          <audio controls playsInline src={resultUrl} className="h-10 w-full" />
+          <MediaAudio
+            controls
+            src={resultUrl}
+            className="h-10 w-full"
+          />
         </div>
       )}
 

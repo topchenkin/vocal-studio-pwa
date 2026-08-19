@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
 import { splitStereoCenterCancel } from "@/lib/wav-client";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
+import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const API_TIMEOUT_MS = 90_000;
@@ -479,7 +480,7 @@ function ResultTrack({
           </a>
         </div>
       </div>
-      <audio controls playsInline src={src} className="h-10 w-full" />
+      <MediaAudio controls src={src} className="h-10 w-full" />
     </div>
   );
 }

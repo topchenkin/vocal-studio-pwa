@@ -33,6 +33,7 @@ import {
   singingInputGainValue,
   singingMicConstraints,
 } from "@/lib/mic-audio";
+import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
 
 export type { PitchFrame } from "@/lib/pitch";
 
@@ -172,6 +173,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
       track.enabled = false;
       track.stop();
     });
+    releaseIosCapture(streamRef.current);
     streamRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== "closed") {
       void audioContextRef.current.close();
@@ -298,6 +300,8 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: singingMicConstraints(),
     });
+    holdIosCapture(stream);
+    streamRef.current = stream;
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -315,7 +319,6 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     inputGain.connect(analyser);
     const mute = connectAnalyserToDestination(audioContext, analyser);
 
-    streamRef.current = stream;
     audioContextRef.current = audioContext;
     analyserRef.current = analyser;
     inputGainRef.current = inputGain;
