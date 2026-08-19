@@ -1,0 +1,13 @@
+# Timeweb App Platform already sets the site root to the build folder (`out`).
+# Do NOT set `root * out` — that looks for out/out and every JS/CSS becomes index.html.
+www.uniquevocal.ru, uniquevocal.ru {
+	encode gzip
+	@static path /_next/* /icons/* /sw.js /manifest.json /offline /workbox-* /swe-worker-*
+	handle @static {
+		file_server
+	}
+	handle {
+		try_files {path} {path}.html /index.html
+		file_server
+	}
+}

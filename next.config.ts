@@ -76,7 +76,7 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-timeweb-v5",
+    cacheId: "uvs-timeweb-v6",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
