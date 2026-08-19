@@ -280,7 +280,9 @@ export function resyncSupabaseTransport() {
 export function installNetworkGuards() {
   if (guardsInstalled || typeof window === "undefined") return;
   guardsInstalled = true;
-  void chooseRoute();
+  void chooseRoute().catch(() => {
+    /* both paths down; the next request races again */
+  });
   window.addEventListener("offline", () => {
     clearChosenRoute();
     notifyReconnecting();

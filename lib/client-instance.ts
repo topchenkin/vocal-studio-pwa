@@ -9,7 +9,7 @@ export function getClientInstanceId(): string {
   try {
     const existing = sessionStorage.getItem(INSTANCE_KEY);
     if (existing) return existing;
-    const id = crypto.randomUUID();
+    const id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
     sessionStorage.setItem(INSTANCE_KEY, id);
     return id;
   } catch {

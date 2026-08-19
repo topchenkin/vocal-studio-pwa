@@ -32,19 +32,15 @@ html.light {
 
 @layer base {
   html {
-    @apply scroll-smooth antialiased;
-    overflow-x: clip;
+    @apply antialiased;
+    overflow-x: hidden;
     max-width: 100%;
     overscroll-behavior-x: none;
-    overscroll-behavior-y: auto;
-    transition:
-      background-color 240ms ease,
-      color 240ms ease;
   }
 
   body {
-    @apply min-h-screen bg-studio-bg text-studio-text;
-    overflow-x: clip;
+    @apply min-h-dvh bg-studio-bg text-studio-text;
+    overflow-x: hidden;
     max-width: 100%;
   }
 

@@ -56,7 +56,87 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-const BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem("uvs-theme");if(t!=="dark"&&t!=="light"){t="dark"}document.documentElement.classList.toggle("light",t==="light");document.documentElement.style.colorScheme=t;document.documentElement.style.backgroundColor=t==="light"?"#f8f7fc":"#0a0a0f"}catch(e){document.documentElement.classList.remove("light");document.documentElement.style.colorScheme="dark";document.documentElement.style.backgroundColor="#0a0a0f"}var VER="20";try{if(localStorage.getItem("uvs-sw-bust")!==VER){var bust=false;var jobs=[];if(navigator.serviceWorker){jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){if(rs.length){bust=true;return Promise.all(rs.map(function(r){return r.unregister()}))}}))}if(typeof caches!=="undefined"){jobs.push(caches.keys().then(function(keys){if(keys.length){bust=true;return Promise.all(keys.map(function(k){return caches.delete(k)}))}}))}Promise.all(jobs).then(function(){try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}if(bust)location.reload()}).catch(function(){try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}})}}catch(e){}window.addEventListener("error",function(e){var el=e.target;if(!el||el.tagName!=="SCRIPT"||!el.src||el.src.indexOf("/_next/")===-1)return;if(document.getElementById("uvs-boot-fail"))return;var d=document.createElement("div");d.id="uvs-boot-fail";d.setAttribute("style","position:fixed;inset:0;z-index:99999;background:#0a0a0f;color:#f5f5f5;font:16px/1.5 system-ui,sans-serif;padding:28px;max-width:40rem");d.innerHTML="<p style='font-size:1.25rem;margin:0 0 12px'>Сайт не загрузился</p><p>Сеть ещё открывает старый сервер, который отдаёт HTML вместо JavaScript.</p><p>Откройте <b>https://uniquevocal.ru</b> без www или поставьте DNS 8.8.8.8 и обновите страницу.</p>";document.documentElement.appendChild(d)},true)})();`;
+const BOOT_SCRIPT = `(function(){
+  function ios(){
+    var ua=navigator.userAgent||"";
+    return /iP(hone|ad|od)/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+  }
+  function log(m){
+    try{
+      var a=JSON.parse(sessionStorage.getItem("uvs-logs")||"[]");
+      a.push({t:Date.now(),e:String(m).slice(0,300)});
+      sessionStorage.setItem("uvs-logs",JSON.stringify(a.slice(-40)));
+    }catch(x){}
+  }
+  try{
+    var t=localStorage.getItem("uvs-theme");
+    if(t!=="dark"&&t!=="light") t="dark";
+    document.documentElement.classList.toggle("light",t==="light");
+    document.documentElement.style.colorScheme=t;
+    document.documentElement.style.backgroundColor=t==="light"?"#f8f7fc":"#0a0a0f";
+  }catch(e){
+    document.documentElement.classList.remove("light");
+    document.documentElement.style.colorScheme="dark";
+    document.documentElement.style.backgroundColor="#0a0a0f";
+  }
+  var VER="21";
+  try{
+    var kill=ios()||localStorage.getItem("uvs-sw-bust")!==VER;
+    if(kill){
+      var bust=false;
+      var jobs=[];
+      if(navigator.serviceWorker){
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){
+          if(rs.length){bust=true;return Promise.all(rs.map(function(r){return r.unregister()}));}
+        }));
+      }
+      if(typeof caches!=="undefined"){
+        jobs.push(caches.keys().then(function(keys){
+          if(keys.length){bust=true;return Promise.all(keys.map(function(k){return caches.delete(k)}));}
+        }));
+      }
+      Promise.all(jobs).then(function(){
+        try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}
+        if(bust) location.reload();
+      }).catch(function(err){
+        log(err);
+        try{localStorage.setItem("uvs-sw-bust",VER)}catch(x){}
+      });
+    }
+  }catch(e){log(e)}
+  window.addEventListener("error",function(e){
+    var el=e.target;
+    log((e.message||"error")+" "+(el&&el.src||""));
+    if(!el||el.tagName!=="SCRIPT"||!el.src||el.src.indexOf("/_next/")===-1)return;
+    if(document.getElementById("uvs-boot-fail"))return;
+    var d=document.createElement("div");
+    d.id="uvs-boot-fail";
+    d.setAttribute("style","position:fixed;inset:0;z-index:99999;background:#0a0a0f;color:#f5f5f5;font:16px/1.5 system-ui,sans-serif;padding:28px;max-width:40rem");
+    d.innerHTML="<p style='font-size:1.25rem;margin:0 0 12px'>Сайт не загрузился</p><p>Сеть ещё открывает старый сервер, который отдаёт HTML вместо JavaScript.</p><p>Откройте <b>https://uniquevocal.ru</b> без www и обновите страницу.</p>";
+    document.documentElement.appendChild(d);
+  },true);
+  window.addEventListener("unhandledrejection",function(e){
+    log(e&&e.reason?e.reason:"unhandledrejection");
+  });
+  setTimeout(function(){
+    if(document.documentElement.getAttribute("data-uvs-ready"))return;
+    if(document.getElementById("uvs-boot-fail"))return;
+    log("watchdog: no data-uvs-ready");
+    var logs="";
+    try{logs=(JSON.parse(sessionStorage.getItem("uvs-logs")||"[]").slice(-6).map(function(x){return x.e}).join("<br>"))}catch(x){}
+    var d=document.createElement("div");
+    d.id="uvs-boot-fail";
+    d.setAttribute("style","position:fixed;inset:0;z-index:99999;background:#0a0a0f;color:#f5f5f5;font:16px/1.5 system-ui,sans-serif;padding:28px");
+    d.innerHTML="<p style='font-size:1.25rem;margin:0 0 12px'>Страница не открылась на iPhone</p><p>Нажмите кнопку — это сбросит кэш Safari.</p><p><button type='button' id='uvs-boot-reload' style='margin-top:12px;padding:12px 18px;border:0;border-radius:12px;background:#8b5cf6;color:#fff;font:16px system-ui'>Обновить</button></p>"+(logs?"<p style='margin-top:16px;font:12px/1.4 ui-monospace,monospace;opacity:.7;word-break:break-word'>"+logs+"</p>":"");
+    document.documentElement.appendChild(d);
+    var b=document.getElementById("uvs-boot-reload");
+    if(b) b.onclick=function(){
+      try{sessionStorage.removeItem("uvs-logs")}catch(x){}
+      try{localStorage.removeItem("uvs-sw-bust")}catch(x){}
+      location.href="https://uniquevocal.ru/?_r="+Date.now();
+    };
+  },4000);
+})();`;
 
 export default function RootLayout({
   children,

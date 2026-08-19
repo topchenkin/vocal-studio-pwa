@@ -68,16 +68,16 @@ const DAY = 24 * 60 * 60;
 const withPWA = withPWAInit({
   dest: "public",
   disable: process.env.NODE_ENV === "development",
-  register: true,
+  register: false,
   cacheOnFrontEndNav: false,
   reloadOnOnline: false,
-  cacheStartUrl: true,
+  cacheStartUrl: false,
   fallbacks: {
     document: "/offline",
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v20",
+    cacheId: "uvs-moscow-v21",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
