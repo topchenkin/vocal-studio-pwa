@@ -1,10 +1,11 @@
 /**
- * Optional public origin for the browser (Moscow reverse-proxy).
- * NEXT_PUBLIC_SUPABASE_URL stays the real https://<ref>.supabase.co.
+ * Browser talks to Supabase through two equal paths and keeps the winner:
+ *   https://<ref>.supabase.co          — works with VPN / from abroad
+ *   https://sb.uniquevocal.ru          — Moscow proxy, works in RU without VPN
  *
- * Happy Eyeballs: after a network change the path is "uncertain" and both
- * origins are raced at once. Once one wins, stick to it until the next flap.
- * Preference is per tab (sessionStorage), never localStorage.
+ * Do not "detect VPN". Race both; the first response is the detection.
+ * Preference lives in memory only — sessionStorage sticky-direct is what
+ * made a phone fail after turning VPN off.
  */
 
 export const SUPABASE_PROJECT_URL = (
@@ -12,31 +13,13 @@ export const SUPABASE_PROJECT_URL = (
 ).replace(/\/$/, "");
 
 export const SUPABASE_PROXY_URL = (
-  process.env.NEXT_PUBLIC_SUPABASE_PROXY_URL || ""
+  process.env.NEXT_PUBLIC_SUPABASE_PROXY_URL ||
+  "https://sb.uniquevocal.ru"
 ).replace(/\/$/, "");
 
-const ORIGIN_KEY = "uvs-sb-origin";
+type Route = "proxy" | "direct";
 
-function readStoredOrigin(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return sessionStorage.getItem(ORIGIN_KEY) === "direct";
-  } catch {
-    return false;
-  }
-}
-
-let useDirect = readStoredOrigin();
-let pathUncertain = true;
-
-function persistOrigin() {
-  if (typeof window === "undefined") return;
-  try {
-    sessionStorage.setItem(ORIGIN_KEY, useDirect ? "direct" : "proxy");
-  } catch {
-    /* private mode */
-  }
-}
+let chosen: Route | null = null;
 
 function browserOrigin() {
   return (
@@ -50,42 +33,47 @@ export function getBrowserSupabaseUrl(): string {
   return browserOrigin();
 }
 
+export function getChosenRoute(): Route | null {
+  return chosen;
+}
+
 export function isProxyUnreachable(): boolean {
-  return useDirect;
-}
-
-export function isPathUncertain(): boolean {
-  return pathUncertain;
-}
-
-export function markPathUncertain() {
-  pathUncertain = true;
-}
-
-export function markPathCertain() {
-  pathUncertain = false;
+  return chosen === "direct";
 }
 
 export function markProxyUnreachable() {
-  useDirect = true;
-  persistOrigin();
+  chosen = "direct";
 }
 
 export function markProxyReachable() {
-  useDirect = false;
-  persistOrigin();
+  chosen = "proxy";
 }
 
-/** Next request races both origins (VPN just flipped). */
-export function clearOriginPreference() {
-  useDirect = false;
-  pathUncertain = true;
+export function clearChosenRoute() {
+  chosen = null;
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.removeItem(ORIGIN_KEY);
+    sessionStorage.removeItem("uvs-sb-origin");
   } catch {
     /* private mode */
   }
+}
+
+/** @deprecated use clearChosenRoute */
+export function clearOriginPreference() {
+  clearChosenRoute();
+}
+
+export function markPathUncertain() {
+  clearChosenRoute();
+}
+
+export function markPathCertain() {
+  /* route is set by markProxy* */
+}
+
+export function isPathUncertain(): boolean {
+  return chosen == null;
 }
 
 function rewriteTo(url: string, dest: string): string {
@@ -100,14 +88,15 @@ function rewriteTo(url: string, dest: string): string {
 
 export function rewriteSupabaseAssetUrl(url: string | null | undefined): string {
   if (!url) return "";
-  const dest = useDirect
-    ? SUPABASE_PROJECT_URL || SUPABASE_PROXY_URL
-    : SUPABASE_PROXY_URL || SUPABASE_PROJECT_URL;
+  const dest =
+    chosen === "direct"
+      ? SUPABASE_PROJECT_URL || SUPABASE_PROXY_URL
+      : SUPABASE_PROXY_URL || SUPABASE_PROJECT_URL;
   return dest ? rewriteTo(url, dest) : url;
 }
 
 export function mapRealtimeUrl(url: string): string {
-  if (!useDirect || !SUPABASE_PROXY_URL || !SUPABASE_PROJECT_URL) {
+  if (chosen !== "direct" || !SUPABASE_PROXY_URL || !SUPABASE_PROJECT_URL) {
     return url;
   }
   const from = toWs(SUPABASE_PROXY_URL);

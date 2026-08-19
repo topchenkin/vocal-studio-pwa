@@ -1,13 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types";
 import {
-  clearOriginPreference,
+  clearChosenRoute,
   getBrowserSupabaseUrl,
-  isPathUncertain,
+  getChosenRoute,
   isProxyUnreachable,
   mapRealtimeUrl,
-  markPathCertain,
-  markPathUncertain,
   markProxyReachable,
   markProxyUnreachable,
   migrateAuthStorage,
@@ -18,12 +16,7 @@ import {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const PROXY_TIMEOUT_MS = 2_500;
-const DIRECT_TIMEOUT_MS = 2_500;
-const HEDGE_MS = 120;
-const REALTIME_CONNECT_MS = 3_000;
-const SETTLE_MS = 400;
-const PROBE_MS = 2_000;
+const RACE_MS = 1_000;
 const PROXY_BAD_STATUS = new Set([502, 503, 504, 521, 522, 523, 524]);
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -118,21 +111,6 @@ function callerAborted(signal?: AbortSignal): boolean {
   return Boolean(signal?.aborted);
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const id = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(id);
-      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 /**
  * iOS Safari often ignores AbortController while a TLS handshake is stuck
  * (VPN on/off). Reject on a timer even if fetch() never settles.
@@ -181,14 +159,12 @@ function isBadGateway(response: Response): boolean {
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastReconnectAt = 0;
 let lastOriginFlipAt = 0;
-let recoverTimer: ReturnType<typeof setTimeout> | null = null;
 let guardsInstalled = false;
-let recovering = false;
-let recoverAgain = false;
+let choosePromise: Promise<"direct" | "proxy"> | null = null;
 
 function reconnectRealtime() {
   const now = Date.now();
-  if (now - lastReconnectAt < 1_200) return;
+  if (now - lastReconnectAt < 1_000) return;
   lastReconnectAt = now;
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
@@ -206,26 +182,11 @@ function reconnectRealtime() {
   }, 80);
 }
 
-function stickToDirect(snapshotDirect: boolean) {
-  if (snapshotDirect !== isProxyUnreachable()) {
-    markPathCertain();
-    return;
-  }
-  const changed = !isProxyUnreachable();
-  markProxyUnreachable();
-  markPathCertain();
-  if (changed) reconnectRealtime();
-}
-
-function stickToProxy(snapshotDirect: boolean) {
-  if (snapshotDirect !== isProxyUnreachable()) {
-    markPathCertain();
-    return;
-  }
-  const changed = isProxyUnreachable();
-  markProxyReachable();
-  markPathCertain();
-  if (changed) reconnectRealtime();
+function rememberRoute(route: "direct" | "proxy") {
+  const previous = getChosenRoute();
+  if (route === "direct") markProxyUnreachable();
+  else markProxyReachable();
+  if (previous && previous !== route) reconnectRealtime();
 }
 
 async function probeOrigin(origin: string): Promise<boolean> {
@@ -240,12 +201,54 @@ async function probeOrigin(origin: string): Promise<boolean> {
           accept: "application/json",
         },
       },
-      PROBE_MS
+      RACE_MS
     );
     return response.ok || (response.status >= 400 && response.status < 500);
   } catch {
     return false;
   }
+}
+
+function raceFirst<T>(left: Promise<T>, right: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let remaining = 2;
+    const fail = (error: unknown) => {
+      remaining -= 1;
+      if (!settled && remaining === 0) reject(error);
+    };
+    const win = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    left.then(win, fail);
+    right.then(win, fail);
+  });
+}
+
+async function chooseRoute(): Promise<"direct" | "proxy"> {
+  const existing = getChosenRoute();
+  if (existing) return existing;
+  if (choosePromise) return choosePromise;
+  choosePromise = raceFirst(
+    probeOrigin(SUPABASE_PROXY_URL).then((ok) => {
+      if (!ok) throw new Error("proxy unreachable");
+      return "proxy" as const;
+    }),
+    probeOrigin(SUPABASE_PROJECT_URL).then((ok) => {
+      if (!ok) throw new Error("direct unreachable");
+      return "direct" as const;
+    })
+  )
+    .then((route) => {
+      rememberRoute(route);
+      return route;
+    })
+    .finally(() => {
+      choosePromise = null;
+    });
+  return choosePromise;
 }
 
 function notifyReconnecting() {
@@ -259,100 +262,31 @@ function notifyRouteRecovered() {
 }
 
 export async function recoverSupabaseRoute() {
-  if (recovering) {
-    recoverAgain = true;
-    return;
-  }
-  recovering = true;
-  markPathUncertain();
+  clearChosenRoute();
   notifyReconnecting();
   try {
-    await delay(SETTLE_MS);
-    if (SUPABASE_PROXY_URL && SUPABASE_PROJECT_URL) {
-      const [proxyOk, directOk] = await Promise.all([
-        probeOrigin(SUPABASE_PROXY_URL),
-        probeOrigin(SUPABASE_PROJECT_URL),
-      ]);
-      if (directOk && !proxyOk) markProxyUnreachable();
-      else markProxyReachable();
-      if (proxyOk || directOk) markPathCertain();
-    }
-    reconnectRealtime();
-    notifyRouteRecovered();
-  } finally {
-    recovering = false;
-    if (recoverAgain) {
-      recoverAgain = false;
-      void recoverSupabaseRoute();
-    }
+    await chooseRoute();
+  } catch {
+    /* next request will race again */
   }
-}
-
-function scheduleRouteRecover() {
-  markPathUncertain();
-  notifyReconnecting();
-  if (recoverTimer) clearTimeout(recoverTimer);
-  recoverTimer = setTimeout(() => {
-    recoverTimer = null;
-    void recoverSupabaseRoute();
-  }, 450);
+  reconnectRealtime();
+  notifyRouteRecovered();
 }
 
 export function resyncSupabaseTransport() {
-  clearOriginPreference();
-  scheduleRouteRecover();
+  void recoverSupabaseRoute();
 }
 
 export function installNetworkGuards() {
   if (guardsInstalled || typeof window === "undefined") return;
   guardsInstalled = true;
-
+  void chooseRoute();
   window.addEventListener("offline", () => {
-    markPathUncertain();
+    clearChosenRoute();
     notifyReconnecting();
   });
-  window.addEventListener("online", scheduleRouteRecover);
-  let hiddenAt = 0;
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      hiddenAt = Date.now();
-      return;
-    }
-    if (hiddenAt && Date.now() - hiddenAt < 2_000) return;
-    scheduleRouteRecover();
-  });
-  window.addEventListener("pageshow", (event) => {
-    if (event.persisted) scheduleRouteRecover();
-  });
-
-  const connection = (
-    navigator as Navigator & {
-      connection?: { addEventListener?: (type: string, fn: () => void) => void };
-    }
-  ).connection;
-  connection?.addEventListener?.("change", scheduleRouteRecover);
-}
-
-type OriginAttempt = { response: Response; fromPrimary: boolean };
-
-function firstSettledOk(
-  primary: Promise<OriginAttempt>,
-  secondary: Promise<OriginAttempt>
-): Promise<OriginAttempt> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let remaining = 2;
-    const fail = (error: unknown) => {
-      remaining -= 1;
-      if (!settled && remaining === 0) reject(error);
-    };
-    const win = (value: OriginAttempt) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    primary.then(win, fail);
-    secondary.then(win, fail);
+  window.addEventListener("online", () => {
+    void recoverSupabaseRoute();
   });
 }
 
@@ -365,10 +299,25 @@ function bindCallerAbort(local: AbortController, caller?: AbortSignal) {
   caller.addEventListener("abort", () => local.abort(), { once: true });
 }
 
+function isIdempotent(method: string) {
+  return method === "GET" || method === "HEAD" || method === "OPTIONS";
+}
+
+async function fetchKnown(
+  target: string,
+  init: RequestInit,
+  callerSignal?: AbortSignal
+): Promise<Response> {
+  const response = await fetchOnce(target, init, RACE_MS, callerSignal);
+  if (isBadGateway(response)) {
+    throw new Error(`upstream ${response.status}`);
+  }
+  return response;
+}
+
 /**
- * Prefer the last working origin, but hedge the other after HEDGE_MS so a
- * hung VPN/TLS path cannot freeze the tab. iOS does not abort stuck
- * handshakes; the independent timer in fetchOnce is what unblocks us.
+ * Happy Eyeballs in 1s: GET races both origins at once. Mutations go to the
+ * last winner only (never double-POST), then fail over once.
  */
 async function fetchWithFallback(
   input: RequestInfo | URL,
@@ -385,69 +334,49 @@ async function fetchWithFallback(
   const directUrl = canFallback
     ? retargetUrl(url, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL)
     : url;
+  const method = String(requestInit.method || "GET").toUpperCase();
 
   if (!canFallback) {
-    return fetchOnce(url, requestInit, DIRECT_TIMEOUT_MS, callerSignal);
+    return fetchOnce(url, requestInit, RACE_MS, callerSignal);
   }
 
   if (callerAborted(callerSignal)) {
     throw callerSignal?.reason ?? new DOMException("Aborted", "AbortError");
   }
 
-  const preferDirect = isProxyUnreachable();
-  const primaryUrl = preferDirect ? directUrl : url;
-  const secondaryUrl = preferDirect ? url : directUrl;
-  const hedgeMs = isPathUncertain() ? 0 : HEDGE_MS;
-  const primaryTimeout = preferDirect ? DIRECT_TIMEOUT_MS : PROXY_TIMEOUT_MS;
-  const secondaryTimeout = preferDirect ? PROXY_TIMEOUT_MS : DIRECT_TIMEOUT_MS;
-
-  const primaryAbort = new AbortController();
-  const secondaryAbort = new AbortController();
-  const hedgeAbort = new AbortController();
-  bindCallerAbort(primaryAbort, callerSignal);
-  bindCallerAbort(secondaryAbort, callerSignal);
-  bindCallerAbort(hedgeAbort, callerSignal);
-
-  const asAttempt = async (
-    target: string,
-    timeoutMs: number,
-    signal: AbortSignal,
-    fromPrimary: boolean
-  ): Promise<OriginAttempt> => {
-    const response = await fetchOnce(target, requestInit, timeoutMs, signal);
-    if (isBadGateway(response)) {
-      throw new Error(`upstream ${response.status}`);
-    }
-    return { response, fromPrimary };
-  };
-
-  const primaryP = asAttempt(
-    primaryUrl,
-    primaryTimeout,
-    primaryAbort.signal,
-    true
-  );
-  const secondaryP = delay(hedgeMs, hedgeAbort.signal).then(() =>
-    asAttempt(secondaryUrl, secondaryTimeout, secondaryAbort.signal, false)
-  );
-
-  try {
-    const winner = await firstSettledOk(primaryP, secondaryP);
-    if (winner.fromPrimary) {
-      hedgeAbort.abort();
-      secondaryAbort.abort();
-      markPathCertain();
-    } else {
-      primaryAbort.abort();
-      if (preferDirect) stickToProxy(preferDirect);
-      else stickToDirect(preferDirect);
-    }
+  if (isIdempotent(method) && !getChosenRoute()) {
+    const proxyAbort = new AbortController();
+    const directAbort = new AbortController();
+    bindCallerAbort(proxyAbort, callerSignal);
+    bindCallerAbort(directAbort, callerSignal);
+    const winner = await raceFirst(
+      fetchKnown(url, requestInit, proxyAbort.signal).then((response) => ({
+        response,
+        route: "proxy" as const,
+      })),
+      fetchKnown(directUrl, requestInit, directAbort.signal).then(
+        (response) => ({
+          response,
+          route: "direct" as const,
+        })
+      )
+    );
+    if (winner.route === "direct") proxyAbort.abort();
+    else directAbort.abort();
+    rememberRoute(winner.route);
     return winner.response;
+  }
+
+  const dest = getChosenRoute() ?? (await chooseRoute());
+  const firstUrl = dest === "direct" ? directUrl : url;
+  const secondUrl = dest === "direct" ? url : directUrl;
+  try {
+    return await fetchKnown(firstUrl, requestInit, callerSignal);
   } catch (error) {
-    hedgeAbort.abort();
-    primaryAbort.abort();
-    secondaryAbort.abort();
-    throw error;
+    if (callerAborted(callerSignal)) throw error;
+    const response = await fetchKnown(secondUrl, requestInit, callerSignal);
+    rememberRoute(dest === "direct" ? "proxy" : "direct");
+    return response;
   }
 }
 
@@ -459,22 +388,18 @@ function FallbackWebSocket(
   const timer = setTimeout(() => {
     if (ws.readyState !== WebSocket.CONNECTING) return;
     const now = Date.now();
-    if (now - lastOriginFlipAt > 3_000) {
+    if (now - lastOriginFlipAt > 1_000) {
       lastOriginFlipAt = now;
       if (isProxyUnreachable()) markProxyReachable();
       else markProxyUnreachable();
-      markPathUncertain();
     }
     try {
       ws.close();
     } catch {
       /* ignore */
     }
-  }, REALTIME_CONNECT_MS);
-  ws.addEventListener("open", () => {
-    clearTimeout(timer);
-    markPathCertain();
-  });
+  }, RACE_MS);
+  ws.addEventListener("open", () => clearTimeout(timer));
   ws.addEventListener("close", () => clearTimeout(timer));
   ws.addEventListener("error", () => clearTimeout(timer));
   return ws;
