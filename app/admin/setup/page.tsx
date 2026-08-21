@@ -9,6 +9,7 @@ import Logo from "@/components/Logo";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { ADMIN_EMAIL } from "@/lib/admin";
+import { adminLoginPath } from "@/lib/admin-gate";
 import { supabase } from "@/lib/supabase";
 
 export default function AdminPasswordSetupPage() {
@@ -27,7 +28,7 @@ export default function AdminPasswordSetupPage() {
   useEffect(() => {
     if (loading || !user) return;
     if (!correctEmail) {
-      void signOut().then(() => router.replace("/admin/login"));
+      void signOut().then(() => router.replace(adminLoginPath()));
     }
   }, [correctEmail, loading, router, signOut, user]);
 
@@ -81,7 +82,7 @@ export default function AdminPasswordSetupPage() {
             Запросите новую ссылку для первого входа.
           </p>
           <Link
-            href="/admin/login"
+            href={adminLoginPath()}
             className="mt-5 inline-flex rounded-xl bg-studio-accent px-4 py-2.5 text-sm font-medium text-white"
           >
             Вернуться ко входу

@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   },
   title: `${APP_NAME} — Студия вокала`,
   description:
-    "Профессиональные уроки вокала. Выберите абонемент и запишитесь на занятие.",
+    "Профессиональные уроки вокала в Екатеринбурге. Бесплатный кабинет, занятия с преподавателем, подписка на приложение — по желанию.",
   applicationName: APP_SHORT_NAME,
   appleWebApp: {
     capable: true,
@@ -38,10 +38,10 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   icons: {
     icon: [
-      { url: "/icons/favicon-32.png?v=41", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png?v=41", sizes: "192x192", type: "image/png" },
+      { url: "/icons/favicon-32.png?v=42", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png?v=42", sizes: "192x192", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png?v=41", sizes: "180x180" }],
+    apple: [{ url: "/icons/apple-touch-icon.png?v=42", sizes: "180x180" }],
   },
 };
 
@@ -75,7 +75,7 @@ const BOOT_SCRIPT = `(function(){
     document.documentElement.style.colorScheme="dark";
     document.documentElement.style.backgroundColor="#0a0a0f";
   }
-  var VER="31";
+  var VER="32";
   try{
     if(localStorage.getItem("uvs-sw-bust")!==VER){
       var hadController=Boolean(navigator.serviceWorker&&navigator.serviceWorker.controller);

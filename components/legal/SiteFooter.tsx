@@ -6,6 +6,7 @@ const links = [
   { href: LEGAL.uslugiPath, label: "Услуги и цены" },
   { href: LEGAL.offerPath, label: "Оферта и возврат" },
   { href: LEGAL.privacyPath, label: "Конфиденциальность" },
+  { href: LEGAL.contactsPath, label: "Контакты и реквизиты" },
 ] as const;
 
 export default function SiteFooter({ extra }: { extra?: ReactNode }) {

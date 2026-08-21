@@ -16,6 +16,7 @@ export const LEGAL = {
   offerPath: "/oferta",
   privacyPath: "/privacy",
   uslugiPath: "/uslugi",
+  contactsPath: "/kontakty",
 } as const;
 
 export function executorTitle() {

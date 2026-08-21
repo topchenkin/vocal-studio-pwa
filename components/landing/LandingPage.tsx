@@ -1,28 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import {
-  AudioLines,
-  Bot,
-  Check,
-  Crown,
-  Mail,
-  MapPin,
-  Mic2,
-  Phone,
-  Play,
-  Sparkles,
-  WandSparkles,
-} from "lucide-react";
+import { Bot, Check, Crown, Mic2, Sparkles } from "lucide-react";
 import Header from "@/components/Header";
 import AuthModal from "@/components/auth/AuthModal";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
-import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
 import { APP_TIER_PRICES } from "@/lib/constants";
-import { LEGAL } from "@/lib/legal";
 import { formatPrice } from "@/lib/storage";
 import type { AppSubscriptionTier } from "@/types";
 
@@ -40,7 +25,7 @@ const plans: Array<{
   {
     tier: "standard",
     title: "Standard",
-    subtitle: "Уверенный старт",
+    subtitle: "Домашняя практика между уроками",
     price: APP_TIER_PRICES.standard,
     icon: Bot,
     features: ["AI-анализатор нот", "Чат платформы", "Часть упражнений"],
@@ -48,7 +33,7 @@ const plans: Array<{
   {
     tier: "premium",
     title: "Premium",
-    subtitle: "Максимум прогресса",
+    subtitle: "Больше материала и внимания к деталям",
     price: APP_TIER_PRICES.premium,
     icon: Sparkles,
     features: [
@@ -61,7 +46,7 @@ const plans: Array<{
   {
     tier: "vip",
     title: "VIP",
-    subtitle: "Для будущих звёзд",
+    subtitle: "Студийный формат и полный набор инструментов",
     price: APP_TIER_PRICES.vip,
     icon: Crown,
     features: ["Запись студийного трека", "Безлимитный AI-анализ", "Всё из Premium"],
@@ -86,87 +71,65 @@ export default function LandingPage() {
       <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-5 sm:px-6">
         <Header />
 
-        <section className="grid min-h-[76vh] items-center gap-10 py-14 lg:grid-cols-[1.05fr_.95fr] lg:py-20">
-          <div className="animate-slide-up">
+        <section className="flex min-h-[72vh] flex-col items-center justify-center py-16 text-center lg:py-24">
+          <div className="animate-slide-up mx-auto max-w-3xl">
             <Badge className="mb-5">
-              <WandSparkles className="mr-1.5 h-3.5 w-3.5" />
-              Вокальная IT-платформа
+              Екатеринбург · живые уроки и кабинет в телефоне
             </Badge>
-            <h1 className="max-w-3xl font-display text-5xl font-semibold leading-[1.04] sm:text-6xl lg:text-7xl">
-              Раскройте свой голос с помощью{" "}
-              <span className="text-gradient">AI и профи</span>
+            <h1 className="font-display text-4xl font-semibold leading-[1.08] sm:text-6xl lg:text-7xl">
+              Голос раскрывается, когда рядом{" "}
+              <span className="text-gradient">наставник и умная практика</span>
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed text-studio-muted sm:text-lg">
-              Тренируйтесь между уроками, получайте точную обратную связь и
-              отслеживайте прогресс в едином пространстве.
+            <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-studio-muted sm:text-lg">
+              Занимайтесь с преподавателем по расписанию и тренируйтесь дома в
+              том же кабинете. Регистрация ничего не стоит — подписку на
+              приложение подключаете только если захотите больше инструментов
+              между уроками.
             </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
               <Button size="lg" onClick={() => openAuth("register")}>
-                Зарегистрироваться
+                Создать бесплатный кабинет
               </Button>
               <Button
                 size="lg"
-                variant="secondary"
+                variant="ghost"
+                className="px-6 text-studio-muted ring-1 ring-studio-border/80 hover:text-studio-text"
                 onClick={() => openAuth("login")}
               >
-                Войти
+                У меня уже есть аккаунт
               </Button>
             </div>
           </div>
+        </section>
 
-          <div className="relative mx-auto w-full max-w-xl">
-            <div className="absolute -inset-8 rounded-full bg-studio-accent/10 blur-3xl" />
-            <div className="relative aspect-[4/5] overflow-hidden rounded-[2rem] bg-gradient-to-br from-studio-card via-[#171224] to-studio-bg ring-1 ring-studio-accent/20 shadow-glow sm:aspect-video lg:aspect-[4/5]">
-              <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle_at_20%_20%,rgba(192,132,252,.35),transparent_35%),linear-gradient(130deg,transparent_35%,rgba(255,255,255,.04)_50%,transparent_65%)]" />
-              <div className="absolute inset-x-5 bottom-5 rounded-2xl bg-black/35 p-4 backdrop-blur-xl ring-1 ring-white/10">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent/20">
-                    <AudioLines className="h-6 w-6 text-studio-accent-light" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex h-8 items-end gap-1">
-                      {[12, 22, 15, 28, 18, 30, 12, 24, 17, 26, 14, 20].map(
-                        (height, index) => (
-                          <span
-                            key={index}
-                            className="flex-1 rounded-full bg-gradient-to-t from-studio-accent to-studio-gold"
-                            style={{ height }}
-                          />
-                        )
-                      )}
-                    </div>
-                    <p className="mt-2 text-xs text-studio-muted">
-                      AI анализирует чистоту интонации
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="absolute left-1/2 top-1/2 flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 backdrop-blur-md ring-1 ring-white/20 transition hover:scale-105 hover:bg-studio-accent/20"
-                aria-label="Воспроизвести видео"
-              >
-                <Play className="h-8 w-8 translate-x-0.5 text-white" />
-              </button>
-              <div className="absolute left-5 top-5 flex items-center gap-2 rounded-full bg-black/30 px-3 py-1.5 text-xs backdrop-blur">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
-                Видео о платформе
-              </div>
-            </div>
-          </div>
+        <section className="rounded-3xl bg-gradient-to-r from-studio-accent/10 via-studio-card to-blue-500/10 p-8 text-center ring-1 ring-studio-border sm:p-12">
+          <Mic2 className="mx-auto h-8 w-8 text-studio-accent" />
+          <h2 className="mt-4 font-display text-3xl font-semibold">
+            Начните без оплаты
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-studio-muted">
+            Кабинет открывается бесплатно. Преподаватель активирует вас как
+            ученика — и можно записываться на занятия. Платить за приложение не
+            нужно: это отдельная возможность, не условие учёбы.
+          </p>
+          <Button className="mt-6" size="lg" onClick={() => openAuth("register")}>
+            Зарегистрироваться
+          </Button>
         </section>
 
         <section id="subscriptions" className="scroll-mt-10 py-16">
           <div className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-medium uppercase tracking-[0.24em] text-studio-accent">
-              Наши подписки
+              По желанию
             </p>
             <h2 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">
-              Выберите темп своего роста
+              Когда захотите заниматься глубже и дома
             </h2>
             <p className="mt-4 text-studio-muted">
-              Подписка открывает функции IT-платформы. Цены ниже — в рублях,
-              без НДС. Занятия вокалом оплачиваются отдельно: сумма видна в
+              Подписка не заменяет уроки и не обязательна. Она открывает
+              анализатор нот, минусовки, распевки и другие инструменты — чтобы
+              между занятиями прогресс не замирал, а копился. Цены в рублях, без
+              НДС. Сами уроки вокала оплачиваются отдельно: сумма видна в
               кабинете до платежа.
             </p>
           </div>
@@ -183,9 +146,9 @@ export default function LandingPage() {
                       : "bg-studio-surface ring-studio-border hover:ring-studio-accent/30"
                   }`}
                 >
-                  {plan.highlighted && (
-                    <Badge className="absolute right-5 top-5">Популярный</Badge>
-                  )}
+                  {plan.highlighted ? (
+                    <Badge className="absolute right-5 top-5">Чаще выбирают</Badge>
+                  ) : null}
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-accent/10 ring-1 ring-studio-accent/25">
                     <Icon className="h-6 w-6 text-studio-accent" />
                   </div>
@@ -212,7 +175,7 @@ export default function LandingPage() {
                     variant={plan.highlighted ? "primary" : "secondary"}
                     onClick={() => openAuth("register")}
                   >
-                    Оформить подписку
+                    Выбрать {plan.title}
                   </Button>
                 </article>
               );
@@ -220,77 +183,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="mt-8 rounded-3xl bg-gradient-to-r from-studio-accent/10 via-studio-card to-blue-500/10 p-8 text-center ring-1 ring-studio-border sm:p-12">
-          <Mic2 className="mx-auto h-8 w-8 text-studio-accent" />
-          <h2 className="mt-4 font-display text-3xl font-semibold">
-            Ваш уникальный голос уже внутри
-          </h2>
-          <p className="mx-auto mt-3 max-w-lg text-studio-muted">
-            Создайте аккаунт и начните с персональной траектории развития.
-          </p>
-          <Button className="mt-6" size="lg" onClick={() => openAuth("register")}>
-            Начать бесплатно
-          </Button>
-        </section>
-
-        <section id="contacts" className="mt-10 grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
-          <div className="rounded-3xl bg-studio-card/70 p-6 ring-1 ring-studio-border sm:p-8">
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-studio-gold">
-              Контакты
-            </p>
-            <h2 className="mt-2 font-display text-2xl font-semibold">
-              Связаться со студией
-            </h2>
-            <p className="mt-3 text-sm leading-relaxed text-studio-muted">
-              {LEGAL.contactHours}.
-            </p>
-            <ul className="mt-6 space-y-3 text-sm">
-              <li className="flex items-center gap-3">
-                <Phone className="h-4 w-4 shrink-0 text-studio-accent" />
-                <a className="hover:text-studio-accent-light" href={LEGAL.phoneHref}>
-                  {LEGAL.phone}
-                </a>
-              </li>
-              <li className="flex items-center gap-3">
-                <Mail className="h-4 w-4 shrink-0 text-studio-accent" />
-                <a
-                  className="hover:text-studio-accent-light"
-                  href={`mailto:${LEGAL.email}`}
-                >
-                  {LEGAL.email}
-                </a>
-              </li>
-              <li className="flex items-center gap-3">
-                <MapPin className="h-4 w-4 shrink-0 text-studio-accent" />
-                <span>г. {LEGAL.city}</span>
-              </li>
-            </ul>
-            <p className="mt-6 text-sm text-studio-muted">
-              Условия оказания услуг, оплата, отказ и возврат — в{" "}
-              <Link href={LEGAL.offerPath} className="text-studio-accent-light underline">
-                оферте
-              </Link>
-              . Полный прайс — на странице{" "}
-              <Link href={LEGAL.uslugiPath} className="text-studio-accent-light underline">
-                «Услуги и цены»
-              </Link>
-              .
-            </p>
-          </div>
-          <RequisitesCard />
-        </section>
-
-        <SiteFooter
-          extra={
-            <Link
-              href="/admin/login"
-              className="inline-flex items-center gap-1.5 transition hover:text-studio-accent-light"
-            >
-              <Crown className="h-3.5 w-3.5" />
-              Вход для администратора
-            </Link>
-          }
-        />
+        <SiteFooter />
       </div>
 
       <AuthModal
