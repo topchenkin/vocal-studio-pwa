@@ -13,7 +13,7 @@ export default function Logo({ className = "", size = 48 }: LogoProps) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src="/icons/logo.png?v=39"
+      src="/icons/logo.png?v=40"
       alt="Unique Vocal Studio"
       width={size}
       height={size}
