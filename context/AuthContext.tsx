@@ -52,7 +52,12 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isActiveStudent: boolean;
   isMockAdmin: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<AuthResult>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName: string,
+    phone?: string
+  ) => Promise<AuthResult>;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -283,13 +288,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isMockAdmin, loadProfile, user]);
 
   const signUp = useCallback(
-    async (email: string, password: string, fullName: string): Promise<AuthResult> => {
+    async (
+      email: string,
+      password: string,
+      fullName: string,
+      phone?: string
+    ): Promise<AuthResult> => {
       try {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { full_name: fullName },
+            data: {
+              full_name: fullName,
+              phone: phone?.trim() || null,
+            },
           },
         });
 

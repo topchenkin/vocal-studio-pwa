@@ -231,6 +231,25 @@ function StudentEditor({
           </button>
         </div>
 
+        {draft.gift_certificate_id && (
+          <div className="rounded-2xl bg-studio-gold/10 p-4 ring-1 ring-studio-gold/35">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-studio-gold">
+              Подарочный сертификат
+            </p>
+            <p className="mt-2 text-sm">
+              {draft.gift_buyer_name
+                ? `От: ${draft.gift_buyer_name}. `
+                : ""}
+              {draft.gift_note || "Есть активированный подарок — не забудьте одобрить ученика."}
+            </p>
+            {draft.gift_kind && (
+              <p className="mt-2 text-xs text-studio-muted">
+                Тип: {draft.gift_kind}
+              </p>
+            )}
+          </div>
+        )}
+
         <fieldset>
           <legend className="mb-2 text-xs font-medium text-studio-muted">
             Подписка платформы
@@ -747,6 +766,14 @@ export default function StudentsTable() {
                       {student.is_active_student ? "Активен" : "Новый"}
                     </Badge>
                   </div>
+                  {student.gift_certificate_id && (
+                    <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-studio-gold">
+                      Сертификат
+                      {student.gift_buyer_name
+                        ? ` · ${student.gift_buyer_name}`
+                        : ""}
+                    </p>
+                  )}
                   <p className="mt-1 whitespace-nowrap text-[10px] text-studio-accent">
                     <CatLevelText
                       label={

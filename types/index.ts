@@ -10,6 +10,39 @@ export type LessonPayType = "abonement" | "one_time";
 
 export type CatLevel = "beginner" | "basic" | "pro" | "star";
 
+export type GiftCertificateKind =
+  | "lesson"
+  | "abonement"
+  | "subscription"
+  | "premium";
+
+export type GiftCertificateStatus =
+  | "pending_payment"
+  | "paid"
+  | "redeemed"
+  | "cancelled";
+
+export interface GiftCertificateRow {
+  [key: string]: unknown;
+  id: string;
+  code: string;
+  kind: GiftCertificateKind;
+  lessons_count: number | null;
+  app_sub_tier: "standard" | "premium" | "vip" | null;
+  amount_rub: number;
+  recipient_name: string;
+  buyer_name: string | null;
+  note: string;
+  status: GiftCertificateStatus;
+  payment_id: string | null;
+  invoice_no: number | null;
+  redeemed_by: string | null;
+  redeemed_at: string | null;
+  expires_at: string | null;
+  paid_at: string | null;
+  created_at: string;
+}
+
 export interface StudentProfile {
   [key: string]: unknown;
   id: string;
@@ -25,6 +58,11 @@ export interface StudentProfile {
   custom_abonement_price: number;
   lessons_balance: number;
   debt_amount: number;
+  phone?: string | null;
+  gift_certificate_id?: string | null;
+  gift_kind?: string | null;
+  gift_note?: string | null;
+  gift_buyer_name?: string | null;
 }
 
 export type LessonStatus = "open" | "scheduled" | "completed" | "cancelled";
@@ -134,9 +172,9 @@ export interface SubscriptionProduct {
 export interface PaymentTransaction {
   [key: string]: unknown;
   id: string;
-  student_id: string;
+  student_id: string | null;
   product_code: string | null;
-  purpose: "lesson_debt" | "lesson_package" | "app_subscription";
+  purpose: "lesson_debt" | "lesson_package" | "app_subscription" | "gift_certificate";
   amount_rub: number;
   provider: string;
   status: "pending" | "confirmed" | "failed" | "cancelled" | "refunded";
@@ -382,6 +420,12 @@ export interface Database {
         Update: Partial<
           Pick<PaymentTransaction, "status" | "external_id" | "confirmed_at">
         >;
+        Relationships: [];
+      };
+      gift_certificates: {
+        Row: GiftCertificateRow;
+        Insert: Record<string, never>;
+        Update: Partial<GiftCertificateRow>;
         Relationships: [];
       };
       exercise_folder_access: {
@@ -650,6 +694,26 @@ export interface Database {
       };
       admin_assign_lesson: {
         Args: { lesson_id: string; target_student_id: string };
+        Returns: undefined;
+      };
+      redeem_gift_certificate: {
+        Args: { p_code: string };
+        Returns: { ok: boolean; kind: string };
+      };
+      admin_create_gift_certificate: {
+        Args: {
+          p_kind: string;
+          p_recipient_name: string;
+          p_note: string;
+          p_amount_rub: number;
+          p_lessons_count?: number | null;
+          p_app_sub_tier?: string | null;
+          p_buyer_name?: string | null;
+        };
+        Returns: Record<string, unknown>;
+      };
+      admin_cancel_gift_certificate: {
+        Args: { p_id: string };
         Returns: undefined;
       };
       complete_sandbox_payment: {

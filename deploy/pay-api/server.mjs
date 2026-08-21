@@ -153,6 +153,124 @@ function money(value) {
   return Number(value).toFixed(2);
 }
 
+async function handleInitGift(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "method" });
+  const auth = String(req.headers.authorization || "");
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json(res, 401, { error: "Нужно войти" });
+
+  const user = await authUser(token);
+  if (!user?.id) return json(res, 401, { error: "Сессия истекла, войдите снова" });
+
+  const profile = await loadProfile(user.id);
+  if (!profile || profile.role !== "admin") {
+    return json(res, 403, { error: "Ссылку на подарок создаёт преподаватель" });
+  }
+
+  let body = {};
+  try {
+    body = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return json(res, 400, { error: "Некорректный запрос" });
+  }
+
+  const certificateId = String(body.certificateId || "").trim();
+  if (!certificateId) return json(res, 400, { error: "Нет сертификата" });
+
+  const certRes = await sb(
+    `/rest/v1/gift_certificates?id=eq.${encodeURIComponent(certificateId)}&select=*&limit=1`
+  );
+  if (!certRes.ok) {
+    return json(res, 500, { error: "Не удалось прочитать сертификат" });
+  }
+  const certRows = await certRes.json();
+  const cert = Array.isArray(certRows) ? certRows[0] : certRows;
+  if (!cert) return json(res, 404, { error: "Сертификат не найден" });
+  if (cert.status === "redeemed" || cert.status === "cancelled") {
+    return json(res, 400, { error: "Этот сертификат уже нельзя оплатить" });
+  }
+  if (cert.status === "paid") {
+    return json(res, 400, { error: "Сертификат уже оплачен" });
+  }
+
+  const outSum = money(cert.amount_rub);
+  const description = `Подарок Unique Vocal: ${cert.recipient_name}`.slice(0, 100);
+
+  const insert = await sb("/rest/v1/payment_transactions", {
+    method: "POST",
+    headers: { prefer: "return=representation" },
+    body: JSON.stringify({
+      student_id: null,
+      product_code: null,
+      purpose: "gift_certificate",
+      amount_rub: Number(outSum),
+      provider: "robokassa",
+      status: "pending",
+      metadata: {
+        is_test: IS_TEST,
+        gift_id: cert.id,
+        gift_code: cert.code,
+        recipient_name: cert.recipient_name,
+        gift_kind: cert.kind,
+        description,
+      },
+    }),
+  });
+  if (!insert.ok) {
+    const detail = await insert.text();
+    console.error("gift invoice failed", insert.status, detail);
+    return json(res, 500, { error: "Не удалось создать счёт на подарок" });
+  }
+  const rows = await insert.json();
+  const tx = Array.isArray(rows) ? rows[0] : rows;
+  const invId = Number(tx?.invoice_no);
+  if (!invId) {
+    console.error("gift invoice_no missing", tx);
+    return json(res, 500, { error: "Счёт создан без номера" });
+  }
+
+  const patch = await sb(
+    `/rest/v1/gift_certificates?id=eq.${encodeURIComponent(cert.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        payment_id: tx.id,
+        invoice_no: invId,
+        status: "pending_payment",
+      }),
+    }
+  );
+  if (!patch.ok) {
+    const detail = await patch.text();
+    console.error("gift patch failed", patch.status, detail);
+    return json(res, 500, { error: "Счёт создан, но сертификат не обновился" });
+  }
+
+  const signature = signInit(outSum, invId);
+  const pay = new URL(PAY_URL);
+  pay.searchParams.set("MerchantLogin", MERCHANT);
+  pay.searchParams.set("OutSum", outSum);
+  pay.searchParams.set("InvId", String(invId));
+  pay.searchParams.set("Description", description);
+  pay.searchParams.set("SignatureValue", signature);
+  pay.searchParams.set("Culture", "ru");
+  pay.searchParams.set("IncCurrLabel", "SBP");
+  pay.searchParams.append("PaymentMethods", "SBP");
+  pay.searchParams.set("SuccessUrl2", SUCCESS_URL);
+  pay.searchParams.set("SuccessUrl2Method", "GET");
+  pay.searchParams.set("FailUrl2", FAIL_URL);
+  pay.searchParams.set("FailUrl2Method", "GET");
+  if (IS_TEST) pay.searchParams.set("IsTest", "1");
+
+  return json(res, 200, {
+    paymentUrl: pay.toString(),
+    invoiceNo: invId,
+    amount: Number(outSum),
+    isTest: IS_TEST,
+    code: cert.code,
+  });
+}
+
 async function handleInit(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
@@ -318,6 +436,7 @@ const server = createServer(async (req, res) => {
     }
     if (!ready()) return json(res, 503, { error: "pay-api is not configured" });
     if (path === "/api/robokassa/init") return handleInit(req, res);
+    if (path === "/api/robokassa/init-gift") return handleInitGift(req, res);
     if (path === "/api/robokassa/result") return handleResult(req, res);
     return json(res, 404, { error: "not found" });
   } catch (error) {

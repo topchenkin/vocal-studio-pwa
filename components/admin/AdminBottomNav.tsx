@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { CalendarDays, MessageCircle, Music2, WalletCards } from "lucide-react";
+import { CalendarDays, Gift, MessageCircle, Music2, WalletCards } from "lucide-react";
 import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
 
 const items = [
@@ -20,7 +20,7 @@ const items = [
   {
     id: "audio",
     href: "/dashboard/admin?tab=audio",
-    label: "Мои аудио",
+    label: "Аудио",
     icon: Music2,
   },
   {
@@ -28,6 +28,12 @@ const items = [
     href: "/dashboard/admin?tab=debtors",
     label: "Должники",
     icon: WalletCards,
+  },
+  {
+    id: "gifts",
+    href: "/dashboard/admin?tab=gifts",
+    label: "Сертификаты",
+    icon: Gift,
   },
 ] as const;
 
@@ -42,7 +48,7 @@ export default function AdminBottomNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
       aria-label="Быстрый доступ"
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-4 px-2 pt-1">
+      <div className="mx-auto grid max-w-6xl grid-cols-5 px-1 pt-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = onCabinet && tab === item.id;
@@ -51,7 +57,7 @@ export default function AdminBottomNav() {
               key={item.id}
               href={item.href}
               tabId={item.id}
-              className={`flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition ${
+              className={`flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition sm:text-[11px] ${
                 active
                   ? "text-studio-accent-light"
                   : "text-studio-muted hover:text-studio-text"

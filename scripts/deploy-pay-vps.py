@@ -11,6 +11,7 @@ PASSWORD = os.environ.get("UVS_SSH_PASS", "")
 ROOT = Path(__file__).resolve().parents[1]
 PAY = ROOT / "deploy" / "pay-api"
 SQL = ROOT / "supabase-migrations" / "2026-08-21-robokassa-confirm.sql"
+GIFT_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-certificates.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -92,6 +93,8 @@ def main() -> None:
         raise SystemExit("UVS_SSH_PASS is not set")
     if not SQL.is_file():
         raise SystemExit(f"missing {SQL}")
+    if not GIFT_SQL.is_file():
+        raise SystemExit(f"missing {GIFT_SQL}")
     env = env_file_bytes()
 
     client = paramiko.SSHClient()
@@ -118,6 +121,8 @@ def main() -> None:
                 fh.write(env)
             with sftp.file("/opt/uvs-migrate/robokassa.sql", "wb") as fh:
                 fh.write(SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/gift-certificates.sql", "wb") as fh:
+                fh.write(GIFT_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -128,6 +133,10 @@ def main() -> None:
         run(
             client,
             "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/robokassa.sql",
+        )
+        run(
+            client,
+            "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/gift-certificates.sql",
         )
         run(client, "systemctl daemon-reload")
         run(client, "systemctl enable --now pay-api")

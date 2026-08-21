@@ -26,6 +26,7 @@ import AdminAiToolBody, {
 } from "@/components/admin/AdminAiToolsPanel";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import DebtorsPanel from "@/components/admin/DebtorsPanel";
+import GiftCertificatesPanel from "@/components/admin/GiftCertificatesPanel";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -55,7 +56,7 @@ const TABS = [
   },
 ];
 
-const QUICK_TABS = ["chat", "audio", "debtors"] as const;
+const QUICK_TABS = ["chat", "audio", "debtors", "gifts"] as const;
 
 function isAdminTab(value: string | null): boolean {
   return Boolean(
@@ -125,9 +126,11 @@ export default function AdminDashboardClient() {
         ? "Мои аудио"
         : activeTab === "debtors"
           ? "Должники"
-          : "Панель администратора";
+          : activeTab === "gifts"
+            ? "Сертификаты"
+            : "Панель администратора";
   const subtitle =
-    isChat || activeTab === "audio" || activeTab === "debtors"
+    isChat || activeTab === "audio" || activeTab === "debtors" || activeTab === "gifts"
       ? undefined
       : isAiTools
         ? "Доступ учеников и инструменты по вкладкам"
@@ -183,6 +186,7 @@ export default function AdminDashboardClient() {
             {activeTab === "content" && <ContentManager />}
             {activeTab === "audio" && <MyAudioLibrary />}
             {activeTab === "debtors" && <DebtorsPanel />}
+            {activeTab === "gifts" && <GiftCertificatesPanel />}
             {activeTab === "ai-tools" && <AdminAiToolBody active={aiSubTab} />}
           </motion.div>
         </AnimatePresence>

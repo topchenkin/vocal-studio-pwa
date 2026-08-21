@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
+import { Eye, EyeOff, Gift, LogIn, UserPlus } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { formatGiftCode, normalizeGiftCode } from "@/lib/gift-certificates";
+import { supabase } from "@/lib/supabase";
 
 type AuthMode = "login" | "register";
 
@@ -14,16 +16,20 @@ interface AuthModalProps {
   onClose: () => void;
 }
 
+const PENDING_GIFT_KEY = "uvs_pending_gift_code";
+
 export default function AuthModal({
   open,
   initialMode,
   onClose,
 }: AuthModalProps) {
-  const { signIn, signUp, backendError } = useAuth();
+  const { signIn, signUp, backendError, refreshProfile } = useAuth();
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [giftCode, setGiftCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -36,6 +42,18 @@ export default function AuthModal({
     setMessage("");
   }, [initialMode, open]);
 
+  const redeemIfNeeded = async (codeRaw: string) => {
+    const code = normalizeGiftCode(codeRaw);
+    if (code.length !== 12) return null;
+    const { error: redeemError } = await supabase.rpc(
+      "redeem_gift_certificate",
+      { p_code: code }
+    );
+    if (redeemError) return redeemError.message;
+    await refreshProfile();
+    return null;
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
@@ -46,14 +64,23 @@ export default function AuthModal({
       return;
     }
     if (mode === "register" && !fullName.trim()) {
-      setError("Укажите имя");
+      setError("Укажите имя — как на подарочном сертификате");
+      return;
+    }
+    if (mode === "register" && !phone.trim()) {
+      setError("Укажите телефон");
+      return;
+    }
+    const code = normalizeGiftCode(giftCode);
+    if (mode === "register" && giftCode.trim() && code.length !== 12) {
+      setError("Код сертификата — 12 букв и цифр");
       return;
     }
 
     setSubmitting(true);
     const result =
       mode === "register"
-        ? await signUp(email.trim(), password, fullName.trim())
+        ? await signUp(email.trim(), password, fullName.trim(), phone.trim())
         : await signIn(email.trim(), password);
     setSubmitting(false);
 
@@ -63,8 +90,30 @@ export default function AuthModal({
     }
 
     if (result.needsEmailConfirmation) {
-      setMessage("Проверьте почту и подтвердите регистрацию.");
+      if (code.length === 12) {
+        try {
+          sessionStorage.setItem(PENDING_GIFT_KEY, code);
+        } catch {
+          /* ignore */
+        }
+      }
+      setMessage(
+        "Проверьте почту и подтвердите регистрацию. После входа сертификат активируется сам, если имя совпадает."
+      );
       return;
+    }
+
+    if (mode === "register" && code.length === 12) {
+      setSubmitting(true);
+      const redeemError = await redeemIfNeeded(code);
+      setSubmitting(false);
+      if (redeemError) {
+        setError(
+          `Аккаунт создан, но сертификат не активирован: ${redeemError}`
+        );
+        return;
+      }
+      setMessage("Сертификат активирован. Можно заходить в кабинет.");
     }
 
     onClose();
@@ -86,22 +135,54 @@ export default function AuthModal({
         <p className="text-sm leading-relaxed text-studio-muted">
           {mode === "login"
             ? "Войдите в личный кабинет Unique Vocal Studio."
-            : "Создайте аккаунт платформы. Статус активного ученика назначает администратор."}
+            : "Создайте аккаунт. Если есть подарок — введите код. Имя должно совпасть с сертификатом."}
         </p>
 
         {mode === "register" && (
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
-              Имя
-            </span>
-            <input
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              autoComplete="name"
-              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
-              placeholder="Ваше имя"
-            />
-          </label>
+          <>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+                Имя
+              </span>
+              <input
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                autoComplete="name"
+                className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
+                placeholder="Как на сертификате"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+                Телефон
+              </span>
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                autoComplete="tel"
+                className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
+                placeholder="+7 …"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-studio-muted">
+                <Gift className="h-3.5 w-3.5 text-studio-gold" />
+                Код подарочного сертификата
+              </span>
+              <input
+                value={giftCode}
+                onChange={(event) =>
+                  setGiftCode(formatGiftCode(event.target.value).slice(0, 14))
+                }
+                autoComplete="off"
+                className="w-full rounded-xl bg-studio-surface px-4 py-3 font-mono text-sm tracking-wider ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
+                placeholder="XXXX-XXXX-XXXX"
+              />
+              <span className="mt-1 block text-[11px] text-studio-muted">
+                Необязательно сейчас — можно активировать позже в кабинете.
+              </span>
+            </label>
+          </>
         )}
 
         <label className="block">

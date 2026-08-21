@@ -8,6 +8,7 @@ import SubscriptionStatus from "@/components/student/SubscriptionStatus";
 import UpcomingLessons from "@/components/student/UpcomingLessons";
 import NotesSection from "@/components/student/NotesSection";
 import VocalProgressSection from "@/components/student/VocalProgressSection";
+import GiftRedeemCard from "@/components/student/GiftRedeemCard";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import StudentNav from "@/components/student/StudentNav";
@@ -168,6 +169,7 @@ export default function StudentDashboardClient() {
             {activeTab === "home" && (
               <div className="space-y-8">
                 <SubscriptionStatus />
+                <GiftRedeemCard />
                 <section>
                   <h3 className="font-display text-lg font-semibold">
                     Домашние задания

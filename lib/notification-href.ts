@@ -54,6 +54,8 @@ export function resolveNotificationHref(input: {
   }
 
   if (input.kind === "payment" && input.isAdmin) {
+    const tab = parsed?.searchParams.get("tab");
+    if (tab === "gifts") return "/dashboard/admin?tab=gifts";
     return "/dashboard/admin?tab=students";
   }
 
