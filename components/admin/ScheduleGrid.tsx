@@ -228,6 +228,16 @@ export default function ScheduleGrid() {
     [lessons]
   );
 
+  const pendingDates = useMemo(
+    () =>
+      new Set(
+        lessons
+          .filter((lesson) => lesson.reschedule_request === "pending")
+          .map((lesson) => localDateKey(lesson.datetime))
+      ),
+    [lessons]
+  );
+
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(VIEW_STORAGE);
@@ -691,8 +701,7 @@ export default function ScheduleGrid() {
 
         {lessons.some((l) => l.reschedule_request === "pending") && (
           <div className="rounded-2xl bg-studio-gold/10 px-4 py-3 text-sm text-studio-gold ring-1 ring-studio-gold/25">
-            Есть запросы на перенос — отмечены в карточках уроков. Откройте день
-            в календаре или список.
+            Есть запросы на перенос — в календаре такие дни с жёлтой точкой.
           </div>
         )}
 
@@ -708,6 +717,7 @@ export default function ScheduleGrid() {
           <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
             <MonthCalendar
               availableDates={new Set(Object.keys(lessonsByDate))}
+              highlightDates={pendingDates}
               selectedDate={selectedDate}
               onSelect={setSelectedDate}
               allowPast

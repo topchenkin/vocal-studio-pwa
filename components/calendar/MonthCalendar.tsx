@@ -16,11 +16,13 @@ export default function MonthCalendar({
   selectedDate,
   onSelect,
   allowPast = false,
+  highlightDates,
 }: {
   availableDates: Set<string>;
   selectedDate: string | null;
   onSelect: (dateKey: string) => void;
   allowPast?: boolean;
+  highlightDates?: Set<string>;
 }) {
   const initialDate = selectedDate
     ? new Date(`${selectedDate}T12:00:00`)
@@ -106,7 +108,8 @@ export default function MonthCalendar({
       <div className="grid grid-cols-7 gap-1">
         {days.map((day) => {
           const key = localDateKey(day);
-          const available = availableDates.has(key);
+          const pending = highlightDates?.has(key) ?? false;
+          const available = availableDates.has(key) || pending;
           const selected = selectedDate === key;
           const inMonth = day.getMonth() === visibleMonth.getMonth();
           const past = day < new Date(new Date().setHours(0, 0, 0, 0));
@@ -119,19 +122,27 @@ export default function MonthCalendar({
               onClick={() => onSelect(key)}
               className={`relative aspect-square rounded-xl text-sm transition ${
                 selected
-? "bg-studio-accent text-white"
+                  ? "bg-studio-accent text-white"
+                  : pending
+                    ? "bg-studio-gold/20 text-studio-text hover:bg-studio-gold/30"
                     : available
                     ? "bg-studio-card text-studio-text hover:bg-studio-accent/20"
                     : inMonth
                       ? "text-studio-muted/45"
                       : "text-studio-muted/20"
               } disabled:cursor-default`}
-              aria-label={day.toLocaleDateString("ru-RU")}
+              aria-label={
+                pending
+                  ? `${day.toLocaleDateString("ru-RU")}, есть запрос на перенос`
+                  : day.toLocaleDateString("ru-RU")
+              }
             >
               {day.getDate()}
-              {available && !selected && (
+              {pending ? (
+                <span className="absolute bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-studio-gold" />
+              ) : available && !selected ? (
                 <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-studio-accent" />
-              )}
+              ) : null}
             </button>
           );
         })}

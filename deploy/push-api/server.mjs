@@ -19,6 +19,7 @@ const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || "";
 const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || "mailto:iris.jar008@gmail.com";
 const POLL_MS = Number(process.env.PUSH_POLL_MS) || 4000;
+const REMIND_MS = Number(process.env.PUSH_REMIND_MS) || 15 * 60 * 1000;
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
 ).replace(/\/$/, "");
@@ -204,11 +205,39 @@ async function pollOnce() {
 }
 
 let ticking = false;
+let lastRemindAt = 0;
+
+async function remindPendingReschedules() {
+  const response = await sb("/rest/v1/rpc/remind_pending_reschedules", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "remind pending failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("pending reschedule reminders", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
 async function tick() {
   if (ticking) return;
   ticking = true;
   try {
     await pollOnce();
+    if (Date.now() - lastRemindAt >= REMIND_MS) {
+      lastRemindAt = Date.now();
+      await remindPendingReschedules();
+    }
   } catch (error) {
     console.error("push poll failed", error?.message || error);
   } finally {
