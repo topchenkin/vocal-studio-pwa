@@ -12,6 +12,7 @@ import { useAuth } from "@/context/AuthContext";
 import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
 import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
+import CatLevelText from "@/components/ui/CatLevelText";
 import type { CatLevel } from "@/types";
 
 const catLevels: Record<
@@ -70,9 +71,11 @@ export default function SubscriptionStatus() {
                 <p className="text-xs uppercase tracking-wider text-studio-muted">
                   Ваш уровень
                 </p>
-                <h2 className="whitespace-nowrap font-display text-2xl font-semibold">
-                  {cat.title}
-                </h2>
+                <CatLevelText
+                  as="h2"
+                  label={cat.title}
+                  className="whitespace-nowrap font-display text-2xl font-semibold"
+                />
               </div>
             </motion.div>
             <Badge variant={tier === "vip" ? "gold" : "default"}>

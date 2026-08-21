@@ -28,12 +28,12 @@ import {
 } from "@/lib/pitch";
 import {
   connectAnalyserToDestination,
+  getSingingMicStream,
   isAppleWebKit,
   readAnalyserTimeDomain,
   singingInputGainValue,
-  singingMicConstraints,
 } from "@/lib/mic-audio";
-import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
+import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 export type { PitchFrame } from "@/lib/pitch";
 
@@ -293,14 +293,11 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     if (streamRef.current && audioContextRef.current && analyserRef.current) {
       return;
     }
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (typeof window === "undefined") {
       throw new Error("Микрофон недоступен в этом браузере.");
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: singingMicConstraints(),
-    });
-    holdIosCapture(stream);
+    const stream = await getSingingMicStream();
     streamRef.current = stream;
     const AudioCtx =
       window.AudioContext ||
@@ -337,7 +334,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     try {
       await ensureAudio();
     } catch {
-      setError("Не удалось получить доступ к микрофону. Разрешите его в настройках браузера / PWA.");
+      setError("Не удалось включить микрофон.");
       cleanup();
     }
   }, [ensureAudio, cleanup]);
@@ -365,7 +362,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
             setTesting(true);
             setTestProgress(0);
           } catch (err) {
-            setError("Не удалось запустить тест. Проверьте разрешение микрофона.");
+            setError("Не удалось запустить тест.");
             reject(err instanceof Error ? err : new Error("Failed to start test"));
           }
         })();

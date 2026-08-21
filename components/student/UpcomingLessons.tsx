@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRightLeft, Ban, Calendar, CheckCircle2, Clock, List } from "lucide-react";
+import { ArrowRightLeft, Calendar, CalendarX2, CheckCircle2, Clock, List } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -323,14 +323,14 @@ export default function UpcomingLessons() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="danger"
+                      variant="secondary"
                       disabled={requestingId === lesson.id}
                       onClick={() => {
                         setCancelLesson(lesson);
                         setNote("");
                       }}
                     >
-                      <Ban className="h-4 w-4" />
+                      <CalendarX2 className="h-4 w-4" />
                       Запросить отмену
                     </Button>
                   </div>
@@ -426,11 +426,10 @@ export default function UpcomingLessons() {
           </label>
           <Button
             fullWidth
-            variant="danger"
             disabled={Boolean(requestingId)}
             onClick={() => void requestCancel()}
           >
-            <Ban className="h-4 w-4" />
+            <CalendarX2 className="h-4 w-4" />
             {requestingId ? "Отправляем..." : "Отправить запрос на отмену"}
           </Button>
         </div>

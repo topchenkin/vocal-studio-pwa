@@ -1,3 +1,9 @@
+import {
+  armIosCapture,
+  cancelArmedIosCapture,
+  holdIosCapture,
+} from "@/lib/ios-audio-session";
+
 /**
  * Shared mic graph helpers for singing analysis (tuner + star-double).
  *
@@ -34,6 +40,58 @@ export function singingMicConstraints(): MediaTrackConstraints {
 /** Linear gain applied after the mic node. ~12 dB on iOS, unity elsewhere. */
 export function singingInputGainValue(): number {
   return isAppleWebKit() ? 4 : 1;
+}
+
+/**
+ * Ask for the mic the same way chat does: arm iOS audio session first,
+ * request a simple `{ audio: true }` so the OS prompt actually appears,
+ * then optionally tighten constraints. Strict singing constraints alone
+ * make Safari throw NotAllowedError with no prompt — even if Settings
+ * already show the site as allowed.
+ */
+export async function getSingingMicStream(): Promise<MediaStream> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Микрофон недоступен");
+  }
+
+  armIosCapture();
+  try {
+    let stream: MediaStream;
+    if (isAppleWebKit()) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+      }
+      const track = stream.getAudioTracks()[0];
+      if (track) {
+        void track.applyConstraints(singingMicConstraints()).catch(() => undefined);
+      }
+    } else {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: singingMicConstraints(),
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    }
+    holdIosCapture(stream);
+    return stream;
+  } catch (error) {
+    cancelArmedIosCapture();
+    throw error;
+  }
 }
 
 /**

@@ -29,7 +29,8 @@ import {
   decodeBlobToAudioBuffer,
   mixAudioBuffersWithOffsets,
 } from "@/lib/wav-client";
-import { holdIosCapture, preferIosPlayback, releaseIosCapture } from "@/lib/ios-audio-session";
+import { getSingingMicStream } from "@/lib/mic-audio";
+import { preferIosPlayback, releaseIosCapture } from "@/lib/ios-audio-session";
 import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_TRACKS = 10;
@@ -546,15 +547,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     if (existing?.getAudioTracks().some((t) => t.readyState === "live")) {
       return existing;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
-    });
-    holdIosCapture(stream);
+    const stream = await getSingingMicStream();
     streamRef.current = stream;
     return stream;
   };

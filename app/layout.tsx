@@ -75,7 +75,7 @@ const BOOT_SCRIPT = `(function(){
     document.documentElement.style.colorScheme="dark";
     document.documentElement.style.backgroundColor="#0a0a0f";
   }
-  var VER="33";
+  var VER="34";
   try{
     if(localStorage.getItem("uvs-sw-bust")!==VER){
       var hadController=Boolean(navigator.serviceWorker&&navigator.serviceWorker.controller);

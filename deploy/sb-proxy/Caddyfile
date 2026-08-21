@@ -17,6 +17,7 @@
 
 (site) {
 	header Alt-Svc "clear"
+	header Permissions-Policy "microphone=(self), camera=(self)"
 	root * /var/www/uniquevocal
 	encode gzip
 	handle /_next/* {

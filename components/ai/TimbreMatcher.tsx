@@ -27,11 +27,11 @@ import {
 } from "@/lib/pcm-capture";
 import {
   connectAnalyserToDestination,
+  getSingingMicStream,
   readAnalyserTimeDomain,
   singingInputGainValue,
-  singingMicConstraints,
 } from "@/lib/mic-audio";
-import { holdIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
+import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
 /**
@@ -238,18 +238,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
     setActiveGenre("Pop");
     setProgress(0);
 
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setError("Микрофон недоступен");
-      busyRef.current = false;
-      return;
-    }
-
     try {
       cleanupAudio();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: singingMicConstraints(),
-      });
-      holdIosCapture(stream);
+      const stream = await getSingingMicStream();
       if (isStale(analysisId)) {
         stream.getTracks().forEach((t) => t.stop());
         releaseIosCapture(stream);
@@ -394,7 +385,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       setError(
         err instanceof Error && /тембра/i.test(err.message)
           ? err.message
-          : "Разрешите доступ к микрофону"
+          : "Не удалось включить микрофон"
       );
       cleanupAudio();
       busyRef.current = false;

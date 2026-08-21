@@ -22,6 +22,7 @@ import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
+import CatLevelText from "@/components/ui/CatLevelText";
 import type {
   AppSubscriptionTier,
   CatLevel,
@@ -747,10 +748,13 @@ export default function StudentsTable() {
                     </Badge>
                   </div>
                   <p className="mt-1 whitespace-nowrap text-[10px] text-studio-accent">
-                    {
-                      catOptions.find((option) => option.value === student.cat_level)
-                        ?.label
-                    }
+                    <CatLevelText
+                      label={
+                        catOptions.find(
+                          (option) => option.value === student.cat_level
+                        )?.label ?? ""
+                      }
+                    />
                   </p>
                 </div>
               </div>
