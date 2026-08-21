@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRightLeft, Calendar, CheckCircle2, Clock, List } from "lucide-react";
+import { ArrowRightLeft, Ban, Calendar, CheckCircle2, Clock, List } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -18,6 +18,7 @@ export default function UpcomingLessons() {
   const [requestingId, setRequestingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [rescheduleLesson, setRescheduleLesson] = useState<Lesson | null>(null);
+  const [cancelLesson, setCancelLesson] = useState<Lesson | null>(null);
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [note, setNote] = useState("");
@@ -140,6 +141,43 @@ export default function UpcomingLessons() {
     setRequestingId(null);
   };
 
+  const requestCancel = async () => {
+    if (!cancelLesson) return;
+    setRequestingId(cancelLesson.id);
+    setError("");
+    const studentNote = note.trim().slice(0, 200) || null;
+
+    try {
+      const { error: rpcError } = await supabase.rpc("request_lesson_cancel", {
+        lesson_id: cancelLesson.id,
+        student_note: studentNote,
+      });
+
+      if (rpcError) {
+        setError("Не удалось отправить запрос на отмену");
+        console.error("Unable to request cancel:", rpcError.message);
+        setRequestingId(null);
+        return;
+      }
+
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === cancelLesson.id
+            ? {
+                ...lesson,
+                cancel_request: "pending",
+                cancel_note: studentNote,
+              }
+            : lesson
+        )
+      );
+      setCancelLesson(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка запроса");
+    }
+    setRequestingId(null);
+  };
+
   if (!user) return null;
 
   const lessonDates = new Set(lessons.map((lesson) => localDateKey(lesson.datetime)));
@@ -154,7 +192,7 @@ export default function UpcomingLessons() {
         <div>
           <h3 className="font-display text-lg font-semibold">Ближайшие занятия</h3>
           <p className="text-xs text-studio-muted">
-            Запись делает преподаватель. Здесь можно запросить перенос.
+            Запись делает преподаватель. Здесь можно запросить перенос или отмену.
           </p>
         </div>
         <div className="flex shrink-0 rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
@@ -210,7 +248,9 @@ export default function UpcomingLessons() {
       ) : (
         visibleLessons.map((lesson) => {
           const date = new Date(lesson.datetime);
-          const requestPending = lesson.reschedule_request === "pending";
+          const reschedulePending = lesson.reschedule_request === "pending";
+          const cancelPending = lesson.cancel_request === "pending";
+          const requestPending = reschedulePending || cancelPending;
 
           return (
             <div
@@ -255,24 +295,45 @@ export default function UpcomingLessons() {
               {requestPending ? (
                 <p className="mt-4 flex items-center gap-2 rounded-xl bg-studio-accent/10 px-3 py-2.5 text-sm text-studio-accent-light">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  Запрос на перенос отправлен преподавателю
+                  {cancelPending
+                    ? "Запрос на отмену отправлен преподавателю"
+                    : "Запрос на перенос отправлен преподавателю"}
                 </p>
               ) : (
                 <div className="mt-4">
                   {lesson.reschedule_request === "rejected" && (
                     <p className="mb-2 text-xs text-red-300">
-                      Запрос отклонён. Можно отправить новый или написать в чат.
+                      Перенос отклонён. Можно отправить новый или написать в чат.
                     </p>
                   )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={requestingId === lesson.id}
-                    onClick={() => openReschedule(lesson)}
-                  >
-                    <ArrowRightLeft className="h-4 w-4" />
-                    Запросить перенос
-                  </Button>
+                  {lesson.cancel_request === "rejected" && (
+                    <p className="mb-2 text-xs text-red-300">
+                      Отмена отклонена. Можно отправить новый запрос или написать в чат.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={requestingId === lesson.id}
+                      onClick={() => openReschedule(lesson)}
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      Запросить перенос
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={requestingId === lesson.id}
+                      onClick={() => {
+                        setCancelLesson(lesson);
+                        setNote("");
+                      }}
+                    >
+                      <Ban className="h-4 w-4" />
+                      Запросить отмену
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -336,6 +397,41 @@ export default function UpcomingLessons() {
           >
             <ArrowRightLeft className="h-4 w-4" />
             {requestingId ? "Отправляем..." : "Отправить запрос"}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(cancelLesson)}
+        onClose={() => setCancelLesson(null)}
+        title="Запрос отмены"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-studio-muted">
+            Преподаватель получит уведомление и сам решит, отменить занятие или
+            оставить его в расписании.
+          </p>
+          <label>
+            <span className="mb-1.5 block text-xs text-studio-muted">
+              Комментарий (необязательно)
+            </span>
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              rows={2}
+              className="w-full rounded-xl bg-studio-surface px-3 py-3 text-sm ring-1 ring-studio-border"
+              placeholder="Например: заболел(а), не успеваю"
+            />
+          </label>
+          <Button
+            fullWidth
+            variant="danger"
+            disabled={Boolean(requestingId)}
+            onClick={() => void requestCancel()}
+          >
+            <Ban className="h-4 w-4" />
+            {requestingId ? "Отправляем..." : "Отправить запрос на отмену"}
           </Button>
         </div>
       </Modal>

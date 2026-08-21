@@ -91,7 +91,7 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="Нейросети Premium"
-      subtitle="Анализ нот, тональность, минусовка, звёздный двойник и сведение"
+      subtitle="Анализ нот, тональность, минусовка, Звёздный двойник и сведение"
       bottomInset
     >
       <StudentNav />

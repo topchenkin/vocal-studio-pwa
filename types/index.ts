@@ -29,6 +29,7 @@ export interface StudentProfile {
 
 export type LessonStatus = "open" | "scheduled" | "completed" | "cancelled";
 export type RescheduleRequest = "none" | "pending" | "approved" | "rejected";
+export type CancelRequest = "none" | "pending" | "rejected";
 
 export interface Lesson {
   [key: string]: unknown;
@@ -37,10 +38,12 @@ export interface Lesson {
   datetime: string;
   status: LessonStatus;
   reschedule_request: RescheduleRequest;
+  cancel_request?: CancelRequest;
   series_id?: string | null;
   is_recurring?: boolean;
   preferred_reschedule_at?: string | null;
   reschedule_note?: string | null;
+  cancel_note?: string | null;
 }
 
 export interface Exercise {
@@ -276,10 +279,12 @@ export interface Database {
           datetime: string;
           status?: LessonStatus;
           reschedule_request?: RescheduleRequest;
+          cancel_request?: CancelRequest;
           series_id?: string | null;
           is_recurring?: boolean;
           preferred_reschedule_at?: string | null;
           reschedule_note?: string | null;
+          cancel_note?: string | null;
         };
         Update: Partial<Omit<Lesson, "id">>;
         Relationships: [];
@@ -576,6 +581,13 @@ export interface Database {
         };
         Returns: undefined;
       };
+      request_lesson_cancel: {
+        Args: {
+          lesson_id: string;
+          student_note?: string | null;
+        };
+        Returns: undefined;
+      };
       complete_lesson: {
         Args: { lesson_id: string };
         Returns: undefined;
@@ -623,6 +635,18 @@ export interface Database {
       admin_cancel_lesson: {
         Args: { lesson_id: string };
         Returns: undefined;
+      };
+      admin_resolve_cancel: {
+        Args: { lesson_id: string; approve: boolean };
+        Returns: undefined;
+      };
+      admin_cancel_student_lessons: {
+        Args: {
+          target_student_id: string;
+          period_start: string;
+          period_end: string;
+        };
+        Returns: number;
       };
       admin_assign_lesson: {
         Args: { lesson_id: string; target_student_id: string };

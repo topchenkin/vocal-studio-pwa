@@ -46,7 +46,7 @@ export default function VoiceRadarChart({ user, match }: Props) {
   return (
     <div className="rounded-2xl bg-studio-bg/80 px-3 py-4 ring-1 ring-studio-border">
       <p className="mb-1 text-center text-sm font-semibold text-studio-text">
-        3D-профиль тембра
+        Профиль звёздного двойника
       </p>
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE + 24}`}

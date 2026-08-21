@@ -91,8 +91,8 @@ export function mergeAiToolAccessRows(
       min_tier: minTier,
       enabled: row.enabled !== false,
       title:
-        row.tool_id === "tuner"
-          ? DEFAULT_AI_TOOL_ACCESS.tuner.title
+        row.tool_id === "tuner" || row.tool_id === "timbre"
+          ? DEFAULT_AI_TOOL_ACCESS[row.tool_id].title
           : incomingTitle,
     };
   }

@@ -5,6 +5,7 @@ import {
   midiFromNoteLabel,
   type PitchFrame,
 } from "@/lib/pitch";
+import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
 import type { CatLevel } from "@/types";
 
 export type VocalSample = {
@@ -287,14 +288,7 @@ export function mentorFeedback(
   score: number,
   catLevel: CatLevel | null | undefined
 ): string {
-  const cat =
-    catLevel === "star"
-      ? "Кот-звезда"
-      : catLevel === "pro"
-        ? "Джазовый кот"
-        : catLevel === "basic"
-          ? "Певчий котик"
-          : "Мурчащий котик";
+  const cat = CAT_LEVEL_LABELS[catLevel ?? "beginner"] ?? CAT_LEVEL_LABELS.beginner;
 
   if (score >= 90) {
     return `${cat} мурчит от восторга: интонация почти студийная. Сохрани эту опору и добавь чуть больше свободы в окончаниях фраз.`;

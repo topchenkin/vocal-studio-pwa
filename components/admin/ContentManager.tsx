@@ -14,6 +14,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { CAT_LEVEL_LABELS, CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
   AppSubscriptionTier,
   CatLevel,
@@ -28,12 +29,7 @@ const tierOptions: AppSubscriptionTier[] = [
   "premium",
   "vip",
 ];
-const catOptions: Array<{ value: CatLevel; label: string }> = [
-  { value: "beginner", label: "Мурчащий котик" },
-  { value: "basic", label: "Певчий котик" },
-  { value: "pro", label: "Джазовый кот" },
-  { value: "star", label: "Кот-Звезда" },
-];
+const catOptions = CAT_LEVEL_OPTIONS;
 
 type VisibilityPreset =
   | "everyone"
@@ -394,8 +390,8 @@ export default function ContentManager() {
                 {item.description || "Без описания"}
               </p>
               <p className="mt-3 text-[10px] uppercase tracking-wide text-studio-accent">
-                {item.min_tier_required} · {item.min_cat_level} ·{" "}
-                {item.audience_mode}
+                {item.min_tier_required} · {CAT_LEVEL_LABELS[item.min_cat_level]}{" "}
+                · {item.audience_mode}
               </p>
               <div className="mt-4 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>

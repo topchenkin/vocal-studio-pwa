@@ -11,6 +11,7 @@ import SbpPaymentSheet, {
 import { useAuth } from "@/context/AuthContext";
 import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
+import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
 import type { CatLevel } from "@/types";
 
 const catLevels: Record<
@@ -18,13 +19,25 @@ const catLevels: Record<
   { title: string; progress: number; next: string }
 > = {
   beginner: {
-    title: "Мурчащий котик",
+    title: CAT_LEVEL_LABELS.beginner,
     progress: 25,
-    next: "Певчий котик",
+    next: CAT_LEVEL_LABELS.basic,
   },
-  basic: { title: "Певчий котик", progress: 50, next: "Джазовый кот" },
-  pro: { title: "Джазовый кот", progress: 75, next: "Кот-звезда" },
-  star: { title: "Кот-звезда", progress: 100, next: "Максимальный уровень" },
+  basic: {
+    title: CAT_LEVEL_LABELS.basic,
+    progress: 50,
+    next: CAT_LEVEL_LABELS.pro,
+  },
+  pro: {
+    title: CAT_LEVEL_LABELS.pro,
+    progress: 75,
+    next: CAT_LEVEL_LABELS.star,
+  },
+  star: {
+    title: CAT_LEVEL_LABELS.star,
+    progress: 100,
+    next: "Максимальный уровень",
+  },
 };
 
 export default function SubscriptionStatus() {
@@ -57,7 +70,7 @@ export default function SubscriptionStatus() {
                 <p className="text-xs uppercase tracking-wider text-studio-muted">
                   Ваш уровень
                 </p>
-                <h2 className="font-display text-2xl font-semibold">
+                <h2 className="whitespace-nowrap font-display text-2xl font-semibold">
                   {cat.title}
                 </h2>
               </div>

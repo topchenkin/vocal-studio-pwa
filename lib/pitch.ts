@@ -382,7 +382,7 @@ export function catBadgeForScore(score: number): {
 } {
   if (score >= 90) {
     return {
-      title: "Кот-звезда",
+      title: "Кот - Звезда",
       emoji: "🌟",
       tone: "text-amber-300 ring-amber-400/40 bg-amber-500/10",
     };

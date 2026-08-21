@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   CalendarDays,
+  CalendarX2,
   CheckCircle2,
   Clock3,
   Plus,
@@ -18,6 +19,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import NumberInput from "@/components/ui/NumberInput";
+import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import MonthCalendar, {
   localDateKey,
 } from "@/components/calendar/MonthCalendar";
@@ -50,6 +52,8 @@ function ScheduleCard({
   onComplete,
   onOpenReschedule,
   onRejectReschedule,
+  onApproveCancel,
+  onRejectCancel,
   onCancel,
   onAssign,
 }: {
@@ -60,6 +64,8 @@ function ScheduleCard({
   onComplete: (lessonId: string) => Promise<void>;
   onOpenReschedule: (lesson: Lesson) => void;
   onRejectReschedule: (lessonId: string) => Promise<void>;
+  onApproveCancel: (lessonId: string) => Promise<void>;
+  onRejectCancel: (lessonId: string) => Promise<void>;
   onCancel: (lessonId: string) => Promise<void>;
   onAssign: (lesson: Lesson) => void;
 }) {
@@ -115,6 +121,32 @@ function ScheduleCard({
         </p>
       ) : null}
 
+      {lesson.cancel_request === "pending" && (
+        <div className="mt-3 rounded-xl bg-red-500/10 p-3 ring-1 ring-red-500/20">
+          <p className="text-xs text-red-300">Запрошена отмена урока</p>
+          {lesson.cancel_note ? (
+            <p className="mt-1 text-xs text-studio-muted">
+              Комментарий: {lesson.cancel_note}
+            </p>
+          ) : null}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void onApproveCancel(lesson.id)}
+              className="rounded-lg bg-red-500 px-3 py-1.5 text-xs text-white"
+            >
+              Отменить урок
+            </button>
+            <button
+              type="button"
+              onClick={() => void onRejectCancel(lesson.id)}
+              className="rounded-lg bg-studio-card px-3 py-1.5 text-xs text-studio-muted"
+            >
+              Отклонить
+            </button>
+          </div>
+        </div>
+      )}
       {lesson.reschedule_request === "pending" && (
         <div className="mt-3 rounded-xl bg-studio-gold/10 p-3 ring-1 ring-studio-gold/20">
           <p className="text-xs text-studio-gold">Запрошен перенос урока</p>
@@ -216,6 +248,7 @@ export default function ScheduleGrid() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [assignLesson, setAssignLesson] = useState<Lesson | null>(null);
   const [assignStudentId, setAssignStudentId] = useState("");
+  const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
   const appliedFocus = useRef<string | null>(null);
 
   const lessonsByDate = useMemo(
@@ -232,7 +265,11 @@ export default function ScheduleGrid() {
     () =>
       new Set(
         lessons
-          .filter((lesson) => lesson.reschedule_request === "pending")
+          .filter(
+            (lesson) =>
+              lesson.reschedule_request === "pending" ||
+              lesson.cancel_request === "pending"
+          )
           .map((lesson) => localDateKey(lesson.datetime))
       ),
     [lessons]
@@ -340,6 +377,7 @@ export default function ScheduleGrid() {
           datetime: tomorrow.toISOString(),
           status: "scheduled",
           reschedule_request: "pending",
+          cancel_request: "none",
           is_recurring: true,
         },
         {
@@ -348,6 +386,7 @@ export default function ScheduleGrid() {
           datetime: nextDay.toISOString(),
           status: "scheduled",
           reschedule_request: "none",
+          cancel_request: "none",
           is_recurring: false,
         },
       ]);
@@ -402,6 +441,7 @@ export default function ScheduleGrid() {
         datetime: when.toISOString(),
         status: "scheduled" as const,
         reschedule_request: "none" as const,
+        cancel_request: "none" as const,
         is_recurring: weeklyRepeat,
         series_id: seriesId,
       };
@@ -579,6 +619,37 @@ export default function ScheduleGrid() {
     showSuccess(approve ? "Урок перенесён" : "Запрос на перенос отклонён");
   };
 
+  const resolveCancel = async (lessonId: string, approve: boolean) => {
+    if (isMockAdmin) {
+      setLessons((current) =>
+        current.map((lesson) =>
+          lesson.id === lessonId
+            ? {
+                ...lesson,
+                status: approve ? "cancelled" : lesson.status,
+                cancel_request: approve ? "none" : "rejected",
+                cancel_note: approve ? null : lesson.cancel_note,
+              }
+            : lesson
+        )
+      );
+    } else {
+      const { error: resolveError } = await supabase.rpc(
+        "admin_resolve_cancel",
+        {
+          lesson_id: lessonId,
+          approve,
+        }
+      );
+      if (resolveError) {
+        setError(`Не удалось обработать отмену: ${resolveError.message}`);
+        return;
+      }
+      await loadSchedule();
+    }
+    showSuccess(approve ? "Урок отменён" : "Запрос на отмену отклонён");
+  };
+
   const cancelLesson = async (lessonId: string) => {
     if (isMockAdmin) {
       setLessons((current) =>
@@ -662,10 +733,10 @@ export default function ScheduleGrid() {
           <div>
             <h3 className="font-display text-xl font-semibold">Расписание</h3>
             <p className="text-sm text-studio-muted">
-              Уроки назначает преподаватель · ученик может запросить перенос
+              Уроки назначает преподаватель · ученик может запросить перенос или отмену
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
               <button
                 type="button"
@@ -692,6 +763,10 @@ export default function ScheduleGrid() {
                 <List className="h-4 w-4" />
               </button>
             </div>
+            <Button variant="secondary" onClick={() => setBulkCancelOpen(true)}>
+              <CalendarX2 className="h-4 w-4" />
+              Массовая отмена
+            </Button>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="h-4 w-4" />
               Добавить урок
@@ -702,6 +777,11 @@ export default function ScheduleGrid() {
         {lessons.some((l) => l.reschedule_request === "pending") && (
           <div className="rounded-2xl bg-studio-gold/10 px-4 py-3 text-sm text-studio-gold ring-1 ring-studio-gold/25">
             Есть запросы на перенос — в календаре такие дни с жёлтой точкой.
+          </div>
+        )}
+        {lessons.some((l) => l.cancel_request === "pending") && (
+          <div className="rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-red-500/25">
+            Есть запросы на отмену — откройте занятие и подтвердите или отклоните.
           </div>
         )}
 
@@ -745,6 +825,12 @@ export default function ScheduleGrid() {
                       onRejectReschedule={(lessonId) =>
                         resolveReschedule(lessonId, false)
                       }
+                      onApproveCancel={(lessonId) =>
+                        resolveCancel(lessonId, true)
+                      }
+                      onRejectCancel={(lessonId) =>
+                        resolveCancel(lessonId, false)
+                      }
                       onCancel={cancelLesson}
                       onAssign={(lesson) => {
                         setAssignLesson(lesson);
@@ -775,6 +861,8 @@ export default function ScheduleGrid() {
                 onRejectReschedule={(lessonId) =>
                   resolveReschedule(lessonId, false)
                 }
+                onApproveCancel={(lessonId) => resolveCancel(lessonId, true)}
+                onRejectCancel={(lessonId) => resolveCancel(lessonId, false)}
                 onCancel={cancelLesson}
                 onAssign={(targetLesson) => {
                   setAssignLesson(targetLesson);
@@ -980,6 +1068,33 @@ export default function ScheduleGrid() {
           </Button>
         </div>
       </Modal>
+
+      <BulkCancelLessonsModal
+        open={bulkCancelOpen}
+        onClose={() => setBulkCancelOpen(false)}
+        students={students}
+        mockMode={isMockAdmin}
+        mockLessons={lessons}
+        onDone={({ count, studentId, start, end }) => {
+          if (isMockAdmin) {
+            setLessons((current) =>
+              current.map((lesson) =>
+                lesson.student_id === studentId &&
+                lesson.status === "scheduled" &&
+                lesson.datetime >= start &&
+                lesson.datetime <= end
+                  ? { ...lesson, status: "cancelled" as const }
+                  : lesson
+              )
+            );
+          } else {
+            void loadSchedule();
+          }
+          showSuccess(
+            count === 1 ? "Отменено 1 занятие" : `Отменено занятий: ${count}`
+          );
+        }}
+      />
     </>
   );
 }

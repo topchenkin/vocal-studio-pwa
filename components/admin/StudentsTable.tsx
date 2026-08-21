@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  CalendarX2,
   Folder,
   FolderPlus,
   Link2,
@@ -17,8 +18,10 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import NumberInput from "@/components/ui/NumberInput";
 import HomeworkAssigner from "@/components/admin/HomeworkAssigner";
+import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
   AppSubscriptionTier,
   CatLevel,
@@ -35,16 +38,7 @@ const tierOptions: Array<{ value: AppSubscriptionTier; label: string }> = [
   { value: "vip", label: "VIP" },
 ];
 
-const catOptions: Array<{ value: CatLevel; label: string }> = [
-  { value: "beginner", label: "Мурчащий котик" },
-  { value: "basic", label: "Певчий котик" },
-  { value: "pro", label: "Джазовый кот" },
-  { value: "star", label: "Кот-Звезда" },
-];
-
-const catLabels = Object.fromEntries(
-  catOptions.map((option) => [option.value, option.label])
-) as Record<CatLevel, string>;
+const catOptions = CAT_LEVEL_OPTIONS;
 
 const mockStudents: StudentProfile[] = [
   {
@@ -88,6 +82,7 @@ function StudentEditor({
   memberFolderIds,
   onFoldersSaved,
   mockMode,
+  onBulkCancel,
 }: {
   student: StudentProfile | null;
   open: boolean;
@@ -97,6 +92,7 @@ function StudentEditor({
   memberFolderIds: string[];
   onFoldersSaved: (studentId: string, folderIds: string[]) => void;
   mockMode: boolean;
+  onBulkCancel: (student: StudentProfile) => void;
 }) {
   const [draft, setDraft] = useState<StudentProfile | null>(student);
   const [saving, setSaving] = useState(false);
@@ -444,6 +440,16 @@ function StudentEditor({
 
         <HomeworkAssigner studentId={draft.id} mockMode={mockMode} />
 
+        <Button
+          fullWidth
+          size="sm"
+          variant="danger"
+          onClick={() => onBulkCancel(draft)}
+        >
+          <CalendarX2 className="h-4 w-4" />
+          Отменить занятия за период
+        </Button>
+
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         <div className="flex gap-3">
@@ -478,6 +484,8 @@ export default function StudentsTable() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderSaving, setFolderSaving] = useState(false);
+  const [bulkStudent, setBulkStudent] = useState<StudentProfile | null>(null);
+  const [bulkSuccess, setBulkSuccess] = useState("");
 
   useEffect(() => {
     if (isMockAdmin) {
@@ -738,8 +746,11 @@ export default function StudentsTable() {
                       {student.is_active_student ? "Активен" : "Новый"}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-[10px] text-studio-accent">
-                    {catLabels[student.cat_level]}
+                  <p className="mt-1 whitespace-nowrap text-[10px] text-studio-accent">
+                    {
+                      catOptions.find((option) => option.value === student.cat_level)
+                        ?.label
+                    }
                   </p>
                 </div>
               </div>
@@ -803,16 +814,26 @@ export default function StudentsTable() {
                 </div>
               </div>
 
-              <Button
-                className="mt-4"
-                fullWidth
-                size="sm"
-                variant="secondary"
-                onClick={() => setSelected(student)}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Карточка и папки
-              </Button>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Button
+                  fullWidth
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setSelected(student)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Карточка
+                </Button>
+                <Button
+                  fullWidth
+                  size="sm"
+                  variant="danger"
+                  onClick={() => setBulkStudent(student)}
+                >
+                  <CalendarX2 className="h-3.5 w-3.5" />
+                  Отменить занятия
+                </Button>
+              </div>
             </article>
           );
         })}
@@ -826,6 +847,9 @@ export default function StudentsTable() {
         </p>
       )}
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      {bulkSuccess && (
+        <p className="mt-3 text-sm text-emerald-400">{bulkSuccess}</p>
+      )}
 
       <StudentEditor
         student={selected}
@@ -853,6 +877,24 @@ export default function StudentsTable() {
           ]);
         }}
         mockMode={isMockAdmin}
+        onBulkCancel={(student) => {
+          setSelected(null);
+          setBulkStudent(student);
+        }}
+      />
+
+      <BulkCancelLessonsModal
+        open={Boolean(bulkStudent)}
+        onClose={() => setBulkStudent(null)}
+        students={students}
+        lockedStudentId={bulkStudent?.id}
+        mockMode={isMockAdmin}
+        onDone={({ count }) => {
+          setBulkSuccess(
+            count === 1 ? "Отменено 1 занятие" : `Отменено занятий: ${count}`
+          );
+          window.setTimeout(() => setBulkSuccess(""), 4000);
+        }}
       />
 
       <Modal
