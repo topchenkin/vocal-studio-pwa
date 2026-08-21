@@ -112,8 +112,18 @@ export default function SubscriptionCabinet() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const pay = new URLSearchParams(window.location.search).get("pay");
-    if (pay === "ok" || pay === "fail") {
+    const fromQuery = new URLSearchParams(window.location.search).get("pay");
+    const fromReturn = sessionStorage.getItem("uvs_pay_notice");
+    if (fromReturn === "ok" || fromReturn === "fail") {
+      sessionStorage.removeItem("uvs_pay_notice");
+    }
+    const pay =
+      fromQuery === "ok" || fromQuery === "fail"
+        ? fromQuery
+        : fromReturn === "ok" || fromReturn === "fail"
+          ? fromReturn
+          : null;
+    if (pay) {
       setPayNotice(pay);
       void refreshProfile();
     }
