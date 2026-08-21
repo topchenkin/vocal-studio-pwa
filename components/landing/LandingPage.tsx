@@ -218,13 +218,21 @@ export default function LandingPage() {
 
         <footer className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-studio-border/60 pt-6 text-xs text-studio-muted sm:flex-row">
           <span>© <span className="text-studio-gold">Unique</span> <span className="text-studio-accent">Vocal</span> <span className="text-gradient">Studio</span></span>
-          <Link
-            href="/admin/login"
-            className="inline-flex items-center gap-1.5 transition hover:text-studio-accent-light"
-          >
-            <Crown className="h-3.5 w-3.5" />
-            Вход для администратора
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <Link
+              href="/oferta"
+              className="transition hover:text-studio-accent-light"
+            >
+              Публичная оферта
+            </Link>
+            <Link
+              href="/admin/login"
+              className="inline-flex items-center gap-1.5 transition hover:text-studio-accent-light"
+            >
+              <Crown className="h-3.5 w-3.5" />
+              Вход для администратора
+            </Link>
+          </div>
         </footer>
       </div>
 
