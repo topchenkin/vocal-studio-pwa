@@ -35,7 +35,7 @@ export default function Header({ showNav = true }: HeaderProps) {
       : "/";
 
   return (
-    <header className="relative z-30 flex w-full min-w-0 items-center justify-between overflow-visible animate-fade-in opacity-0 [animation-fill-mode:forwards]">
+    <header className="relative z-30 flex w-full min-w-0 items-center justify-between overflow-visible pt-[env(safe-area-inset-top)] animate-fade-in opacity-0 [animation-fill-mode:forwards]">
       <Link href="/" className="flex min-w-0 items-center gap-3">
         <Logo size={48} />
         <BrandWordmark className="min-w-0" subtitle="Студия вокала" />

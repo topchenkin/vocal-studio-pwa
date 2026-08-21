@@ -58,24 +58,22 @@ export async function getSingingMicStream(): Promise<MediaStream> {
   try {
     let stream: MediaStream;
     if (isAppleWebKit()) {
+      // Permission prompt only appears for a simple { audio: true } request.
+      const unlocked = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      unlocked.getTracks().forEach((track) => track.stop());
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: singingMicConstraints(),
           video: false,
         });
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: true,
           video: false,
         });
-      }
-      const track = stream.getAudioTracks()[0];
-      if (track) {
-        void track.applyConstraints(singingMicConstraints()).catch(() => undefined);
       }
     } else {
       try {
@@ -114,17 +112,41 @@ export function readAnalyserTimeDomain(
   floatBuf: Float32Array<ArrayBuffer>
 ): void {
   analyser.getFloatTimeDomainData(floatBuf);
+  const n = floatBuf.length;
   let peak = 0;
-  for (let i = 0; i < floatBuf.length; i += 1) {
-    const a = Math.abs(floatBuf[i] ?? 0);
+  let min = 1;
+  let max = -1;
+  let sum = 0;
+  for (let i = 0; i < n; i += 1) {
+    const v = floatBuf[i] ?? 0;
+    sum += v;
+    if (v < min) min = v;
+    if (v > max) max = v;
+    const a = Math.abs(v);
     if (a > peak) peak = a;
   }
-  if (peak > 1e-5) return;
 
-  const bytes = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(bytes);
-  const n = Math.min(floatBuf.length, bytes.length);
-  for (let i = 0; i < n; i += 1) {
-    floatBuf[i] = ((bytes[i] ?? 128) - 128) / 128;
+  if (peak <= 1e-5) {
+    const bytes = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(bytes);
+    const count = Math.min(n, bytes.length);
+    for (let i = 0; i < count; i += 1) {
+      floatBuf[i] = ((bytes[i] ?? 128) - 128) / 128;
+    }
+  } else if (min >= -0.02 && max <= 1.02 && sum / n > 0.2) {
+    // Some WebKit builds return 0..1 instead of -1..1. Waveform moves,
+    // but YIN never finds a pitch until we remap.
+    for (let i = 0; i < n; i += 1) {
+      floatBuf[i] = ((floatBuf[i] ?? 0) * 2) - 1;
+    }
+  }
+
+  let mean = 0;
+  for (let i = 0; i < n; i += 1) mean += floatBuf[i] ?? 0;
+  mean /= Math.max(1, n);
+  if (Math.abs(mean) > 1e-4) {
+    for (let i = 0; i < n; i += 1) {
+      floatBuf[i] = (floatBuf[i] ?? 0) - mean;
+    }
   }
 }

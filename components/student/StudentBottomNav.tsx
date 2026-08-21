@@ -42,7 +42,7 @@ export default function StudentBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
       aria-label="Быстрый доступ"
     >
       <div className="mx-auto grid max-w-6xl grid-cols-4 px-2 pt-1">

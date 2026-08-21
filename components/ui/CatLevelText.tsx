@@ -1,6 +1,6 @@
 "use client";
 
-/** Display fonts slant a hyphen; Inter keeps a straight dash. */
+/** Straight dash aligned to the letters, not a glyph from another font. */
 export default function CatLevelText({
   label,
   className,
@@ -15,9 +15,12 @@ export default function CatLevelText({
     return <Tag className={className}>{label}</Tag>;
   }
   return (
-    <Tag className={className}>
+    <Tag className={`inline-flex items-center ${className ?? ""}`}>
       {label.slice(0, dash)}
-      <span className="inline font-sans font-semibold not-italic">-</span>
+      <span
+        aria-hidden
+        className="mx-[0.14em] inline-block h-[0.11em] w-[0.4em] shrink-0 rounded-[1px] bg-current"
+      />
       {label.slice(dash + 1)}
     </Tag>
   );

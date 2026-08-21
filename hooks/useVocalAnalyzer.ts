@@ -23,6 +23,7 @@ import {
   computeRms,
   createYinDetector,
   dbFromRms,
+  detectPitchHzOctaveSafe,
   type PitchDetectorFn,
   type PitchFrame,
 } from "@/lib/pitch";
@@ -217,9 +218,20 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
 
     const rms = computeRms(buf);
     const db = dbFromRms(rms);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i += 1) {
+      const a = Math.abs(buf[i] ?? 0);
+      if (a > peak) peak = a;
+    }
     const skipDb = iosRef.current ? DETECT_SKIP_DB_IOS : DETECT_SKIP_DB;
     const floorDb = iosRef.current ? NOISE_FLOOR_DB_IOS : NOISE_FLOOR_DB;
-    const hz = db > skipDb ? detector(buf) : null;
+    const hasVoice = db > skipDb || peak > 0.02;
+    let hz = hasVoice ? detector(buf) : null;
+    if (hz === null && peak > 0.025) {
+      const sampleRate = audioContextRef.current?.sampleRate ?? 44100;
+      const fallback = detectPitchHzOctaveSafe(buf, sampleRate);
+      hz = fallback > 0 ? fallback : null;
+    }
     const pitch = hz !== null ? analyzeFrequency(hz) : null;
 
     const rollingWindow = rollingDbRef.current;

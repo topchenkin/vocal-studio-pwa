@@ -205,6 +205,16 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             <Waves className="h-10 w-10 text-studio-border" />
           </div>
         )}
+        {listening && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center">
+            <p className="font-display text-3xl font-semibold leading-none drop-shadow">
+              {note}
+            </p>
+            <p className="mt-1 text-[11px] text-studio-muted">
+              {hz > 0 ? `${hz} Hz` : "Спойте — нота появится здесь"}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_1.2fr]">

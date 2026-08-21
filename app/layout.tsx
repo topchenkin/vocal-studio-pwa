@@ -54,6 +54,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
 };
 
 const BOOT_SCRIPT = `(function(){
@@ -75,7 +76,7 @@ const BOOT_SCRIPT = `(function(){
     document.documentElement.style.colorScheme="dark";
     document.documentElement.style.backgroundColor="#0a0a0f";
   }
-  var VER="34";
+  var VER="35";
   try{
     if(localStorage.getItem("uvs-sw-bust")!==VER){
       var hadController=Boolean(navigator.serviceWorker&&navigator.serviceWorker.controller);
