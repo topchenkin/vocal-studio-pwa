@@ -10,9 +10,11 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true },
 };
 
+/** Static export forbids an empty `generateStaticParams()` (CI has no gate slug). */
+const EXPORT_PLACEHOLDER = "__export__";
+
 export function generateStaticParams() {
-  if (!ADMIN_GATE_SLUG) return [];
-  return [{ slug: ADMIN_GATE_SLUG }];
+  return [{ slug: ADMIN_GATE_SLUG || EXPORT_PLACEHOLDER }];
 }
 
 export default async function AdminGatePage({
