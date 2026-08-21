@@ -28,6 +28,8 @@ const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
 ).replace(/\/$/, "");
 const PAY_URL = "https://auth.robokassa.ru/Merchant/Index.aspx";
+const SUCCESS_URL = `${APP_ORIGIN}/pay/success`;
+const FAIL_URL = `${APP_ORIGIN}/pay/fail`;
 
 const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
 const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
@@ -52,7 +54,18 @@ function digest(value) {
 }
 
 function signInit(outSum, invId) {
-  return digest(`${MERCHANT}:${outSum}:${invId}:${PASS1}`);
+  return digest(
+    [
+      MERCHANT,
+      outSum,
+      String(invId),
+      encodeURIComponent(SUCCESS_URL),
+      "GET",
+      encodeURIComponent(FAIL_URL),
+      "GET",
+      PASS1,
+    ].join(":")
+  );
 }
 
 function signResult(outSum, invId) {
@@ -235,6 +248,12 @@ async function handleInit(req, res) {
   pay.searchParams.set("Description", description.slice(0, 100));
   pay.searchParams.set("SignatureValue", signature);
   pay.searchParams.set("Culture", "ru");
+  pay.searchParams.set("IncCurrLabel", "SBP");
+  pay.searchParams.append("PaymentMethods", "SBP");
+  pay.searchParams.set("SuccessUrl2", SUCCESS_URL);
+  pay.searchParams.set("SuccessUrl2Method", "GET");
+  pay.searchParams.set("FailUrl2", FAIL_URL);
+  pay.searchParams.set("FailUrl2Method", "GET");
   if (IS_TEST) pay.searchParams.set("IsTest", "1");
   const email = String(user.email || profile.email || "").trim();
   if (email) pay.searchParams.set("Email", email);
