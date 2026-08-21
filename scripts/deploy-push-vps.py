@@ -46,7 +46,7 @@ def env_file_bytes() -> bytes:
     lines = [
         "BIND=127.0.0.1",
         "PORT=8789",
-        f"SUPABASE_URL={url}",
+        f"SUPABASE_URL={local.get('SELFHOST_SUPABASE_URL') or url}",
         f"SUPABASE_SERVICE_ROLE_KEY={local.get('SUPABASE_SERVICE_ROLE_KEY', '')}",
         f"NEXT_PUBLIC_VAPID_PUBLIC_KEY={local.get('NEXT_PUBLIC_VAPID_PUBLIC_KEY', '')}",
         f"VAPID_PRIVATE_KEY={local.get('VAPID_PRIVATE_KEY', '')}",

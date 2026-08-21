@@ -10,6 +10,7 @@ import {
   markProxyUnreachable,
   migrateAuthStorage,
   projectAuthStorageKey,
+  supabaseOriginsMatch,
   SUPABASE_PROJECT_URL,
   SUPABASE_PROXY_URL,
 } from "@/lib/supabase-origin";
@@ -247,6 +248,10 @@ function raceFirst<T>(left: Promise<T>, right: Promise<T>): Promise<T> {
 }
 
 async function chooseRoute(): Promise<"direct" | "proxy"> {
+  if (supabaseOriginsMatch() || !SUPABASE_PROJECT_URL) {
+    markProxyReachable();
+    return "proxy";
+  }
   const existing = getChosenRoute();
   if (existing) return existing;
   if (choosePromise) return choosePromise;
@@ -418,6 +423,7 @@ async function fetchWithFallback(
   const canFallback =
     Boolean(SUPABASE_PROXY_URL) &&
     Boolean(SUPABASE_PROJECT_URL) &&
+    !supabaseOriginsMatch() &&
     url.startsWith(SUPABASE_PROXY_URL);
   const directUrl = canFallback
     ? retargetUrl(url, SUPABASE_PROXY_URL, SUPABASE_PROJECT_URL)

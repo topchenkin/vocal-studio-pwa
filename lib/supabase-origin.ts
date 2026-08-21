@@ -29,6 +29,14 @@ function browserOrigin() {
   );
 }
 
+export function supabaseOriginsMatch(): boolean {
+  return Boolean(
+    SUPABASE_PROXY_URL &&
+      SUPABASE_PROJECT_URL &&
+      SUPABASE_PROXY_URL === SUPABASE_PROJECT_URL
+  );
+}
+
 export function getBrowserSupabaseUrl(): string {
   return browserOrigin();
 }

@@ -47,7 +47,7 @@ def env_file_bytes() -> bytes:
     lines = [
         "BIND=127.0.0.1",
         "PORT=8788",
-        f"SUPABASE_URL={url}",
+        f"SUPABASE_URL={local.get('SELFHOST_SUPABASE_URL') or url}",
         f"SUPABASE_SERVICE_ROLE_KEY={local.get('SUPABASE_SERVICE_ROLE_KEY', '')}",
         f"HUGGINGFACE_API_KEY={local.get('HUGGINGFACE_API_KEY', '')}",
         f"DEMUCS_HF_SPACE={local.get('DEMUCS_HF_SPACE', 'abidlabs/music-separation')}",
