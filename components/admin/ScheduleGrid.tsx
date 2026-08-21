@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CalendarDays,
   CheckCircle2,
@@ -25,6 +26,7 @@ import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
 const WEEKDAY_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
+const VIEW_STORAGE = "uvs-admin-schedule-view";
 
 function weekdayShort(date: Date) {
   return WEEKDAY_SHORT[date.getDay()] ?? "—";
@@ -44,6 +46,7 @@ function ScheduleCard({
   lesson,
   studentLabel,
   completingId,
+  highlighted,
   onComplete,
   onOpenReschedule,
   onRejectReschedule,
@@ -53,6 +56,7 @@ function ScheduleCard({
   lesson: Lesson;
   studentLabel: (studentId: string | null) => string;
   completingId: string | null;
+  highlighted?: boolean;
   onComplete: (lessonId: string) => Promise<void>;
   onOpenReschedule: (lesson: Lesson) => void;
   onRejectReschedule: (lessonId: string) => Promise<void>;
@@ -63,7 +67,14 @@ function ScheduleCard({
   const hasStudent = Boolean(lesson.student_id);
 
   return (
-    <article className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border transition hover:ring-studio-accent/30">
+    <article
+      id={`lesson-${lesson.id}`}
+      className={`scroll-mt-28 rounded-2xl bg-studio-surface p-4 ring-1 transition ${
+        highlighted
+          ? "ring-2 ring-studio-accent shadow-glow"
+          : "ring-studio-border hover:ring-studio-accent/30"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div
@@ -181,6 +192,10 @@ function ScheduleCard({
 
 export default function ScheduleGrid() {
   const { isMockAdmin } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const focusLessonId = searchParams.get("lesson");
+  const focusDate = searchParams.get("date");
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -201,6 +216,7 @@ export default function ScheduleGrid() {
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [assignLesson, setAssignLesson] = useState<Lesson | null>(null);
   const [assignStudentId, setAssignStudentId] = useState("");
+  const appliedFocus = useRef<string | null>(null);
 
   const lessonsByDate = useMemo(
     () =>
@@ -213,14 +229,73 @@ export default function ScheduleGrid() {
   );
 
   useEffect(() => {
-    if (selectedDate && lessonsByDate[selectedDate]) return;
-    const today = localDateKey(new Date());
-    const firstFuture =
-      Object.keys(lessonsByDate).find((key) => key >= today) ??
-      Object.keys(lessonsByDate)[0] ??
-      null;
-    setSelectedDate(firstFuture);
-  }, [lessonsByDate, selectedDate]);
+    try {
+      const stored = window.localStorage.getItem(VIEW_STORAGE);
+      if (stored === "list" || stored === "calendar") setView(stored);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VIEW_STORAGE, view);
+    } catch {
+      /* private mode */
+    }
+  }, [view]);
+
+  useEffect(() => {
+    const focusKey = `${focusLessonId ?? ""}:${focusDate ?? ""}`;
+    if (!focusLessonId && !focusDate) {
+      if (selectedDate && lessonsByDate[selectedDate]) return;
+      const today = localDateKey(new Date());
+      const firstFuture =
+        Object.keys(lessonsByDate).find((key) => key >= today) ??
+        Object.keys(lessonsByDate)[0] ??
+        null;
+      setSelectedDate(firstFuture);
+      return;
+    }
+
+    if (appliedFocus.current === focusKey) return;
+
+    const focusedLesson = focusLessonId
+      ? lessons.find((item) => item.id === focusLessonId)
+      : undefined;
+    const dateFromUrl =
+      focusDate && /^\d{4}-\d{2}-\d{2}$/.test(focusDate) ? focusDate : null;
+    const dateFromLesson = focusedLesson
+      ? localDateKey(focusedLesson.datetime)
+      : null;
+    const nextDate = dateFromLesson ?? dateFromUrl;
+
+    if (nextDate && selectedDate !== nextDate) setSelectedDate(nextDate);
+    if (
+      dateFromLesson ||
+      (!focusLessonId && dateFromUrl) ||
+      (!loading && lessons.length > 0)
+    ) {
+      appliedFocus.current = focusKey;
+    }
+  }, [
+    lessonsByDate,
+    selectedDate,
+    focusLessonId,
+    focusDate,
+    lessons,
+    loading,
+  ]);
+
+  useEffect(() => {
+    if (!focusLessonId || loading) return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`lesson-${focusLessonId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [focusLessonId, loading, view, selectedDate, lessons.length]);
 
   const loadSchedule = useCallback(async () => {
     if (isMockAdmin) {
@@ -485,6 +560,12 @@ export default function ScheduleGrid() {
       await loadSchedule();
     }
     setRescheduleLesson(null);
+    const params = new URLSearchParams(searchParams.toString());
+    if (params.has("lesson") || params.has("date")) {
+      params.delete("lesson");
+      params.delete("date");
+      router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });
+    }
     showSuccess(approve ? "Урок перенесён" : "Запрос на перенос отклонён");
   };
 
@@ -648,6 +729,7 @@ export default function ScheduleGrid() {
                       lesson={lesson}
                       studentLabel={studentLabel}
                       completingId={completingId}
+                      highlighted={focusLessonId === lesson.id}
                       onComplete={completeLesson}
                       onOpenReschedule={openReschedule}
                       onRejectReschedule={(lessonId) =>
@@ -668,12 +750,16 @@ export default function ScheduleGrid() {
 
         {view === "list" && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {lessons.map((lesson) => (
+            {[
+              ...lessons.filter((lesson) => lesson.id === focusLessonId),
+              ...lessons.filter((lesson) => lesson.id !== focusLessonId),
+            ].map((lesson) => (
               <ScheduleCard
                 key={lesson.id}
                 lesson={lesson}
                 studentLabel={studentLabel}
                 completingId={completingId}
+                highlighted={focusLessonId === lesson.id}
                 onComplete={completeLesson}
                 onOpenReschedule={openReschedule}
                 onRejectReschedule={(lessonId) =>
@@ -841,6 +927,16 @@ export default function ScheduleGrid() {
           >
             <CalendarClock className="h-4 w-4" />
             Подтвердить новое время
+          </Button>
+          <Button
+            fullWidth
+            variant="secondary"
+            onClick={() =>
+              rescheduleLesson &&
+              void resolveReschedule(rescheduleLesson.id, false)
+            }
+          >
+            Отклонить перенос
           </Button>
         </div>
       </Modal>

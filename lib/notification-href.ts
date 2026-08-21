@@ -42,6 +42,21 @@ export function resolveNotificationHref(input: {
   const fallback = defaultChatHref(input.isAdmin);
   const parsed = parseAppPath(input.actionUrl || "");
   const message = input.message || "";
+
+  if (input.kind === "lesson" && input.isAdmin) {
+    const next = new URLSearchParams();
+    next.set("tab", "schedule");
+    const lesson = parsed?.searchParams.get("lesson");
+    const date = parsed?.searchParams.get("date");
+    if (lesson && UUID.test(lesson)) next.set("lesson", lesson);
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) next.set("date", date);
+    return `/dashboard/admin?${next}`;
+  }
+
+  if (input.kind === "payment" && input.isAdmin) {
+    return "/dashboard/admin?tab=students";
+  }
+
   const isChat =
     input.kind === "chat" ||
     isVocalReportText(message) ||

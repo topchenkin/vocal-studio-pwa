@@ -101,6 +101,8 @@ export default function AdminDashboardClient() {
     setActiveTab(id);
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", id);
+    params.delete("lesson");
+    params.delete("date");
     if (id === "ai-tools") params.set("ai", aiSubTab);
     else params.delete("ai");
     router.replace(`/dashboard/admin?${params.toString()}`, { scroll: false });

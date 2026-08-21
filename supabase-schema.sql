@@ -560,6 +560,7 @@ declare
   notify_message text;
   note_clean text;
   preferred_text text;
+  action_path text;
 begin
   note_clean := nullif(left(trim(coalesce(student_note, '')), 200), '');
 
@@ -602,6 +603,12 @@ begin
     notify_message := notify_message || '. Комментарий: ' || note_clean;
   end if;
 
+  action_path :=
+    '/dashboard/admin?tab=schedule&lesson='
+    || lesson_id::text
+    || '&date='
+    || to_char(current_when at time zone 'Europe/Moscow', 'YYYY-MM-DD');
+
   insert into public.notifications (
     recipient_id, recipient_role, title, message, kind, action_url, email_fallback_at
   )
@@ -611,7 +618,7 @@ begin
     'Запрос переноса урока',
     notify_message,
     'lesson',
-    '/dashboard/admin?tab=schedule',
+    action_path,
     now() + interval '5 minutes'
   from public.profiles p
   where p.role = 'admin';
@@ -626,7 +633,7 @@ begin
       'Запрос переноса урока',
       notify_message,
       'lesson',
-      '/dashboard/admin?tab=schedule',
+      action_path,
       now() + interval '5 minutes'
     );
   end if;
@@ -1071,6 +1078,91 @@ create policy "payments_admin_manage"
 on public.payment_transactions for all
 using (public.current_user_is_admin())
 with check (public.current_user_is_admin());
+
+create or replace function public.notify_admin_on_student_payment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  student_name text;
+  purpose_label text;
+  amount_label text;
+  notify_message text;
+  inserted integer;
+begin
+  if new.status is distinct from 'confirmed' then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and old.status is not distinct from 'confirmed' then
+    return new;
+  end if;
+
+  select coalesce(
+    nullif(trim(full_name), ''),
+    nullif(trim(email), ''),
+    'Ученик'
+  )
+  into student_name
+  from public.profiles
+  where id = new.student_id;
+
+  student_name := coalesce(student_name, 'Ученик');
+
+  purpose_label := case new.purpose
+    when 'lesson_debt' then 'задолженность за занятия'
+    when 'lesson_package' then 'пакет занятий'
+    when 'app_subscription' then
+      case
+        when coalesce(new.product_code, '') ilike '%duo%' then 'подписку Duo'
+        else 'подписку приложения'
+      end
+    else 'оплату'
+  end;
+
+  amount_label := trim(to_char(new.amount_rub, 'FM999999990')) || ' ₽';
+  notify_message := student_name || ' оплатил(а) ' || purpose_label || ': ' || amount_label;
+
+  insert into public.notifications (
+    recipient_id, recipient_role, title, message, kind, action_url, email_fallback_at
+  )
+  select
+    p.id,
+    'admin',
+    'Оплата',
+    notify_message,
+    'payment',
+    '/dashboard/admin?tab=students',
+    now() + interval '5 minutes'
+  from public.profiles p
+  where p.role = 'admin';
+
+  get diagnostics inserted = row_count;
+  if inserted = 0 then
+    insert into public.notifications (
+      recipient_id, recipient_role, title, message, kind, action_url, email_fallback_at
+    )
+    values (
+      null,
+      'admin',
+      'Оплата',
+      notify_message,
+      'payment',
+      '/dashboard/admin?tab=students',
+      now() + interval '5 minutes'
+    );
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_student_payment_confirmed on public.payment_transactions;
+create trigger on_student_payment_confirmed
+after insert or update of status on public.payment_transactions
+for each row
+execute procedure public.notify_admin_on_student_payment();
 
 create or replace function public.user_can_access_exercise(
   target_exercise_id uuid,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export function localDateKey(value: Date | string) {
@@ -28,6 +28,21 @@ export default function MonthCalendar({
   const [visibleMonth, setVisibleMonth] = useState(
     new Date(initialDate.getFullYear(), initialDate.getMonth(), 1)
   );
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const next = new Date(`${selectedDate}T12:00:00`);
+    if (Number.isNaN(next.getTime())) return;
+    setVisibleMonth((current) => {
+      if (
+        current.getFullYear() === next.getFullYear() &&
+        current.getMonth() === next.getMonth()
+      ) {
+        return current;
+      }
+      return new Date(next.getFullYear(), next.getMonth(), 1);
+    });
+  }, [selectedDate]);
 
   const days = useMemo(() => {
     const first = new Date(

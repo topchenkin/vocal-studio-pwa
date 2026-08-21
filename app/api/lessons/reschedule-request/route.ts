@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
     ].filter(Boolean);
 
     const message = messageParts.join(". ");
+    const actionUrl = `/dashboard/admin?tab=schedule&lesson=${lessonId}`;
 
     const { data: admins } = await auth.admin
       .from("profiles")
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
             title: "Запрос переноса урока",
             message,
             kind: "lesson" as const,
-            action_url: "/dashboard/admin?tab=schedule",
+            action_url: actionUrl,
             email_fallback_at: new Date(Date.now() + 5 * 60_000).toISOString(),
           }))
         : [
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
               title: "Запрос переноса урока",
               message,
               kind: "lesson" as const,
-              action_url: "/dashboard/admin?tab=schedule",
+              action_url: actionUrl,
               email_fallback_at: new Date(Date.now() + 5 * 60_000).toISOString(),
             },
           ];
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest) {
     const push = await sendWebPush(adminIds, {
       title: ADMIN_DISPLAY_NAME,
       body: message.slice(0, 180),
-      url: "/dashboard/admin?tab=schedule",
+      url: actionUrl,
     });
 
     return NextResponse.json({
