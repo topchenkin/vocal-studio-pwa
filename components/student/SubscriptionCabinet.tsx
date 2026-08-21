@@ -24,6 +24,9 @@ import { formatPrice, loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { AppSubscriptionTier } from "@/types";
 
 const PLAN_TO_TIER: Record<string, Exclude<AppSubscriptionTier, "none">> = {
+  standard: "standard",
+  premium: "premium",
+  vip: "vip",
   "1m": "standard",
   "3m": "premium",
   "6m": "vip",
@@ -66,10 +69,8 @@ function emptyPrefs(): BillingPrefs {
 }
 
 function planForTier(tier: AppSubscriptionTier) {
-  if (tier === "vip") return PLANS.find((p) => p.id === "6m") ?? PLANS[2];
-  if (tier === "premium") return PLANS.find((p) => p.id === "3m") ?? PLANS[1];
-  if (tier === "standard") return PLANS.find((p) => p.id === "1m") ?? PLANS[0];
-  return null;
+  if (tier === "none") return null;
+  return PLANS.find((p) => p.id === tier) ?? null;
 }
 
 export default function SubscriptionCabinet() {
@@ -83,6 +84,7 @@ export default function SubscriptionCabinet() {
   const [expiry, setExpiry] = useState("");
   const [cardError, setCardError] = useState("");
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
+  const [payNotice, setPayNotice] = useState<"ok" | "fail" | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -107,6 +109,15 @@ export default function SubscriptionCabinet() {
       );
     }
   }, [user, tier]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const pay = new URLSearchParams(window.location.search).get("pay");
+    if (pay === "ok" || pay === "fail") {
+      setPayNotice(pay);
+      void refreshProfile();
+    }
+  }, [refreshProfile]);
 
   const persist = (next: BillingPrefs) => {
     if (!user) return;
@@ -149,6 +160,7 @@ export default function SubscriptionCabinet() {
 
   const checkout = () => {
     if (duoMember) return;
+    persist({ ...prefs, planId: selected.id });
     setPayment({
       type: "subscription",
       tier: mappedTier,
@@ -164,6 +176,16 @@ export default function SubscriptionCabinet() {
   return (
     <>
       <div className="space-y-8">
+        {payNotice === "ok" && (
+          <p className="rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300 ring-1 ring-emerald-500/30">
+            Платёж принят. Если тариф ещё не обновился, обновите страницу через несколько секунд.
+          </p>
+        )}
+        {payNotice === "fail" && (
+          <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-red-500/30">
+            Оплата не завершена. Можно выбрать тариф и попробовать снова.
+          </p>
+        )}
         <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-studio-card via-studio-surface to-studio-gold/10 px-6 py-8 ring-1 ring-studio-gold/25 sm:px-8">
           <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-studio-gold">
             Текущий план
@@ -227,7 +249,7 @@ export default function SubscriptionCabinet() {
                   {profile.debt_amount.toLocaleString("ru-RU")} ₽
                 </p>
                 <p className="mt-1 text-xs text-red-300/70">
-                  Погасите задолженность через СБП (песочница).
+                  Погасите задолженность целиком через СБП.
                 </p>
               </div>
             </div>
@@ -247,8 +269,7 @@ export default function SubscriptionCabinet() {
           <div>
             <h3 className="font-display text-xl font-semibold">Сменить план</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              Срок абонемента и доступ к платформе. Оплата — через песочницу
-              СБП, без реального списания.
+              Срок тарифа — 1 месяц. Оплата через СБП на странице Робокассы.
             </p>
           </div>
           <SubscriptionSelector
@@ -278,8 +299,8 @@ export default function SubscriptionCabinet() {
                 Способ оплаты
               </h3>
               <p className="mt-1 text-sm text-studio-muted">
-                Карта сохраняется в кабинете. Эквайринг ещё не подключён —
-                песочница.
+                Карта в приложении не нужна: ученик платит СБП на странице
+                Робокассы и возвращается в кабинет.
               </p>
             </div>
           </div>
@@ -400,9 +421,8 @@ export default function SubscriptionCabinet() {
             <div>
               <p className="text-sm font-medium">Документы и поддержка</p>
               <p className="mt-1 text-sm leading-relaxed text-studio-muted">
-                Чек и закрывающие документы — по запросу в чате студии. В
-                истории операций пометка «Beta без списания» означает тестовую
-                оплату Unique Vocal.
+                Чек НПД приходит после оплаты через Робокассу. Тестовые платежи
+                до включения боевого режима деньги не списывают.
               </p>
             </div>
           </div>

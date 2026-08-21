@@ -1,0 +1,21 @@
+[Unit]
+Description=UniqueVocal Robokassa payment API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/uniquevocal/pay-api.env
+WorkingDirectory=/opt/pay-api
+ExecStart=/usr/bin/node /opt/pay-api/server.mjs
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -139,6 +139,7 @@ export interface PaymentTransaction {
   status: "pending" | "confirmed" | "failed" | "cancelled" | "refunded";
   external_id: string | null;
   metadata: Record<string, unknown>;
+  invoice_no?: number;
   created_at: string;
   confirmed_at: string | null;
 }

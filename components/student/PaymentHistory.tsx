@@ -67,7 +67,16 @@ export default function PaymentHistory({
               <p>{purposeLabels[item.purpose]}</p>
               <p className="text-[10px] text-studio-muted">
                 {new Date(item.created_at).toLocaleDateString("ru-RU")}
-                {item.provider === "sandbox" ? " · Beta без списания" : ""}
+                {item.status === "pending"
+                  ? " · ожидает оплату"
+                  : item.provider === "sandbox"
+                    ? " · Beta без списания"
+                    : item.provider === "robokassa" &&
+                        Boolean(
+                          (item.metadata as { is_test?: boolean } | null)?.is_test
+                        )
+                      ? " · тест Робокассы"
+                      : ""}
               </p>
             </div>
             <span className="font-medium">

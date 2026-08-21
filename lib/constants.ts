@@ -19,27 +19,26 @@ export const DUO_TIER_PRICES = {
 
 export const PLANS: SubscriptionPlan[] = [
   {
-    id: "1m",
-    duration: "1 месяц",
+    id: "standard",
+    duration: "Standard · 1 месяц",
     months: 1,
-    price: 8000,
-    pricePerMonth: 8000,
+    price: APP_TIER_PRICES.standard,
+    pricePerMonth: APP_TIER_PRICES.standard,
   },
   {
-    id: "3m",
-    duration: "3 месяца",
-    months: 3,
-    price: 21000,
-    pricePerMonth: 7000,
+    id: "premium",
+    duration: "Premium · 1 месяц",
+    months: 1,
+    price: APP_TIER_PRICES.premium,
+    pricePerMonth: APP_TIER_PRICES.premium,
     badge: "Популярный",
   },
   {
-    id: "6m",
-    duration: "6 месяцев",
-    months: 6,
-    price: 36000,
-    pricePerMonth: 6000,
-    badge: "Выгодно",
+    id: "vip",
+    duration: "VIP · 1 месяц",
+    months: 1,
+    price: APP_TIER_PRICES.vip,
+    pricePerMonth: APP_TIER_PRICES.vip,
   },
 ];
 
