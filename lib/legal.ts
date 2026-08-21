@@ -3,12 +3,12 @@ export const LEGAL = {
   site: "https://www.uniquevocal.ru",
   siteAlt: "https://uniquevocal.ru",
   inn: "668400292050",
-  /** Паспортное ФИО самозанятого. Пусто — в оферте только статус и ИНН. */
-  fullName: "",
+  fullName: "Топченкина Ирина Алексеевна",
+  city: "Екатеринбург",
   status:
     "физическое лицо, применяющее специальный налоговый режим «Налог на профессиональный доход» (самозанятый)",
-  phone: "+7 963 052-02-51",
-  phoneHref: "tel:+79630520251",
+  phone: "+7 932 608-28-48",
+  phoneHref: "tel:+79326082848",
   email: "yangta4@gmail.com",
   offerDate: "21 августа 2026 г.",
   offerPath: "/oferta",

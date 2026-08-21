@@ -277,12 +277,10 @@ export default function OfertaPage() {
             <dl className="grid gap-2 sm:grid-cols-[10rem_1fr]">
               <dt className="text-studio-muted">Статус</dt>
               <dd>Самозанятый (НПД)</dd>
-              {LEGAL.fullName.trim() ? (
-                <>
-                  <dt className="text-studio-muted">ФИО</dt>
-                  <dd>{LEGAL.fullName}</dd>
-                </>
-              ) : null}
+              <dt className="text-studio-muted">ФИО</dt>
+              <dd>{LEGAL.fullName}</dd>
+              <dt className="text-studio-muted">Город</dt>
+              <dd>{LEGAL.city}</dd>
               <dt className="text-studio-muted">ИНН</dt>
               <dd>{LEGAL.inn}</dd>
               <dt className="text-studio-muted">ОГРНИП</dt>
