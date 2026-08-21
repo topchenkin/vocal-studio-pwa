@@ -74,7 +74,7 @@ export default function SubscriptionStatus() {
                 <CatLevelText
                   as="h2"
                   label={cat.title}
-                  className="whitespace-nowrap font-display text-2xl font-semibold"
+                  className="whitespace-nowrap font-display text-2xl font-semibold leading-none"
                 />
               </div>
             </motion.div>

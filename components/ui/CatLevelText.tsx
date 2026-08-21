@@ -1,6 +1,9 @@
 "use client";
 
-/** Straight dash aligned to the letters, not a glyph from another font. */
+/**
+ * Words stay on one baseline (display font). The dash is a straight bar
+ * lifted from that baseline into the middle of the letters — not the cap line.
+ */
 export default function CatLevelText({
   label,
   className,
@@ -15,13 +18,15 @@ export default function CatLevelText({
     return <Tag className={className}>{label}</Tag>;
   }
   return (
-    <Tag className={`inline-flex items-center ${className ?? ""}`}>
+    <Tag className={className}>
       {label.slice(0, dash)}
       <span
         aria-hidden
-        className="mx-[0.14em] inline-block h-[0.11em] w-[0.4em] shrink-0 rounded-[1px] bg-current"
+        className="mx-[0.12em] inline-block h-[0.1em] w-[0.4em] translate-y-[-0.22em] rounded-[1px] bg-current"
       />
-      {label.slice(dash + 1)}
+      <span className="inline-block translate-y-[-0.08em]">
+        {label.slice(dash + 1)}
+      </span>
     </Tag>
   );
 }

@@ -77,7 +77,7 @@ const withPWA = withPWAInit({
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v45",
+    cacheId: "uvs-moscow-v46",
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
