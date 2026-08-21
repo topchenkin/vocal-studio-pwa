@@ -4,6 +4,19 @@ export const APP_NAME = "Unique Vocal Studio";
 export const APP_SHORT_NAME = "Unique Vocal";
 export const NOTIFICATION_APP_NAME = "Unique Vocal";
 
+/** Публичные цены подписки на приложение (₽ / месяц), как в каталоге услуг. */
+export const APP_TIER_PRICES = {
+  standard: 990,
+  premium: 1990,
+  vip: 3990,
+} as const;
+
+export const DUO_TIER_PRICES = {
+  standard: 1490,
+  premium: 2990,
+  vip: 5990,
+} as const;
+
 export const PLANS: SubscriptionPlan[] = [
   {
     id: "1m",

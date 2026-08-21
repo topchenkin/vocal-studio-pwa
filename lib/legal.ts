@@ -10,8 +10,12 @@ export const LEGAL = {
   phone: "+7 932 608-28-48",
   phoneHref: "tel:+79326082848",
   email: "yangta4@gmail.com",
+  contactHours:
+    "ежедневно по телефону, email и в чате приложения; занятия — по расписанию в личном кабинете (часовой пояс Екатеринбург, UTC+5)",
   offerDate: "21 августа 2026 г.",
   offerPath: "/oferta",
+  privacyPath: "/privacy",
+  uslugiPath: "/uslugi",
 } as const;
 
 export function executorTitle() {

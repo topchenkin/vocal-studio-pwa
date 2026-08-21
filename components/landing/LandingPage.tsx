@@ -7,7 +7,10 @@ import {
   Bot,
   Check,
   Crown,
+  Mail,
+  MapPin,
   Mic2,
+  Phone,
   Play,
   Sparkles,
   WandSparkles,
@@ -15,8 +18,12 @@ import {
 import Header from "@/components/Header";
 import AuthModal from "@/components/auth/AuthModal";
 import Button from "@/components/ui/Button";
-import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
+import RequisitesCard from "@/components/legal/RequisitesCard";
+import SiteFooter from "@/components/legal/SiteFooter";
+import { APP_TIER_PRICES } from "@/lib/constants";
+import { LEGAL } from "@/lib/legal";
+import { formatPrice } from "@/lib/storage";
 import type { AppSubscriptionTier } from "@/types";
 
 type AuthMode = "login" | "register";
@@ -25,6 +32,7 @@ const plans: Array<{
   tier: Exclude<AppSubscriptionTier, "none">;
   title: string;
   subtitle: string;
+  price: number;
   icon: typeof Bot;
   features: string[];
   highlighted?: boolean;
@@ -33,6 +41,7 @@ const plans: Array<{
     tier: "standard",
     title: "Standard",
     subtitle: "Уверенный старт",
+    price: APP_TIER_PRICES.standard,
     icon: Bot,
     features: ["AI-анализатор нот", "Чат платформы", "Часть упражнений"],
   },
@@ -40,6 +49,7 @@ const plans: Array<{
     tier: "premium",
     title: "Premium",
     subtitle: "Максимум прогресса",
+    price: APP_TIER_PRICES.premium,
     icon: Sparkles,
     features: [
       "Отзывы преподавателя",
@@ -52,6 +62,7 @@ const plans: Array<{
     tier: "vip",
     title: "VIP",
     subtitle: "Для будущих звёзд",
+    price: APP_TIER_PRICES.vip,
     icon: Crown,
     features: ["Запись студийного трека", "Безлимитный AI-анализ", "Всё из Premium"],
   },
@@ -60,7 +71,6 @@ const plans: Array<{
 export default function LandingPage() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("register");
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   const openAuth = (mode: AuthMode) => {
     setAuthMode(mode);
@@ -155,8 +165,9 @@ export default function LandingPage() {
               Выберите темп своего роста
             </h2>
             <p className="mt-4 text-studio-muted">
-              Подписка открывает функции IT-платформы. Условия и стоимость
-              вокальных уроков преподаватель настраивает индивидуально.
+              Подписка открывает функции IT-платформы. Цены ниже — в рублях,
+              без НДС. Занятия вокалом оплачиваются отдельно: сумма видна в
+              кабинете до платежа.
             </p>
           </div>
 
@@ -182,6 +193,12 @@ export default function LandingPage() {
                     {plan.title}
                   </h3>
                   <p className="text-sm text-studio-muted">{plan.subtitle}</p>
+                  <p className="mt-3 font-display text-3xl font-semibold">
+                    {formatPrice(plan.price)} ₽
+                    <span className="ml-1 text-sm font-normal text-studio-muted">
+                      / месяц
+                    </span>
+                  </p>
                   <ul className="my-6 flex-1 space-y-3">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex gap-2 text-sm">
@@ -193,9 +210,9 @@ export default function LandingPage() {
                   <Button
                     fullWidth
                     variant={plan.highlighted ? "primary" : "secondary"}
-                    onClick={() => setSelectedPlan(plan.title)}
+                    onClick={() => openAuth("register")}
                   >
-                    Купить подписку
+                    Оформить подписку
                   </Button>
                 </article>
               );
@@ -216,15 +233,55 @@ export default function LandingPage() {
           </Button>
         </section>
 
-        <footer className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-studio-border/60 pt-6 text-xs text-studio-muted sm:flex-row">
-          <span>© <span className="text-studio-gold">Unique</span> <span className="text-studio-accent">Vocal</span> <span className="text-gradient">Studio</span></span>
-          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-            <Link
-              href="/oferta"
-              className="transition hover:text-studio-accent-light"
-            >
-              Публичная оферта
-            </Link>
+        <section id="contacts" className="mt-10 grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
+          <div className="rounded-3xl bg-studio-card/70 p-6 ring-1 ring-studio-border sm:p-8">
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-studio-gold">
+              Контакты
+            </p>
+            <h2 className="mt-2 font-display text-2xl font-semibold">
+              Связаться со студией
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-studio-muted">
+              {LEGAL.contactHours}.
+            </p>
+            <ul className="mt-6 space-y-3 text-sm">
+              <li className="flex items-center gap-3">
+                <Phone className="h-4 w-4 shrink-0 text-studio-accent" />
+                <a className="hover:text-studio-accent-light" href={LEGAL.phoneHref}>
+                  {LEGAL.phone}
+                </a>
+              </li>
+              <li className="flex items-center gap-3">
+                <Mail className="h-4 w-4 shrink-0 text-studio-accent" />
+                <a
+                  className="hover:text-studio-accent-light"
+                  href={`mailto:${LEGAL.email}`}
+                >
+                  {LEGAL.email}
+                </a>
+              </li>
+              <li className="flex items-center gap-3">
+                <MapPin className="h-4 w-4 shrink-0 text-studio-accent" />
+                <span>г. {LEGAL.city}</span>
+              </li>
+            </ul>
+            <p className="mt-6 text-sm text-studio-muted">
+              Условия оказания услуг, оплата, отказ и возврат — в{" "}
+              <Link href={LEGAL.offerPath} className="text-studio-accent-light underline">
+                оферте
+              </Link>
+              . Полный прайс — на странице{" "}
+              <Link href={LEGAL.uslugiPath} className="text-studio-accent-light underline">
+                «Услуги и цены»
+              </Link>
+              .
+            </p>
+          </div>
+          <RequisitesCard />
+        </section>
+
+        <SiteFooter
+          extra={
             <Link
               href="/admin/login"
               className="inline-flex items-center gap-1.5 transition hover:text-studio-accent-light"
@@ -232,8 +289,8 @@ export default function LandingPage() {
               <Crown className="h-3.5 w-3.5" />
               Вход для администратора
             </Link>
-          </div>
-        </footer>
+          }
+        />
       </div>
 
       <AuthModal
@@ -241,28 +298,6 @@ export default function LandingPage() {
         initialMode={authMode}
         onClose={() => setAuthOpen(false)}
       />
-
-      <Modal
-        open={Boolean(selectedPlan)}
-        onClose={() => setSelectedPlan(null)}
-        title={`Подписка ${selectedPlan ?? ""}`}
-      >
-        <div className="text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-studio-accent/10">
-            <Sparkles className="h-7 w-7 text-studio-accent" />
-          </div>
-          <h3 className="mt-4 font-display text-2xl font-semibold">
-            Оплата скоро появится
-          </h3>
-          <p className="mt-2 text-sm leading-relaxed text-studio-muted">
-            Эквайринг для ежемесячных подписок находится в разработке. Мы
-            сообщим, когда тариф станет доступен.
-          </p>
-          <Button fullWidth className="mt-6" onClick={() => setSelectedPlan(null)}>
-            Понятно
-          </Button>
-        </div>
-      </Modal>
     </main>
   );
 }

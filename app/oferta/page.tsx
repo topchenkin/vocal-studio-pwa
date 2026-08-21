@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
+import SiteFooter from "@/components/legal/SiteFooter";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL, executorTitle } from "@/lib/legal";
 
@@ -308,16 +309,27 @@ export default function OfertaPage() {
                   {LEGAL.email}
                 </a>
               </dd>
+              <dt className="text-studio-muted">Связь</dt>
+              <dd>{LEGAL.contactHours}</dd>
             </dl>
           </div>
           <p className="mt-6 text-xs text-studio-muted">
             Размещено для ознакомления в соответствии с требованиями платёжного
             сервиса.{" "}
+            <Link href={LEGAL.uslugiPath} className="underline hover:text-studio-text">
+              Услуги и цены
+            </Link>
+            {" · "}
+            <Link href={LEGAL.privacyPath} className="underline hover:text-studio-text">
+              Конфиденциальность
+            </Link>
+            {" · "}
             <Link href="/" className="underline hover:text-studio-text">
               На главную
             </Link>
           </p>
         </article>
+        <SiteFooter />
       </div>
     </main>
   );
