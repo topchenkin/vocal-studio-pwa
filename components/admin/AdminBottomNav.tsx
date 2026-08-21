@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { CalendarDays, MessageCircle, Music2 } from "lucide-react";
+import { CalendarDays, MessageCircle, Music2, WalletCards } from "lucide-react";
 import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
 
 const items = [
@@ -23,6 +23,12 @@ const items = [
     label: "Мои аудио",
     icon: Music2,
   },
+  {
+    id: "debtors",
+    href: "/dashboard/admin?tab=debtors",
+    label: "Должники",
+    icon: WalletCards,
+  },
 ] as const;
 
 export default function AdminBottomNav() {
@@ -36,7 +42,7 @@ export default function AdminBottomNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
       aria-label="Быстрый доступ"
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-3 px-2 pt-1">
+      <div className="mx-auto grid max-w-6xl grid-cols-4 px-2 pt-1">
         {items.map((item) => {
           const Icon = item.icon;
           const active = onCabinet && tab === item.id;
