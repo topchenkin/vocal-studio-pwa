@@ -167,6 +167,7 @@ function StudentEditor({
     const updates = {
       is_active_student: draft.is_active_student,
       app_sub_tier: draft.app_sub_tier,
+      app_sub_expires_at: draft.app_sub_expires_at || null,
       cat_level: draft.cat_level,
       lesson_pay_type: draft.lesson_pay_type,
       custom_lesson_price:
@@ -313,6 +314,27 @@ function StudentEditor({
               Тариф управляется подпиской Duo.
             </p>
           )}
+          <label className="mt-3 block">
+            <span className="mb-1.5 block text-xs text-studio-muted">
+              Подписка действует до
+            </span>
+            <input
+              type="date"
+              value={
+                draft.app_sub_expires_at
+                  ? draft.app_sub_expires_at.slice(0, 10)
+                  : ""
+              }
+              onChange={(event) => {
+                const value = event.target.value;
+                updateDraft(
+                  "app_sub_expires_at",
+                  value ? `${value}T23:59:59.000Z` : null
+                );
+              }}
+              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            />
+          </label>
         </fieldset>
 
         <fieldset className="rounded-2xl bg-studio-accent/5 p-4 ring-1 ring-studio-accent/20">
@@ -824,6 +846,14 @@ export default function StudentsTable() {
                     {student.app_sub_tier}
                     {student.app_sub_variant !== "individual" ? " Duo" : ""}
                   </p>
+                  {student.app_sub_expires_at && (
+                    <p className="mt-1 text-[10px] text-studio-gold">
+                      до{" "}
+                      {new Date(student.app_sub_expires_at).toLocaleDateString(
+                        "ru-RU"
+                      )}
+                    </p>
+                  )}
                 </div>
                 <div className="rounded-xl bg-studio-bg/50 p-3">
                   <p className="text-studio-muted">

@@ -229,6 +229,37 @@ async function remindPendingReschedules() {
   }
 }
 
+async function remindSubscriptionExpiring() {
+  try {
+    await sb("/rest/v1/rpc/expire_app_subscriptions", {
+      method: "POST",
+      body: "{}",
+    });
+  } catch (error) {
+    console.error("expire subscriptions failed", error?.message || error);
+  }
+
+  const response = await sb("/rest/v1/rpc/remind_subscription_expiring", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "subscription expiry remind failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("subscription expiry reminders", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
 async function tick() {
   if (ticking) return;
   ticking = true;
@@ -237,6 +268,7 @@ async function tick() {
     if (Date.now() - lastRemindAt >= REMIND_MS) {
       lastRemindAt = Date.now();
       await remindPendingReschedules();
+      await remindSubscriptionExpiring();
     }
   } catch (error) {
     console.error("push poll failed", error?.message || error);

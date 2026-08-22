@@ -150,11 +150,13 @@ export default function ExerciseLibrary() {
   const upgrade = () => {
     const target =
       lockedTier === "vip" ? ("vip" as const) : ("premium" as const);
+    const monthly = target === "vip" ? 3990 : 1990;
     setLockedTier(null);
     setPayment({
       type: "subscription",
       tier: target,
-      amount: target === "vip" ? 3990 : 1990,
+      months: 3,
+      amount: monthly * 3,
     });
   };
 

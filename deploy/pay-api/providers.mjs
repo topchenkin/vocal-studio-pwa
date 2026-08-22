@@ -209,28 +209,53 @@ export const yookassa = {
   },
   isTest: IS_TEST,
   async createPayment({ outSum, invId, description, email }) {
-    const payload = {
+    const base = {
       amount: { value: outSum, currency: "RUB" },
       capture: true,
       description: description.slice(0, 128),
-      // SBP by default; YooKassa page still handles redirect/QR.
-      payment_method_data: { type: "sbp" },
       confirmation: { type: "redirect", return_url: RETURN_URL },
       metadata: { invoice_no: String(invId) },
     };
-    if (email) payload.metadata.payer_email = email;
+    if (email) base.metadata.payer_email = email;
 
-    const payment = await request("/payments", {
-      method: "POST",
-      headers: { "Idempotence-Key": randomUUID() },
-      body: JSON.stringify(payload),
-    });
+    // Prefer SBP on the checkout page; if the shop rejects forced SBP,
+    // fall back to the full YooKassa method picker (still includes SBP when enabled).
+    const attempts = [
+      { ...base, payment_method_data: { type: "sbp" } },
+      base,
+    ];
 
-    const paymentUrl = payment?.confirmation?.confirmation_url;
-    if (!paymentUrl) {
-      throw new Error("YooKassa did not return confirmation_url");
+    let lastError;
+    for (const payload of attempts) {
+      try {
+        const payment = await request("/payments", {
+          method: "POST",
+          headers: { "Idempotence-Key": randomUUID() },
+          body: JSON.stringify(payload),
+        });
+        const paymentUrl = payment?.confirmation?.confirmation_url;
+        if (!paymentUrl) {
+          throw new Error("YooKassa did not return confirmation_url");
+        }
+        return { paymentUrl, externalId: payment.id || null };
+      } catch (error) {
+        lastError = error;
+        const msg = String(error?.message || "").toLowerCase();
+        const sbpForced = Boolean(payload.payment_method_data);
+        if (
+          sbpForced &&
+          (msg.includes("payment_method") ||
+            msg.includes("sbp") ||
+            msg.includes("not available") ||
+            msg.includes("illegal") ||
+            error?.status === 400)
+        ) {
+          continue;
+        }
+        throw error;
+      }
     }
-    return { paymentUrl, externalId: payment.id || null };
+    throw lastError || new Error("YooKassa payment failed");
   },
   async fetchPayment(paymentId) {
     return request(`/payments/${encodeURIComponent(paymentId)}`, {

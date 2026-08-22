@@ -15,6 +15,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
 const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
+const ALLOWED_MONTHS = new Set([3, 6, 12]);
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -63,7 +64,7 @@ async function authUser(accessToken) {
 
 async function loadProfile(userId) {
   const response = await sb(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,debt_amount,app_sub_variant,app_sub_tier&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,debt_amount,app_sub_variant,app_sub_tier,app_sub_expires_at,lesson_pay_type,custom_abonement_price,lessons_balance&limit=1`
   );
   if (!response.ok) return null;
   const rows = await response.json();
@@ -72,6 +73,12 @@ async function loadProfile(userId) {
 
 function money(value) {
   return Number(value).toFixed(2);
+}
+
+function parseMonths(raw) {
+  const months = Number(raw);
+  if (!ALLOWED_MONTHS.has(months)) return null;
+  return months;
 }
 
 async function confirmPayment(invoiceNo, outSum, externalId) {
@@ -243,30 +250,55 @@ async function handleInit(req, res) {
   let description = "";
   let tier = null;
   let isDuo = false;
+  let months = null;
+  let lessonsCount = null;
+  const metadata = {
+    is_test: yookassa.isTest,
+  };
 
   if (kind === "debt") {
     amount = Number(profile.debt_amount || 0);
     if (!(amount > 0)) return json(res, 400, { error: "Задолженности нет" });
     purpose = "lesson_debt";
     description = "Задолженность за занятия Unique Vocal";
+  } else if (kind === "abonement" || kind === "lesson_package") {
+    amount = Number(profile.custom_abonement_price || 0);
+    if (!(amount > 0)) {
+      return json(res, 400, { error: "Стоимость абонемента не задана" });
+    }
+    lessonsCount = Math.max(1, Number(body.lessonsCount) || 8);
+    purpose = "lesson_package";
+    productCode = "abonement";
+    description = `Абонемент Unique Vocal (${lessonsCount} занятий)`;
+    metadata.lessons_count = lessonsCount;
   } else if (kind === "subscription" || kind === "duo_subscription") {
     tier = String(body.tier || "");
     if (!["standard", "premium", "vip"].includes(tier)) {
       return json(res, 400, { error: "Неизвестный тариф" });
     }
+    months = parseMonths(body.months);
+    if (!months) {
+      return json(res, 400, { error: "Выберите срок 3, 6 или 12 месяцев" });
+    }
     isDuo = kind === "duo_subscription";
     if (profile.app_sub_variant === "duo_member") {
       return json(res, 400, { error: "Тариф Duo меняет владелец подписки" });
     }
-    amount = isDuo ? DUO_PRICES[tier] : TIER_PRICES[tier];
+    const monthly = isDuo ? DUO_PRICES[tier] : TIER_PRICES[tier];
+    amount = monthly * months;
     purpose = "app_subscription";
     productCode = isDuo ? `${tier}_duo` : tier;
     description = isDuo
-      ? `Подписка ${tier} Duo Unique Vocal`
-      : `Подписка ${tier} Unique Vocal`;
+      ? `Подписка ${tier} Duo Unique Vocal · ${months} мес.`
+      : `Подписка ${tier} Unique Vocal · ${months} мес.`;
+    metadata.tier = tier;
+    metadata.is_duo = isDuo;
+    metadata.months = months;
   } else {
     return json(res, 400, { error: "Неизвестный тип оплаты" });
   }
+
+  metadata.description = description;
 
   const outSum = money(amount);
   const insert = await sb("/rest/v1/payment_transactions", {
@@ -279,12 +311,7 @@ async function handleInit(req, res) {
       amount_rub: Number(outSum),
       provider: "yookassa",
       status: "pending",
-      metadata: {
-        is_test: yookassa.isTest,
-        tier,
-        is_duo: isDuo,
-        description,
-      },
+      metadata,
     }),
   });
   if (!insert.ok) {
@@ -323,6 +350,7 @@ async function handleInit(req, res) {
     amount: Number(outSum),
     isTest: yookassa.isTest,
     provider: "yookassa",
+    months,
   });
 }
 

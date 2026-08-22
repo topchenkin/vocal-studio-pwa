@@ -40,10 +40,18 @@ async function postPayment(path: string, body: unknown) {
 }
 
 export async function startPayment(purpose: PaymentPurpose) {
-  const payload = await postPayment("/init", {
-    type: purpose.type,
-    tier: purpose.type === "debt" ? undefined : purpose.tier,
-  });
+  const body =
+    purpose.type === "debt"
+      ? { type: "debt" }
+      : purpose.type === "abonement"
+        ? { type: "abonement", lessonsCount: purpose.lessonsCount }
+        : {
+            type: purpose.type,
+            tier: purpose.tier,
+            months: purpose.months,
+          };
+
+  const payload = await postPayment("/init", body);
   window.location.assign(payload.paymentUrl!);
 }
 

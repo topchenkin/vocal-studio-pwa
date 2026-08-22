@@ -17,17 +17,36 @@ export const DUO_TIER_PRICES = {
   vip: 5990,
 } as const;
 
+/** Доступные сроки оплаты подписки (без автопродления). */
+export const SUBSCRIPTION_MONTH_OPTIONS = [3, 6, 12] as const;
+export type SubscriptionMonthOption =
+  (typeof SUBSCRIPTION_MONTH_OPTIONS)[number];
+
+export const TIER_RANK = {
+  none: 0,
+  standard: 1,
+  premium: 2,
+  vip: 3,
+} as const;
+
+export function subscriptionTotal(
+  monthly: number,
+  months: SubscriptionMonthOption
+) {
+  return monthly * months;
+}
+
 export const PLANS: SubscriptionPlan[] = [
   {
     id: "standard",
-    duration: "Standard · 1 месяц",
+    duration: "Standard",
     months: 1,
     price: APP_TIER_PRICES.standard,
     pricePerMonth: APP_TIER_PRICES.standard,
   },
   {
     id: "premium",
-    duration: "Premium · 1 месяц",
+    duration: "Premium",
     months: 1,
     price: APP_TIER_PRICES.premium,
     pricePerMonth: APP_TIER_PRICES.premium,
@@ -35,7 +54,7 @@ export const PLANS: SubscriptionPlan[] = [
   },
   {
     id: "vip",
-    duration: "VIP · 1 месяц",
+    duration: "VIP",
     months: 1,
     price: APP_TIER_PRICES.vip,
     pricePerMonth: APP_TIER_PRICES.vip,

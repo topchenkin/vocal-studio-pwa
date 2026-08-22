@@ -62,12 +62,12 @@ export default function SubscriptionCard({ plan, selected, onSelect }: Props) { 
             {formatPrice(plan.price)}
             <span className="text-sm font-sans font-normal text-studio-muted">
               {" "}
-              ₽
+              ₽/мес
             </span>
           </p>
           {plan.months > 1 && (
             <p className="text-xs text-studio-gold">
-              −{Math.round((1 - plan.pricePerMonth / 8000) * 100)}% экономия
+              за {plan.months} мес. · {formatPrice(plan.price)} ₽
             </p>
           )}
         </div>

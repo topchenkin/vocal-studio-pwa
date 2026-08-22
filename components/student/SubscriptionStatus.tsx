@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Cat, Crown, Sparkles, WalletCards } from "lucide-react";
+import { CalendarDays, Cat, Crown, Sparkles, WalletCards } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import SbpPaymentSheet, {
@@ -13,7 +13,9 @@ import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
 import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
 import CatLevelText from "@/components/ui/CatLevelText";
+import { APP_TIER_PRICES, subscriptionTotal } from "@/lib/constants";
 import type { CatLevel } from "@/types";
+import Link from "next/link";
 
 const catLevels: Record<
   CatLevel,
@@ -52,6 +54,15 @@ export default function SubscriptionStatus() {
     tier === "none"
       ? "Без подписки"
       : `${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+  const expiry =
+    profile.app_sub_expires_at &&
+    !Number.isNaN(new Date(profile.app_sub_expires_at).getTime())
+      ? new Date(profile.app_sub_expires_at).toLocaleDateString("ru-RU")
+      : null;
+  const active =
+    tier !== "none" &&
+    (!profile.app_sub_expires_at ||
+      new Date(profile.app_sub_expires_at).getTime() > Date.now());
 
   return (
     <>
@@ -82,6 +93,17 @@ export default function SubscriptionStatus() {
               <Crown className="mr-1 h-3 w-3" />
               {tierName}
             </Badge>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 text-sm text-studio-muted">
+            <CalendarDays className="h-4 w-4 text-studio-accent-light" />
+            {active && expiry
+              ? `Подписка до ${expiry}`
+              : active
+                ? "Срок подписки не указан"
+                : expiry
+                  ? `Истекла ${expiry}`
+                  : "Нет активной подписки"}
           </div>
 
           <div className="mt-6">
@@ -132,7 +154,7 @@ export default function SubscriptionStatus() {
             </div>
           </div>
 
-          {tier === "none" && (
+          {!active && (
             <Button
               className="mt-4"
               fullWidth
@@ -140,14 +162,25 @@ export default function SubscriptionStatus() {
                 setPayment({
                   type: "subscription",
                   tier: "standard",
-                  amount: 990,
+                  months: 3,
+                  amount: subscriptionTotal(APP_TIER_PRICES.standard, 3),
                 })
               }
             >
               <Sparkles className="h-4 w-4" />
-              Подключить Standard
+              Standard · 3 мес. ·{" "}
+              {subscriptionTotal(APP_TIER_PRICES.standard, 3).toLocaleString(
+                "ru-RU"
+              )}{" "}
+              ₽
             </Button>
           )}
+          <Link
+            href="/dashboard/student/subscription"
+            className="mt-3 block text-center text-xs text-studio-accent-light underline-offset-2 hover:underline"
+          >
+            Все тарифы и сроки оплаты
+          </Link>
         </div>
 
         <DuoSubscriptionCard profile={profile} />

@@ -7,17 +7,26 @@ import { startPayment } from "@/lib/payment-client";
 import { paymentProviderLabel } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
+export type SubscriptionMonths = 3 | 6 | 12;
+
 type PaymentPurpose =
   | { type: "debt"; amount: number }
+  | {
+      type: "abonement";
+      amount: number;
+      lessonsCount?: number;
+    }
   | {
       type: "subscription";
       amount: number;
       tier: Exclude<AppSubscriptionTier, "none">;
+      months: SubscriptionMonths;
     }
   | {
       type: "duo_subscription";
       amount: number;
       tier: Exclude<AppSubscriptionTier, "none">;
+      months: SubscriptionMonths;
     };
 
 function SbpLogo() {
@@ -32,6 +41,14 @@ function SbpLogo() {
       <span className="text-lg font-bold">СБП</span>
     </div>
   );
+}
+
+function purposeLabel(purpose: PaymentPurpose) {
+  if (purpose.type === "debt") return "Оплата задолженности за урок";
+  if (purpose.type === "abonement") return "Оплата абонемента";
+  return `Подписка ${purpose.tier}${
+    purpose.type === "duo_subscription" ? " Duo" : ""
+  } · ${purpose.months} мес.`;
 }
 
 export default function SbpPaymentSheet({
@@ -51,13 +68,12 @@ export default function SbpPaymentSheet({
     if (!open) return;
     setError("");
     setBusy(true);
-    void startPayment(purpose)
-      .catch((caught: unknown) => {
-        setBusy(false);
-        setError(
-          caught instanceof Error ? caught.message : "Не удалось открыть оплату"
-        );
-      });
+    void startPayment(purpose).catch((caught: unknown) => {
+      setBusy(false);
+      setError(
+        caught instanceof Error ? caught.message : "Не удалось открыть оплату"
+      );
+    });
   }, [open, purpose]);
 
   return (
@@ -67,13 +83,7 @@ export default function SbpPaymentSheet({
         <h2 className="mt-5 font-display text-3xl font-semibold">
           Оплата по СБП
         </h2>
-        <p className="mt-1 text-sm text-studio-muted">
-          {purpose.type === "debt"
-            ? "Оплата задолженности за урок"
-            : `Подписка ${purpose.tier}${
-                purpose.type === "duo_subscription" ? " Duo" : ""
-              }`}
-        </p>
+        <p className="mt-1 text-sm text-studio-muted">{purposeLabel(purpose)}</p>
       </div>
 
       <p className="mt-6 text-center font-display text-3xl font-semibold">

@@ -77,6 +77,7 @@ const mockAdminProfile: StudentProfile = {
   role: "admin",
   app_sub_tier: "vip",
   app_sub_variant: "individual",
+  app_sub_expires_at: null,
   cat_level: "star",
   is_active_student: true,
   lesson_pay_type: "one_time",
@@ -446,7 +447,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadProfile, user]);
 
   const role: UserRole = profile?.role ?? (user ? "student" : "guest");
-  const tier = profile?.app_sub_tier ?? "none";
+  const rawTier = profile?.app_sub_tier ?? "none";
+  const expired =
+    Boolean(profile?.app_sub_expires_at) &&
+    new Date(profile!.app_sub_expires_at!).getTime() <= Date.now();
+  const tier: AppSubscriptionTier =
+    rawTier !== "none" && expired ? "none" : rawTier;
 
   const value = useMemo<AuthContextValue>(
     () => ({

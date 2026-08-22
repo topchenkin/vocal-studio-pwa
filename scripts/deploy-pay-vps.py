@@ -15,6 +15,7 @@ GIFT_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-certificates.sql"
 YK_SQL = ROOT / "supabase-migrations" / "2026-08-22-yookassa-confirm.sql"
 GIFT_ADMIN_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-admin-actions.sql"
 GIFT_SIGNUP_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-redeem-on-signup.sql"
+SUB_SQL = ROOT / "supabase-migrations" / "2026-08-23-subscription-expiry.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -113,7 +114,7 @@ def main() -> None:
     password = PASSWORD or local.get("UVS_SSH_PASS", "")
     if not password:
         raise SystemExit("UVS_SSH_PASS is not set")
-    for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL, GIFT_SIGNUP_SQL):
+    for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL, GIFT_SIGNUP_SQL, SUB_SQL):
         if not path.is_file():
             raise SystemExit(f"missing {path}")
     env = env_file_bytes()
@@ -154,6 +155,8 @@ def main() -> None:
                 fh.write(GIFT_ADMIN_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/gift-redeem-on-signup.sql", "wb") as fh:
                 fh.write(GIFT_SIGNUP_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/subscription-expiry.sql", "wb") as fh:
+                fh.write(SUB_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -167,6 +170,7 @@ def main() -> None:
             "yookassa-confirm.sql",
             "gift-admin-actions.sql",
             "gift-redeem-on-signup.sql",
+            "subscription-expiry.sql",
         ):
             run(
                 client,

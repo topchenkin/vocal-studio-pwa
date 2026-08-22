@@ -1,13 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link2, UsersRound } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import SbpPaymentSheet, {
   type PaymentPurpose,
+  type SubscriptionMonths,
 } from "@/components/payment/SbpPaymentSheet";
 import { useAuth } from "@/context/AuthContext";
+import {
+  DUO_TIER_PRICES,
+  SUBSCRIPTION_MONTH_OPTIONS,
+  TIER_RANK,
+  subscriptionTotal,
+  type SubscriptionMonthOption,
+} from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
 import type {
   AppSubscriptionTier,
@@ -20,10 +28,16 @@ const duoPlans: Array<{
   title: string;
   price: number;
 }> = [
-  { tier: "standard", title: "Standard Duo", price: 1490 },
-  { tier: "premium", title: "Premium Duo", price: 2990 },
-  { tier: "vip", title: "VIP Duo", price: 5990 },
+  { tier: "standard", title: "Standard Duo", price: DUO_TIER_PRICES.standard },
+  { tier: "premium", title: "Premium Duo", price: DUO_TIER_PRICES.premium },
+  { tier: "vip", title: "VIP Duo", price: DUO_TIER_PRICES.vip },
 ];
+
+function isActive(profile: StudentProfile) {
+  if (profile.app_sub_tier === "none") return false;
+  if (!profile.app_sub_expires_at) return true;
+  return new Date(profile.app_sub_expires_at).getTime() > Date.now();
+}
 
 export default function DuoSubscriptionCard({
   profile,
@@ -36,6 +50,7 @@ export default function DuoSubscriptionCard({
   const [linkOpen, setLinkOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [linking, setLinking] = useState(false);
+  const [months, setMonths] = useState<SubscriptionMonthOption>(3);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
   const [error, setError] = useState("");
 
@@ -81,6 +96,15 @@ export default function DuoSubscriptionCard({
 
   const isOwner = profile.app_sub_variant === "duo_owner";
   const isMember = profile.app_sub_variant === "duo_member";
+  const active = isActive(profile);
+
+  const visibleDuoPlans = useMemo(() => {
+    if (!active || !isOwner) return duoPlans;
+    const current = duo?.tier ?? profile.app_sub_tier;
+    return duoPlans.filter(
+      (plan) => TIER_RANK[plan.tier] >= TIER_RANK[current]
+    );
+  }, [active, duo?.tier, isOwner, profile.app_sub_tier]);
 
   return (
     <>
@@ -106,17 +130,25 @@ export default function DuoSubscriptionCard({
                     ? "У вас общий доступ к платформе, но личные уроки, Котик и баланс."
                     : "Одна оплата — два аккаунта. Уроки и прогресс остаются личными."}
             </p>
+            {isOwner && profile.app_sub_expires_at && (
+              <p className="mt-1 text-xs text-studio-gold">
+                До{" "}
+                {new Date(profile.app_sub_expires_at).toLocaleDateString(
+                  "ru-RU"
+                )}
+              </p>
+            )}
           </div>
         </div>
 
-        {!isOwner && !isMember && (
+        {!isMember && (
           <Button
             className="mt-4"
             fullWidth
             variant="secondary"
             onClick={() => setPlansOpen(true)}
           >
-            Выбрать Duo
+            {isOwner && active ? "Продлить / апгрейд Duo" : "Выбрать Duo"}
           </Button>
         )}
         {isOwner && duo?.status !== "active" && (
@@ -133,30 +165,52 @@ export default function DuoSubscriptionCard({
         title="Тарифы Duo"
         size="sm"
       >
-        <div className="space-y-2">
-          {duoPlans.map((plan) => (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {SUBSCRIPTION_MONTH_OPTIONS.map((option) => (
             <button
-              key={plan.tier}
+              key={option}
               type="button"
-              onClick={() => {
-                setPlansOpen(false);
-                setPayment({
-                  type: "duo_subscription",
-                  tier: plan.tier,
-                  amount: plan.price,
-                });
-              }}
-              className="flex w-full items-center justify-between rounded-xl bg-studio-surface p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent"
+              onClick={() => setMonths(option)}
+              className={`rounded-xl px-3 py-2 text-xs ring-1 transition ${
+                months === option
+                  ? "bg-studio-accent/15 text-studio-accent-light ring-studio-accent"
+                  : "bg-studio-surface text-studio-muted ring-studio-border"
+              }`}
             >
-              <span>
-                <span className="block font-medium">{plan.title}</span>
-                <span className="text-xs text-studio-muted">
-                  Доступ платформы для двух аккаунтов
-                </span>
-              </span>
-              <span className="font-semibold">{plan.price.toLocaleString("ru-RU")} ₽</span>
+              {option} мес.
             </button>
           ))}
+        </div>
+        <div className="space-y-2">
+          {visibleDuoPlans.map((plan) => {
+            const amount = subscriptionTotal(plan.price, months);
+            return (
+              <button
+                key={plan.tier}
+                type="button"
+                onClick={() => {
+                  setPlansOpen(false);
+                  setPayment({
+                    type: "duo_subscription",
+                    tier: plan.tier,
+                    months: months as SubscriptionMonths,
+                    amount,
+                  });
+                }}
+                className="flex w-full items-center justify-between rounded-xl bg-studio-surface p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent"
+              >
+                <span>
+                  <span className="block font-medium">{plan.title}</span>
+                  <span className="text-xs text-studio-muted">
+                    {plan.price.toLocaleString("ru-RU")} ₽/мес · {months} мес.
+                  </span>
+                </span>
+                <span className="font-semibold">
+                  {amount.toLocaleString("ru-RU")} ₽
+                </span>
+              </button>
+            );
+          })}
         </div>
       </Modal>
 

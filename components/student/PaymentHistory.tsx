@@ -65,7 +65,14 @@ export default function PaymentHistory({
             className="flex items-center justify-between rounded-xl bg-studio-bg/40 px-3 py-2.5 text-sm"
           >
             <div>
-              <p>{purposeLabels[item.purpose]}</p>
+              <p>
+                {purposeLabels[item.purpose]}
+                {item.purpose === "app_subscription" &&
+                typeof (item.metadata as { months?: number } | null)?.months ===
+                  "number"
+                  ? ` · ${(item.metadata as { months: number }).months} мес.`
+                  : ""}
+              </p>
               <p className="text-[10px] text-studio-muted">
                 {new Date(item.created_at).toLocaleDateString("ru-RU")}
                 {item.status === "pending"

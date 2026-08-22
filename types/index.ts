@@ -51,6 +51,7 @@ export interface StudentProfile {
   role: Exclude<UserRole, "guest">;
   app_sub_tier: AppSubscriptionTier;
   app_sub_variant: AppSubscriptionVariant;
+  app_sub_expires_at?: string | null;
   cat_level: CatLevel;
   is_active_student: boolean;
   lesson_pay_type: LessonPayType;

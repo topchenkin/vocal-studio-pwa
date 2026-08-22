@@ -198,8 +198,8 @@ export default function GiftCertificatesPanel() {
         <div>
           <h3 className="font-display text-xl font-semibold">Сертификаты</h3>
           <p className="mt-1 text-xs text-studio-muted">
-            Звонок → создаёте сертификат → кидаете ссылку СБП. Код дарите после
-            оплаты. Активация по имени получателя.
+            Звонок → создаёте сертификат → кидаете ссылку оплаты ЮKassa.
+            Код дарите после оплаты. Активация по имени получателя.
           </p>
         </div>
         <Button onClick={() => setCreating((value) => !value)}>
