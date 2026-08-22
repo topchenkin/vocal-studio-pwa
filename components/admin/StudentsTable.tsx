@@ -74,6 +74,48 @@ const mockStudents: StudentProfile[] = [
   },
 ];
 
+function AdminGiftNote({
+  giftCertificateId,
+  buyerName,
+  giftKind,
+}: {
+  giftCertificateId: string;
+  buyerName?: string | null;
+  giftKind?: string | null;
+}) {
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from("gift_certificates")
+        .select("note")
+        .eq("id", giftCertificateId)
+        .maybeSingle();
+      if (!cancelled) setNote(data?.note ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [giftCertificateId]);
+
+  return (
+    <div className="rounded-2xl bg-studio-gold/10 p-4 ring-1 ring-studio-gold/35">
+      <p className="text-xs font-medium uppercase tracking-[0.16em] text-studio-gold">
+        Подарочный сертификат
+      </p>
+      <p className="mt-2 text-sm">
+        {buyerName ? `От: ${buyerName}. ` : ""}
+        {note || "Есть активированный подарок — не забудьте одобрить ученика."}
+      </p>
+      {giftKind && (
+        <p className="mt-2 text-xs text-studio-muted">Тип: {giftKind}</p>
+      )}
+    </div>
+  );
+}
+
 function StudentEditor({
   student,
   open,
@@ -232,22 +274,11 @@ function StudentEditor({
         </div>
 
         {draft.gift_certificate_id && (
-          <div className="rounded-2xl bg-studio-gold/10 p-4 ring-1 ring-studio-gold/35">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-studio-gold">
-              Подарочный сертификат
-            </p>
-            <p className="mt-2 text-sm">
-              {draft.gift_buyer_name
-                ? `От: ${draft.gift_buyer_name}. `
-                : ""}
-              {draft.gift_note || "Есть активированный подарок — не забудьте одобрить ученика."}
-            </p>
-            {draft.gift_kind && (
-              <p className="mt-2 text-xs text-studio-muted">
-                Тип: {draft.gift_kind}
-              </p>
-            )}
-          </div>
+          <AdminGiftNote
+            giftCertificateId={draft.gift_certificate_id}
+            buyerName={draft.gift_buyer_name}
+            giftKind={draft.gift_kind}
+          />
         )}
 
         <fieldset>

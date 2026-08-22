@@ -697,8 +697,8 @@ export interface Database {
         Returns: undefined;
       };
       redeem_gift_certificate: {
-        Args: { p_code: string };
-        Returns: { ok: boolean; kind: string };
+        Args: { p_code: string; p_full_name?: string | null };
+        Returns: { ok: boolean; kind: string; already?: boolean };
       };
       admin_create_gift_certificate: {
         Args: {

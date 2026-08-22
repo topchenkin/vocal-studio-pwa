@@ -25,7 +25,10 @@ export default function GiftRedeemCard() {
     if (!profile || profile.gift_certificate_id) return;
     let pending = "";
     try {
-      pending = sessionStorage.getItem(PENDING_GIFT_KEY) || "";
+      pending =
+        sessionStorage.getItem(PENDING_GIFT_KEY) ||
+        localStorage.getItem(PENDING_GIFT_KEY) ||
+        "";
     } catch {
       pending = "";
     }
@@ -35,16 +38,22 @@ export default function GiftRedeemCard() {
       setBusy(true);
       const { error: redeemError } = await supabase.rpc(
         "redeem_gift_certificate",
-        { p_code: normalizeGiftCode(pending) }
+        {
+          p_code: normalizeGiftCode(pending),
+          p_full_name: profile.full_name,
+        }
       );
       setBusy(false);
       try {
         sessionStorage.removeItem(PENDING_GIFT_KEY);
+        localStorage.removeItem(PENDING_GIFT_KEY);
       } catch {
         /* ignore */
       }
       if (redeemError) {
-        setError(redeemError.message);
+        if (!/уже активирован|already/i.test(redeemError.message)) {
+          setError(redeemError.message);
+        }
         return;
       }
       setOk("Подарочный сертификат активирован");
@@ -68,9 +77,6 @@ export default function GiftRedeemCard() {
                 ? ` · от ${profile.gift_buyer_name}`
                 : ""}
             </p>
-            {profile.gift_note && (
-              <p className="mt-2 text-xs text-studio-muted">{profile.gift_note}</p>
-            )}
           </div>
         </div>
       </div>
@@ -103,7 +109,10 @@ export default function GiftRedeemCard() {
                 setBusy(true);
                 const { error: redeemError } = await supabase.rpc(
                   "redeem_gift_certificate",
-                  { p_code: normalizeGiftCode(code) }
+                  {
+                    p_code: normalizeGiftCode(code),
+                    p_full_name: profile.full_name,
+                  }
                 );
                 setBusy(false);
                 if (redeemError) {

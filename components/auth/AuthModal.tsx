@@ -18,6 +18,24 @@ interface AuthModalProps {
 
 const PENDING_GIFT_KEY = "uvs_pending_gift_code";
 
+function storePendingGift(code: string) {
+  try {
+    sessionStorage.setItem(PENDING_GIFT_KEY, code);
+    localStorage.setItem(PENDING_GIFT_KEY, code);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPendingGift() {
+  try {
+    sessionStorage.removeItem(PENDING_GIFT_KEY);
+    localStorage.removeItem(PENDING_GIFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function AuthModal({
   open,
   initialMode,
@@ -42,15 +60,29 @@ export default function AuthModal({
     setMessage("");
   }, [initialMode, open]);
 
-  const redeemIfNeeded = async (codeRaw: string) => {
+  const redeemIfNeeded = async (codeRaw: string, name: string) => {
     const code = normalizeGiftCode(codeRaw);
     if (code.length !== 12) return null;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return "Сессия ещё не готова — войдите и активируйте код в кабинете";
+
+    await supabase
+      .from("profiles")
+      .update({ full_name: name.trim() })
+      .eq("id", user.id);
+
     const { error: redeemError } = await supabase.rpc(
       "redeem_gift_certificate",
-      { p_code: code }
+      {
+        p_code: code,
+        p_full_name: name.trim(),
+      }
     );
     if (redeemError) return redeemError.message;
     await refreshProfile();
+    clearPendingGift();
     return null;
   };
 
@@ -80,7 +112,13 @@ export default function AuthModal({
     setSubmitting(true);
     const result =
       mode === "register"
-        ? await signUp(email.trim(), password, fullName.trim(), phone.trim())
+        ? await signUp(
+            email.trim(),
+            password,
+            fullName.trim(),
+            phone.trim(),
+            code.length === 12 ? code : undefined
+          )
         : await signIn(email.trim(), password);
     setSubmitting(false);
 
@@ -90,13 +128,7 @@ export default function AuthModal({
     }
 
     if (result.needsEmailConfirmation) {
-      if (code.length === 12) {
-        try {
-          sessionStorage.setItem(PENDING_GIFT_KEY, code);
-        } catch {
-          /* ignore */
-        }
-      }
+      if (code.length === 12) storePendingGift(code);
       setMessage(
         "Проверьте почту и подтвердите регистрацию. После входа сертификат активируется сам, если имя совпадает."
       );
@@ -105,14 +137,16 @@ export default function AuthModal({
 
     if (mode === "register" && code.length === 12) {
       setSubmitting(true);
-      const redeemError = await redeemIfNeeded(code);
+      const redeemError = await redeemIfNeeded(code, fullName.trim());
       setSubmitting(false);
-      if (redeemError) {
+      if (redeemError && !/уже активирован|already/i.test(redeemError)) {
+        storePendingGift(code);
         setError(
           `Аккаунт создан, но сертификат не активирован: ${redeemError}`
         );
         return;
       }
+      clearPendingGift();
       setMessage("Сертификат активирован. Можно заходить в кабинет.");
     }
 
@@ -208,7 +242,9 @@ export default function AuthModal({
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              autoComplete={
+                mode === "login" ? "current-password" : "new-password"
+              }
               className="w-full rounded-xl bg-studio-surface px-4 py-3 pr-11 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
               placeholder="Минимум 6 символов"
             />

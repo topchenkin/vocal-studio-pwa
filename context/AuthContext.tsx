@@ -56,7 +56,8 @@ interface AuthContextValue {
     email: string,
     password: string,
     fullName: string,
-    phone?: string
+    phone?: string,
+    giftCode?: string
   ) => Promise<AuthResult>;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
@@ -292,9 +293,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: string,
       password: string,
       fullName: string,
-      phone?: string
+      phone?: string,
+      giftCode?: string
     ): Promise<AuthResult> => {
       try {
+        const compactGift = (giftCode || "")
+          .replace(/[^a-zA-Z0-9]/g, "")
+          .toUpperCase();
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -302,6 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             data: {
               full_name: fullName,
               phone: phone?.trim() || null,
+              ...(compactGift.length === 12 ? { gift_code: compactGift } : {}),
             },
           },
         });
@@ -309,6 +315,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) return { error: mapBackendError(error) };
 
         if (data.session && data.user) {
+          // Ensure name is on the profile before client-side redeem fallback.
+          await supabase
+            .from("profiles")
+            .update({
+              full_name: fullName.trim(),
+              phone: phone?.trim() || null,
+            })
+            .eq("id", data.user.id);
+
+          if (compactGift.length === 12) {
+            const { error: redeemError } = await supabase.rpc(
+              "redeem_gift_certificate",
+              {
+                p_code: compactGift,
+                p_full_name: fullName.trim(),
+              }
+            );
+            if (redeemError) {
+              console.warn("gift redeem after signup", redeemError.message);
+            }
+          }
+
           await loadProfile(data.user);
         }
 
@@ -335,6 +363,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (error) return { error: mapBackendError(error) };
+
+        const { data: signedProfile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          await supabase.auth.signOut({ scope: "local" });
+          return { error: mapBackendError(profileError) };
+        }
+
+        if (signedProfile?.role === "admin") {
+          await supabase.auth.signOut({ scope: "local" });
+          writeCachedProfile(null);
+          setUser(null);
+          setProfile(null);
+          return {
+            error:
+              "Вход администратора только через служебную ссылку админки",
+          };
+        }
 
         setUser(data.user);
         await loadProfile(data.user);

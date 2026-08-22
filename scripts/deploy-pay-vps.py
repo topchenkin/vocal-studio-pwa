@@ -14,6 +14,7 @@ SQL = ROOT / "supabase-migrations" / "2026-08-21-robokassa-confirm.sql"
 GIFT_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-certificates.sql"
 YK_SQL = ROOT / "supabase-migrations" / "2026-08-22-yookassa-confirm.sql"
 GIFT_ADMIN_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-admin-actions.sql"
+GIFT_SIGNUP_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-redeem-on-signup.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -115,7 +116,7 @@ def env_file_bytes() -> bytes:
 def main() -> None:
     if not PASSWORD:
         raise SystemExit("UVS_SSH_PASS is not set")
-    for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL):
+    for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL, GIFT_SIGNUP_SQL):
         if not path.is_file():
             raise SystemExit(f"missing {path}")
     env = env_file_bytes()
@@ -149,6 +150,8 @@ def main() -> None:
                 fh.write(YK_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/gift-admin-actions.sql", "wb") as fh:
                 fh.write(GIFT_ADMIN_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/gift-redeem-on-signup.sql", "wb") as fh:
+                fh.write(GIFT_SIGNUP_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -171,6 +174,10 @@ def main() -> None:
         run(
             client,
             "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/gift-admin-actions.sql",
+        )
+        run(
+            client,
+            "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/gift-redeem-on-signup.sql",
         )
         run(client, "systemctl daemon-reload")
         run(client, "systemctl enable --now pay-api")
