@@ -145,7 +145,10 @@ async function handleInitGift(req, res) {
   }
 
   const outSum = money(cert.amount_rub);
-  const description = `Подарок Unique Vocal: ${cert.recipient_name}`.slice(0, 100);
+  const description = `Unique Vocal Studio — подарок: ${cert.recipient_name}`.slice(
+    0,
+    128
+  );
 
   const insert = await sb("/rest/v1/payment_transactions", {
     method: "POST",
@@ -261,7 +264,7 @@ async function handleInit(req, res) {
     amount = Number(profile.debt_amount || 0);
     if (!(amount > 0)) return json(res, 400, { error: "Задолженности нет" });
     purpose = "lesson_debt";
-    description = "Задолженность за занятия Unique Vocal";
+    description = "Unique Vocal Studio — задолженность за занятия";
   } else if (kind === "abonement" || kind === "lesson_package") {
     amount = Number(profile.custom_abonement_price || 0);
     if (!(amount > 0)) {
@@ -269,8 +272,9 @@ async function handleInit(req, res) {
     }
     lessonsCount = Math.max(1, Number(body.lessonsCount) || 8);
     purpose = "lesson_package";
-    productCode = "abonement";
-    description = `Абонемент Unique Vocal (${lessonsCount} занятий)`;
+    // not in subscription_products catalog — keep FK happy
+    productCode = null;
+    description = `Unique Vocal Studio — абонемент (${lessonsCount} занятий)`;
     metadata.lessons_count = lessonsCount;
   } else if (kind === "subscription" || kind === "duo_subscription") {
     tier = String(body.tier || "");
@@ -290,16 +294,17 @@ async function handleInit(req, res) {
     purpose = "app_subscription";
     productCode = isDuo ? `${tier}_duo` : tier;
     description = isDuo
-      ? `Подписка ${tier} Duo Unique Vocal · ${months} мес.`
-      : `Подписка ${tier} Unique Vocal · ${months} мес.`;
+      ? `Unique Vocal Studio — подписка ${tier} Duo · ${months} мес.`
+      : `Unique Vocal Studio — подписка ${tier} · ${months} мес.`;
     metadata.tier = tier;
     metadata.is_duo = isDuo;
     metadata.months = months;
   } else if (kind === "test_payment") {
     amount = TEST_PAYMENT_AMOUNT;
     purpose = "test_payment";
-    productCode = "test_payment";
-    description = "Тестовая оплата Unique Vocal · 1 ₽";
+    // product_code FK → subscription_products; test is not a catalog product
+    productCode = null;
+    description = "Unique Vocal Studio — тестовая оплата";
   } else {
     return json(res, 400, { error: "Неизвестный тип оплаты" });
   }
