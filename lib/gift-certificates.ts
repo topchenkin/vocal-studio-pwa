@@ -68,17 +68,23 @@ export function giftIncludesLine(cert: Pick<
   GiftCertificate,
   "kind" | "lessons_count" | "app_sub_tier"
 >) {
+  const lessons = cert.lessons_count ?? 0;
+  const lessonsWord =
+    lessons === 1 ? "занятие" : lessons < 5 ? "занятия" : "занятий";
+  const tier = cert.app_sub_tier
+    ? cert.app_sub_tier.charAt(0).toUpperCase() + cert.app_sub_tier.slice(1)
+    : "";
+
   if (cert.kind === "lesson") {
     return "Индивидуальное занятие по вокалу в студии Unique Vocal";
   }
   if (cert.kind === "abonement") {
-    return `Абонемент: ${giftBenefitLine(cert)} по вокалу`;
+    return `Абонемент: ${lessons} ${lessonsWord} по вокалу`;
   }
   if (cert.kind === "subscription") {
-    const tier = cert.app_sub_tier ?? "standard";
-    return `Подписка ${tier.charAt(0).toUpperCase() + tier.slice(1)} — упражнения, ИИ-инструменты и кабинет`;
+    return `Подписка ${tier} — упражнения, ИИ-инструменты и кабинет`;
   }
-  return `Абонемент ${giftBenefitLine(cert)} + подписка ${(cert.app_sub_tier ?? "premium").charAt(0).toUpperCase() + (cert.app_sub_tier ?? "premium").slice(1)}`;
+  return `Абонемент ${lessons} ${lessonsWord} + подписка ${tier}`;
 }
 
 export const GIFT_ACTIVATION_STEPS = [

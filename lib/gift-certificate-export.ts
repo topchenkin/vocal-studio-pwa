@@ -30,29 +30,36 @@ function loadImage(src: string) {
   });
 }
 
-function wrapText(
+/** Centered wrapped text. Returns Y after the last line. */
+function wrapTextCenter(
   ctx: CanvasRenderingContext2D,
   text: string,
-  x: number,
+  centerX: number,
   y: number,
   maxWidth: number,
   lineHeight: number
 ) {
   const words = text.split(/\s+/);
+  const lines: string[] = [];
   let line = "";
-  let cursorY = y;
   for (let i = 0; i < words.length; i += 1) {
     const test = line ? `${line} ${words[i]}` : words[i];
     if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, cursorY);
+      lines.push(line);
       line = words[i];
-      cursorY += lineHeight;
     } else {
       line = test;
     }
   }
-  if (line) ctx.fillText(line, x, cursorY);
-  return cursorY + lineHeight;
+  if (line) lines.push(line);
+
+  ctx.textAlign = "center";
+  let cursorY = y;
+  for (const row of lines) {
+    ctx.fillText(row, centerX, cursorY);
+    cursorY += lineHeight;
+  }
+  return cursorY;
 }
 
 function roundRect(
@@ -88,13 +95,27 @@ export async function renderGiftCertificatePng(
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
-  const glow = ctx.createRadialGradient(W * 0.82, H * 0.08, 0, W * 0.82, H * 0.08, 420);
+  const glow = ctx.createRadialGradient(
+    W * 0.82,
+    H * 0.08,
+    0,
+    W * 0.82,
+    H * 0.08,
+    420
+  );
   glow.addColorStop(0, COLORS.purple);
   glow.addColorStop(1, "transparent");
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
 
-  const glow2 = ctx.createRadialGradient(W * 0.12, H * 0.88, 0, W * 0.12, H * 0.88, 380);
+  const glow2 = ctx.createRadialGradient(
+    W * 0.12,
+    H * 0.88,
+    0,
+    W * 0.12,
+    H * 0.88,
+    380
+  );
   glow2.addColorStop(0, COLORS.gold);
   glow2.addColorStop(1, "transparent");
   ctx.fillStyle = glow2;
@@ -147,10 +168,16 @@ export async function renderGiftCertificatePng(
 
   ctx.fillStyle = COLORS.muted;
   ctx.font = "400 22px system-ui, sans-serif";
-  ctx.textAlign = "left";
-  wrapText(ctx, giftIncludesLine(cert), W * 0.12, nameY + 118, W - 240, 32);
+  const afterIncludes = wrapTextCenter(
+    ctx,
+    giftIncludesLine(cert),
+    W / 2,
+    nameY + 118,
+    W - 200,
+    32
+  );
 
-  const codeY = nameY + 220;
+  const codeY = Math.max(nameY + 220, afterIncludes + 36);
   roundRect(ctx, W * 0.12, codeY, W * 0.76, 132, 24);
   ctx.fillStyle = "rgba(0,0,0,0.35)";
   ctx.fill();
@@ -158,6 +185,7 @@ export async function renderGiftCertificatePng(
   ctx.lineWidth = 2;
   ctx.stroke();
 
+  ctx.textAlign = "center";
   ctx.fillStyle = COLORS.muted;
   ctx.font = "600 16px system-ui, sans-serif";
   ctx.fillText("КОД АКТИВАЦИИ", W / 2, codeY + 42);
@@ -166,19 +194,23 @@ export async function renderGiftCertificatePng(
   ctx.font = "700 44px ui-monospace, monospace";
   ctx.fillText(formatGiftCode(cert.code), W / 2, codeY + 96);
 
-  ctx.textAlign = "left";
   ctx.fillStyle = COLORS.muted;
   ctx.font = "600 18px system-ui, sans-serif";
-  ctx.fillText("Как активировать", W * 0.12, codeY + 190);
+  ctx.fillText("Как активировать", W / 2, codeY + 190);
 
   ctx.font = "400 20px system-ui, sans-serif";
   let stepY = codeY + 232;
   GIFT_ACTIVATION_STEPS.forEach((step, index) => {
-    ctx.fillStyle = COLORS.goldText;
-    ctx.fillText(`${index + 1}.`, W * 0.12, stepY);
     ctx.fillStyle = COLORS.text;
-    stepY = wrapText(ctx, step, W * 0.16, stepY, W - 220, 30);
-    stepY += 8;
+    stepY = wrapTextCenter(
+      ctx,
+      `${index + 1}. ${step}`,
+      W / 2,
+      stepY,
+      W - 200,
+      30
+    );
+    stepY += 14;
   });
 
   ctx.textAlign = "center";
@@ -188,7 +220,8 @@ export async function renderGiftCertificatePng(
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
-      (value) => (value ? resolve(value) : reject(new Error("PNG export failed"))),
+      (value) =>
+        value ? resolve(value) : reject(new Error("PNG export failed")),
       "image/png",
       1
     );

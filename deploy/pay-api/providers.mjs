@@ -116,10 +116,20 @@ async function ykRequest(path, init = {}) {
     body = { raw: text };
   }
   if (!response.ok) {
-    const message =
+    const raw =
       body?.description ||
       body?.type ||
       `YooKassa HTTP ${response.status}`;
+    const lower = String(raw).toLowerCase();
+    let message = raw;
+    if (
+      lower.includes("authentication type is not allowed") ||
+      lower.includes("invalid_credentials") ||
+      response.status === 401
+    ) {
+      message =
+        "ЮKassa не приняла ключ. Нужен секретный ключ магазина для приёма платежей (Интеграция → Ключи API), не ключ для выплат. shopId — идентификатор магазина, не agentId.";
+    }
     const error = new Error(message);
     error.status = response.status;
     error.body = body;

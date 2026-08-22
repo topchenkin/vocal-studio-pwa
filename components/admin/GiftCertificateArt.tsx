@@ -88,15 +88,14 @@ export default function GiftCertificateArt({
             </p>
           </div>
 
-          <div className="mt-8 w-full max-w-md rounded-2xl bg-studio-surface/40 px-5 py-4 text-left ring-1 ring-white/10">
+          <div className="mt-8 w-full max-w-md rounded-2xl bg-studio-surface/40 px-5 py-4 text-center ring-1 ring-white/10">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-studio-muted">
               Как активировать
             </p>
             <ol className="mt-3 space-y-2.5 text-sm leading-relaxed text-studio-text/90">
-              {GIFT_ACTIVATION_STEPS.map((step) => (
-                <li key={step} className="flex gap-2.5">
-                  <span className="mt-0.5 text-studio-gold">•</span>
-                  <span>{step}</span>
+              {GIFT_ACTIVATION_STEPS.map((step, index) => (
+                <li key={step}>
+                  <span className="text-studio-gold">{index + 1}.</span> {step}
                 </li>
               ))}
             </ol>
