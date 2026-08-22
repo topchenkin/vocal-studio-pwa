@@ -387,12 +387,16 @@ const server = createServer(async (req, res) => {
       path === "/api/payments/health" ||
       path === "/api/payments"
     ) {
+      const auth = yookassa.isReady()
+        ? await yookassa.diagnoseAuth()
+        : { authOk: false, accountKind: "missing" };
       return json(res, 200, {
-        ok: ready(),
+        ok: ready() && auth.canAcceptPayments === true,
         provider: "yookassa",
         isTest: yookassa.isTest,
         yookassaReady: yookassa.isReady(),
         ...yookassa.healthExtra(),
+        auth,
       });
     }
 

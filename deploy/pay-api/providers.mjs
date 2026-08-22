@@ -1,5 +1,10 @@
 /**
  * YooKassa payment adapter for the static PWA pay-api.
+ *
+ * Accepts payments via shop credentials only:
+ *   Basic shopId:secret → https://api.yookassa.ru/v3/payments
+ * Payouts gateway (agentId) secrets authenticate for /me and /payouts but
+ * cannot create payments ("Authentication type is not allowed").
  */
 import { randomUUID } from "node:crypto";
 
@@ -18,8 +23,11 @@ const IS_TEST =
     : SECRET_KEY.startsWith("test_");
 const API = "https://api.yookassa.ru/v3";
 
-function authHeader() {
-  return `Basic ${Buffer.from(`${SHOP_ID}:${SECRET_KEY}`).toString("base64")}`;
+const AUTH_HINT_SHOP =
+  "Нужны shopId и секретный ключ магазина: в ЛК переключитесь на магазин (не шлюз выплат) → Интеграция → Ключи API. Ключ шлюза (agentId) подходит только для выплат, не для приёма платежей.";
+
+function authHeader(userId = SHOP_ID, secret = SECRET_KEY) {
+  return `Basic ${Buffer.from(`${userId}:${secret}`).toString("base64")}`;
 }
 
 async function request(path, init = {}) {
@@ -48,8 +56,7 @@ async function request(path, init = {}) {
       lower.includes("invalid_credentials") ||
       response.status === 401
     ) {
-      message =
-        "ЮKassa не приняла ключ. Нужны идентификатор магазина (shopId) и секретный ключ из раздела «Интеграция → Ключи API» для приёма платежей. Ключ выплат / agentId не подходят.";
+      message = `ЮKassa отклонила авторизацию для приёма платежей. ${AUTH_HINT_SHOP}`;
     }
     const error = new Error(message);
     error.status = response.status;
@@ -57,6 +64,61 @@ async function request(path, init = {}) {
     throw error;
   }
   return body;
+}
+
+/**
+ * Probe /v3/me with configured shopId:secret.
+ * Classifies credentials as shop (payment_methods) vs payouts gateway.
+ */
+async function diagnoseAuth() {
+  if (!SHOP_ID || !SECRET_KEY) {
+    return { authOk: false, accountKind: "missing", hint: AUTH_HINT_SHOP };
+  }
+  try {
+    const response = await fetch(`${API}/me`, {
+      headers: { authorization: authHeader() },
+    });
+    const text = await response.text();
+    let body = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = {};
+    }
+    if (!response.ok) {
+      return {
+        authOk: false,
+        accountKind: "unknown",
+        httpStatus: response.status,
+        code: body?.code || null,
+        hint: AUTH_HINT_SHOP,
+      };
+    }
+    const hasPayouts = Array.isArray(body.payout_methods);
+    const hasPayments = Array.isArray(body.payment_methods);
+    let accountKind = "unknown";
+    if (hasPayouts && !hasPayments) accountKind = "payouts_gateway";
+    else if (hasPayments) accountKind = "shop";
+    return {
+      authOk: true,
+      accountKind,
+      accountId: body.account_id || null,
+      test: Boolean(body.test),
+      canAcceptPayments: accountKind === "shop",
+      hint:
+        accountKind === "payouts_gateway"
+          ? "Сейчас в env ключ шлюза выплат (agentId). Для оплаты нужен отдельный ключ магазина (shopId)."
+          : accountKind === "shop"
+            ? null
+            : AUTH_HINT_SHOP,
+    };
+  } catch (error) {
+    return {
+      authOk: false,
+      accountKind: "error",
+      hint: error?.message || AUTH_HINT_SHOP,
+    };
+  }
 }
 
 export const yookassa = {
@@ -99,6 +161,8 @@ export const yookassa = {
       shopId: SHOP_ID,
       secretLooksTest: SECRET_KEY.startsWith("test_"),
       secretConfigured: Boolean(SECRET_KEY),
+      secretHasAsterisk: SECRET_KEY.includes("*"),
     };
   },
+  diagnoseAuth,
 };
