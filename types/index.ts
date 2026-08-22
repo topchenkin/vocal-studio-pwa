@@ -175,7 +175,12 @@ export interface PaymentTransaction {
   id: string;
   student_id: string | null;
   product_code: string | null;
-  purpose: "lesson_debt" | "lesson_package" | "app_subscription" | "gift_certificate";
+  purpose:
+    | "lesson_debt"
+    | "lesson_package"
+    | "app_subscription"
+    | "gift_certificate"
+    | "test_payment";
   amount_rub: number;
   provider: string;
   status: "pending" | "confirmed" | "failed" | "cancelled" | "refunded";

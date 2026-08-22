@@ -15,7 +15,8 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
 const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
-const ALLOWED_MONTHS = new Set([3, 6, 12]);
+const ALLOWED_MONTHS = new Set([1, 3, 6, 12]);
+const TEST_PAYMENT_AMOUNT = 1;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -278,7 +279,7 @@ async function handleInit(req, res) {
     }
     months = parseMonths(body.months);
     if (!months) {
-      return json(res, 400, { error: "Выберите срок 3, 6 или 12 месяцев" });
+      return json(res, 400, { error: "Выберите срок 1, 3, 6 или 12 месяцев" });
     }
     isDuo = kind === "duo_subscription";
     if (profile.app_sub_variant === "duo_member") {
@@ -294,6 +295,11 @@ async function handleInit(req, res) {
     metadata.tier = tier;
     metadata.is_duo = isDuo;
     metadata.months = months;
+  } else if (kind === "test_payment") {
+    amount = TEST_PAYMENT_AMOUNT;
+    purpose = "test_payment";
+    productCode = "test_payment";
+    description = "Тестовая оплата Unique Vocal · 1 ₽";
   } else {
     return json(res, 400, { error: "Неизвестный тип оплаты" });
   }

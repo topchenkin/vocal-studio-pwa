@@ -11,6 +11,7 @@ const purposeLabels: Record<PaymentTransaction["purpose"], string> = {
   lesson_debt: "Оплата задолженности",
   lesson_package: "Пакет уроков",
   gift_certificate: "Подарочный сертификат",
+  test_payment: "Тестовая оплата",
 };
 
 export default function PaymentHistory({

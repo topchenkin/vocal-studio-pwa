@@ -7,7 +7,7 @@ import { startPayment } from "@/lib/payment-client";
 import { paymentProviderLabel } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
-export type SubscriptionMonths = 3 | 6 | 12;
+export type SubscriptionMonths = 1 | 3 | 6 | 12;
 
 type PaymentPurpose =
   | { type: "debt"; amount: number }
@@ -27,7 +27,8 @@ type PaymentPurpose =
       amount: number;
       tier: Exclude<AppSubscriptionTier, "none">;
       months: SubscriptionMonths;
-    };
+    }
+  | { type: "test_payment"; amount: number };
 
 function SbpLogo() {
   return (
@@ -46,6 +47,7 @@ function SbpLogo() {
 function purposeLabel(purpose: PaymentPurpose) {
   if (purpose.type === "debt") return "Оплата задолженности за урок";
   if (purpose.type === "abonement") return "Оплата абонемента";
+  if (purpose.type === "test_payment") return "Тестовая оплата · 1 ₽";
   return `Подписка ${purpose.tier}${
     purpose.type === "duo_subscription" ? " Duo" : ""
   } · ${purpose.months} мес.`;

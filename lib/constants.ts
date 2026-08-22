@@ -18,7 +18,7 @@ export const DUO_TIER_PRICES = {
 } as const;
 
 /** Доступные сроки оплаты подписки (без автопродления). */
-export const SUBSCRIPTION_MONTH_OPTIONS = [3, 6, 12] as const;
+export const SUBSCRIPTION_MONTH_OPTIONS = [1, 3, 6, 12] as const;
 export type SubscriptionMonthOption =
   (typeof SUBSCRIPTION_MONTH_OPTIONS)[number];
 

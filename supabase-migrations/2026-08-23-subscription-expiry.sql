@@ -200,6 +200,9 @@ begin
     if not found then
       raise exception 'Gift certificate was not found';
     end if;
+  elsif tx.purpose = 'test_payment' then
+    -- Real 1 RUB live check via YooKassa; no entitlement changes.
+    null;
   else
     raise exception 'Unsupported payment purpose';
   end if;
