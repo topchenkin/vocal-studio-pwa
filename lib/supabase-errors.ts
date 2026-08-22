@@ -13,14 +13,37 @@ export function isLikelyUnreachableBackend(error: unknown): boolean {
   );
 }
 
-export function mapBackendError(error: unknown, fallback?: string): string {
-  if (isLikelyUnreachableBackend(error)) return SUPABASE_UNREACHABLE_RU;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = String((error as { message: unknown }).message ?? "").trim();
-    if (message) return message;
+function isUselessErrorText(value: string): boolean {
+  const t = value.trim();
+  return !t || t === "{}" || t === "[object Object]" || t === "null" || t === "undefined";
+}
+
+function pickErrorText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const t = value.trim();
+    return isUselessErrorText(t) ? null : t;
   }
-  if (typeof error === "string" && error.trim()) return error;
-  return fallback ?? SUPABASE_UNREACHABLE_RU;
+  return null;
+}
+
+/** Human-readable auth/backend error; never returns `{}` / empty object stringification. */
+export function mapBackendError(error: unknown, fallback?: string): string {
+  const fb = fallback ?? SUPABASE_UNREACHABLE_RU;
+  if (isLikelyUnreachableBackend(error)) return SUPABASE_UNREACHABLE_RU;
+
+  if (typeof error === "string") {
+    return pickErrorText(error) ?? fb;
+  }
+
+  if (error && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    for (const key of ["message", "error_description", "msg", "error", "code"] as const) {
+      const text = pickErrorText(obj[key]);
+      if (text) return text;
+    }
+  }
+
+  return fb;
 }
 
 /**

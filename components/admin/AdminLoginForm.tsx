@@ -15,9 +15,29 @@ import { mapBackendError } from "@/lib/supabase-errors";
 const GENERIC_AUTH_ERROR = "Неверный логин или пароль";
 const GENERIC_OTP_OK =
   "Если этот адрес подходит для входа, письмо уже в пути. Откройте его на этом устройстве.";
+const OTP_UNAVAILABLE_RU =
+  "Вход по письму сейчас недоступен. Проверьте SMTP / Email в Supabase или войдите паролем.";
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function mapOtpError(error: unknown): string {
+  const raw = mapBackendError(error, "").trim();
+  if (!raw || raw === "{}" || raw === "[object Object]") {
+    return OTP_UNAVAILABLE_RU;
+  }
+  if (raw.toLowerCase().includes("rate limit")) {
+    return "Слишком много попыток. Подождите минуту и повторите.";
+  }
+  if (
+    /email.*(disabled|not.?enabled)|otp|magic.?link|smtp|mailer|provider|signups? not allowed|unable to validate/i.test(
+      raw
+    )
+  ) {
+    return OTP_UNAVAILABLE_RU;
+  }
+  return raw;
 }
 
 export default function AdminLoginForm() {
@@ -87,7 +107,8 @@ export default function AdminLoginForm() {
     }
 
     setSubmitting(true);
-    const result = await signIn(login, password);
+    // Gate must allow admin; student AuthModal still uses signIn without allowAdmin.
+    const result = await signIn(login, password, { allowAdmin: true });
 
     if (result.error) {
       setSubmitting(false);
@@ -142,18 +163,14 @@ export default function AdminLoginForm() {
       setSendingLink(false);
 
       if (otpError) {
-        const rateLimited = otpError.message.toLowerCase().includes("rate limit");
-        setError(
-          rateLimited
-            ? "Слишком много попыток. Подождите минуту и повторите."
-            : mapBackendError(otpError, GENERIC_AUTH_ERROR)
-        );
-        if (rateLimited) setCooldown(60);
+        const mapped = mapOtpError(otpError);
+        setError(mapped);
+        if (mapped.includes("Слишком много попыток")) setCooldown(60);
         return;
       }
     } catch (otpThrown) {
       setSendingLink(false);
-      setError(mapBackendError(otpThrown, GENERIC_AUTH_ERROR));
+      setError(mapOtpError(otpThrown));
       return;
     }
 

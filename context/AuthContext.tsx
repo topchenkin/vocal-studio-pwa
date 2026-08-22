@@ -59,7 +59,11 @@ interface AuthContextValue {
     phone?: string,
     giftCode?: string
   ) => Promise<AuthResult>;
-  signIn: (email: string, password: string) => Promise<AuthResult>;
+  signIn: (
+    email: string,
+    password: string,
+    options?: { allowAdmin?: boolean }
+  ) => Promise<AuthResult>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   enableMockAdmin: () => void;
@@ -356,7 +360,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signIn = useCallback(
-    async (email: string, password: string): Promise<AuthResult> => {
+    async (
+      email: string,
+      password: string,
+      options?: { allowAdmin?: boolean }
+    ): Promise<AuthResult> => {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
@@ -376,7 +384,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return { error: mapBackendError(profileError) };
         }
 
-        if (signedProfile?.role === "admin") {
+        // Student/public login must not accept admin — only the unlisted gate may.
+        if (signedProfile?.role === "admin" && !options?.allowAdmin) {
           await supabase.auth.signOut({ scope: "local" });
           writeCachedProfile(null);
           setUser(null);
