@@ -48,16 +48,6 @@
 			}
 		}
 	}
-	handle /api/robokassa* {
-		reverse_proxy 127.0.0.1:8791 {
-			transport http {
-				versions 1.1
-				read_timeout 30s
-				write_timeout 30s
-				dial_timeout 5s
-			}
-		}
-	}
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8788 {
 			transport http {

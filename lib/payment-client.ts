@@ -51,9 +51,3 @@ export async function createGiftPaymentLink(certificateId: string) {
   const payload = await postPayment("/init-gift", { certificateId });
   return payload.paymentUrl!;
 }
-
-/** @deprecated use startPayment */
-export const startRobokassaPayment = startPayment;
-
-/** re-export unchanged */
-export { createGiftPaymentLink as createGiftPaymentLinkLegacy };

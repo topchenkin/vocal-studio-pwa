@@ -72,17 +72,12 @@ export default function PaymentHistory({
                   ? " · ожидает оплату"
                   : item.provider === "sandbox"
                     ? " · Beta без списания"
-                    : item.provider === "robokassa" &&
+                    : item.provider === "yookassa" &&
                         Boolean(
                           (item.metadata as { is_test?: boolean } | null)?.is_test
                         )
-                      ? " · тест Робокассы"
-                      : item.provider === "yookassa" &&
-                          Boolean(
-                            (item.metadata as { is_test?: boolean } | null)?.is_test
-                          )
-                        ? " · тест ЮKassa"
-                        : ""}
+                      ? " · тест ЮKassa"
+                      : ""}
               </p>
             </div>
             <span className="font-medium">

@@ -1,9 +1,8 @@
 /**
- * Payment init + webhooks for the static PWA.
- * Active provider: PAYMENT_PROVIDER=yookassa|robokassa (default yookassa).
+ * YooKassa-only pay-api for the static PWA.
  */
 import { createServer } from "node:http";
-import { getProvider, robokassa, yookassa } from "./providers.mjs";
+import { yookassa } from "./providers.mjs";
 
 const PORT = Number(process.env.PORT) || 8791;
 const BIND = process.env.BIND || "127.0.0.1";
@@ -13,17 +12,9 @@ const SUPABASE_URL = (
   ""
 ).replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const PAYMENT_PROVIDER = (
-  process.env.PAYMENT_PROVIDER || "yookassa"
-).toLowerCase();
-const APP_ORIGIN = (
-  process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
-).replace(/\/$/, "");
 
 const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
 const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
-
-const activeProvider = getProvider(PAYMENT_PROVIDER) || yookassa;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -34,11 +25,6 @@ function json(res, status, body) {
   res.end(payload);
 }
 
-function text(res, status, body) {
-  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-  res.end(body);
-}
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -46,37 +32,6 @@ function readBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
-}
-
-function paramsFrom(req, raw, url) {
-  const merged = new URLSearchParams(url.search);
-  const contentType = String(req.headers["content-type"] || "");
-  if (raw) {
-    if (contentType.includes("application/json")) {
-      try {
-        const data = JSON.parse(raw);
-        for (const [key, value] of Object.entries(data || {})) {
-          if (value != null) merged.set(key, String(value));
-        }
-      } catch {
-        /* ignore */
-      }
-    } else {
-      const form = new URLSearchParams(raw);
-      for (const [key, value] of form) merged.set(key, value);
-    }
-  }
-  const pick = (name) =>
-    merged.get(name) ||
-    merged.get(name.toLowerCase()) ||
-    merged.get(name[0].toUpperCase() + name.slice(1)) ||
-    "";
-  return {
-    OutSum: pick("OutSum"),
-    InvId: pick("InvId") || pick("InvoiceID"),
-    SignatureValue: pick("SignatureValue"),
-    PaymentMethod: pick("PaymentMethod"),
-  };
 }
 
 function sbHeaders(extra = {}) {
@@ -119,23 +74,16 @@ function money(value) {
   return Number(value).toFixed(2);
 }
 
-async function confirmPayment(invoiceNo, outSum, externalId, provider) {
+async function confirmPayment(invoiceNo, outSum, externalId) {
   return sb("/rest/v1/rpc/confirm_payment", {
     method: "POST",
     body: JSON.stringify({
       p_invoice_no: Number(invoiceNo),
       p_out_sum: Number(outSum),
       p_external_id: externalId || null,
-      p_provider: provider,
+      p_provider: "yookassa",
     }),
   });
-}
-
-async function buildPaymentUrl(provider, { outSum, invId, description, email }) {
-  if (provider.id === "robokassa") {
-    return provider.buildPaymentUrl({ outSum, invId, description, email });
-  }
-  return provider.createPayment({ outSum, invId, description, email });
 }
 
 async function patchExternalId(txId, externalId) {
@@ -146,14 +94,16 @@ async function patchExternalId(txId, externalId) {
   });
 }
 
-async function handleInitGift(req, res, provider = activeProvider) {
+async function handleInitGift(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json(res, 401, { error: "Нужно войти" });
 
   const user = await authUser(token);
-  if (!user?.id) return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  if (!user?.id) {
+    return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  }
 
   const profile = await loadProfile(user.id);
   if (!profile || profile.role !== "admin") {
@@ -197,10 +147,10 @@ async function handleInitGift(req, res, provider = activeProvider) {
       product_code: null,
       purpose: "gift_certificate",
       amount_rub: Number(outSum),
-      provider: provider.id,
+      provider: "yookassa",
       status: "pending",
       metadata: {
-        is_test: provider.isTest,
+        is_test: yookassa.isTest,
         gift_id: cert.id,
         gift_code: cert.code,
         recipient_name: cert.recipient_name,
@@ -210,17 +160,13 @@ async function handleInitGift(req, res, provider = activeProvider) {
     }),
   });
   if (!insert.ok) {
-    const detail = await insert.text();
-    console.error("gift invoice failed", insert.status, detail);
+    console.error("gift invoice failed", insert.status, await insert.text());
     return json(res, 500, { error: "Не удалось создать счёт на подарок" });
   }
   const rows = await insert.json();
   const tx = Array.isArray(rows) ? rows[0] : rows;
   const invId = Number(tx?.invoice_no);
-  if (!invId) {
-    console.error("gift invoice_no missing", tx);
-    return json(res, 500, { error: "Счёт создан без номера" });
-  }
+  if (!invId) return json(res, 500, { error: "Счёт создан без номера" });
 
   const patch = await sb(
     `/rest/v1/gift_certificates?id=eq.${encodeURIComponent(cert.id)}`,
@@ -234,15 +180,13 @@ async function handleInitGift(req, res, provider = activeProvider) {
     }
   );
   if (!patch.ok) {
-    const detail = await patch.text();
-    console.error("gift patch failed", patch.status, detail);
     return json(res, 500, { error: "Счёт создан, но сертификат не обновился" });
   }
 
   let paymentUrl;
   let externalId = null;
   try {
-    const payment = await buildPaymentUrl(provider, {
+    const payment = await yookassa.createPayment({
       outSum,
       invId,
       description,
@@ -253,30 +197,32 @@ async function handleInitGift(req, res, provider = activeProvider) {
   } catch (error) {
     console.error("gift payment init failed", error);
     return json(res, 502, {
-      error: error instanceof Error ? error.message : "Не удалось создать платёж",
+      error:
+        error instanceof Error ? error.message : "Не удалось создать платёж",
     });
   }
 
   await patchExternalId(tx.id, externalId);
-
   return json(res, 200, {
     paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: provider.isTest,
-    provider: provider.id,
+    isTest: yookassa.isTest,
+    provider: "yookassa",
     code: cert.code,
   });
 }
 
-async function handleInit(req, res, provider = activeProvider) {
+async function handleInit(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
   if (!token) return json(res, 401, { error: "Нужно войти в кабинет" });
 
   const user = await authUser(token);
-  if (!user?.id) return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  if (!user?.id) {
+    return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  }
 
   let body = {};
   try {
@@ -310,9 +256,7 @@ async function handleInit(req, res, provider = activeProvider) {
     }
     isDuo = kind === "duo_subscription";
     if (profile.app_sub_variant === "duo_member") {
-      return json(res, 400, {
-        error: "Тариф Duo меняет владелец подписки",
-      });
+      return json(res, 400, { error: "Тариф Duo меняет владелец подписки" });
     }
     amount = isDuo ? DUO_PRICES[tier] : TIER_PRICES[tier];
     purpose = "app_subscription";
@@ -333,10 +277,10 @@ async function handleInit(req, res, provider = activeProvider) {
       product_code: productCode,
       purpose,
       amount_rub: Number(outSum),
-      provider: provider.id,
+      provider: "yookassa",
       status: "pending",
       metadata: {
-        is_test: provider.isTest,
+        is_test: yookassa.isTest,
         tier,
         is_duo: isDuo,
         description,
@@ -344,23 +288,19 @@ async function handleInit(req, res, provider = activeProvider) {
     }),
   });
   if (!insert.ok) {
-    const detail = await insert.text();
-    console.error("create invoice failed", insert.status, detail);
+    console.error("create invoice failed", insert.status, await insert.text());
     return json(res, 500, { error: "Не удалось создать счёт" });
   }
   const rows = await insert.json();
   const tx = Array.isArray(rows) ? rows[0] : rows;
   const invId = Number(tx?.invoice_no);
-  if (!invId) {
-    console.error("invoice_no missing", tx);
-    return json(res, 500, { error: "Счёт создан без номера" });
-  }
+  if (!invId) return json(res, 500, { error: "Счёт создан без номера" });
 
   const email = String(user.email || profile.email || "").trim();
   let paymentUrl;
   let externalId = null;
   try {
-    const payment = await buildPaymentUrl(provider, {
+    const payment = await yookassa.createPayment({
       outSum,
       invId,
       description,
@@ -371,47 +311,19 @@ async function handleInit(req, res, provider = activeProvider) {
   } catch (error) {
     console.error("payment init failed", error);
     return json(res, 502, {
-      error: error instanceof Error ? error.message : "Не удалось создать платёж",
+      error:
+        error instanceof Error ? error.message : "Не удалось создать платёж",
     });
   }
 
   await patchExternalId(tx.id, externalId);
-
   return json(res, 200, {
     paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: provider.isTest,
-    provider: provider.id,
+    isTest: yookassa.isTest,
+    provider: "yookassa",
   });
-}
-
-async function handleRobokassaResult(req, res) {
-  const raw = req.method === "GET" ? "" : await readBody(req);
-  const url = new URL(req.url || "/", APP_ORIGIN);
-  const params = paramsFrom(req, raw, url);
-  const outSum = String(params.OutSum || "").trim();
-  const invId = String(params.InvId || "").trim();
-  const signature = String(params.SignatureValue || "").trim().toLowerCase();
-
-  if (!robokassa.verifyResult({ outSum, invId, signature })) {
-    console.error("robokassa bad signature", { invId, outSum });
-    return text(res, 400, "bad signature");
-  }
-
-  const confirm = await confirmPayment(
-    invId,
-    outSum,
-    params.PaymentMethod || null,
-    "robokassa"
-  );
-  if (!confirm.ok) {
-    const detail = await confirm.text();
-    console.error("confirm failed", confirm.status, detail);
-    return text(res, 500, "confirm failed");
-  }
-
-  return text(res, 200, `OK${invId}`);
 }
 
 async function handleYookassaWebhook(req, res) {
@@ -426,10 +338,7 @@ async function handleYookassaWebhook(req, res) {
 
   const event = String(notification.event || "");
   const paymentId = String(notification?.object?.id || "");
-  if (!paymentId) {
-    return json(res, 400, { error: "missing payment id" });
-  }
-
+  if (!paymentId) return json(res, 400, { error: "missing payment id" });
   if (event !== "payment.succeeded") {
     return json(res, 200, { ok: true, ignored: event || "unknown" });
   }
@@ -455,15 +364,9 @@ async function handleYookassaWebhook(req, res) {
     return json(res, 400, { error: "missing invoice metadata" });
   }
 
-  const confirm = await confirmPayment(
-    invoiceNo,
-    outSum,
-    paymentId,
-    "yookassa"
-  );
+  const confirm = await confirmPayment(invoiceNo, outSum, paymentId);
   if (!confirm.ok) {
-    const detail = await confirm.text();
-    console.error("yookassa confirm failed", confirm.status, detail);
+    console.error("yookassa confirm failed", confirm.status, await confirm.text());
     return json(res, 500, { error: "confirm failed" });
   }
 
@@ -471,19 +374,7 @@ async function handleYookassaWebhook(req, res) {
 }
 
 function ready() {
-  if (!SUPABASE_URL || !SERVICE_KEY) return false;
-  return activeProvider.isReady();
-}
-
-function healthPayload() {
-  return {
-    ok: ready(),
-    provider: PAYMENT_PROVIDER,
-    isTest: activeProvider.isTest,
-    robokassaReady: robokassa.isReady(),
-    yookassaReady: yookassa.isReady(),
-    ...activeProvider.healthExtra(),
-  };
+  return Boolean(SUPABASE_URL && SERVICE_KEY && yookassa.isReady());
 }
 
 const server = createServer(async (req, res) => {
@@ -491,30 +382,30 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    const healthPaths = new Set([
-      "/health",
-      "/api/payments/health",
-      "/api/payments",
-      "/api/robokassa/health",
-      "/api/robokassa",
-    ]);
-    if (healthPaths.has(path)) {
-      return json(res, 200, healthPayload());
+    if (
+      path === "/health" ||
+      path === "/api/payments/health" ||
+      path === "/api/payments"
+    ) {
+      return json(res, 200, {
+        ok: ready(),
+        provider: "yookassa",
+        isTest: yookassa.isTest,
+        yookassaReady: yookassa.isReady(),
+        ...yookassa.healthExtra(),
+      });
     }
 
     if (!ready()) {
-      return json(res, 503, { error: "pay-api is not configured" });
+      return json(res, 503, {
+        error:
+          "pay-api: нужны YOOKASSA_SHOP_ID и полный YOOKASSA_SECRET_KEY магазина (без *)",
+      });
     }
 
     if (path === "/api/payments/init") return handleInit(req, res);
     if (path === "/api/payments/init-gift") return handleInitGift(req, res);
     if (path === "/api/yookassa/webhook") return handleYookassaWebhook(req, res);
-
-    if (path === "/api/robokassa/init") return handleInit(req, res, robokassa);
-    if (path === "/api/robokassa/init-gift") {
-      return handleInitGift(req, res, robokassa);
-    }
-    if (path === "/api/robokassa/result") return handleRobokassaResult(req, res);
 
     return json(res, 404, { error: "not found" });
   } catch (error) {
@@ -525,6 +416,6 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, BIND, () => {
   console.log(
-    `pay-api listening on ${BIND}:${PORT} provider=${PAYMENT_PROVIDER} test=${activeProvider.isTest}`
+    `pay-api listening on ${BIND}:${PORT} provider=yookassa test=${yookassa.isTest}`
   );
 });
