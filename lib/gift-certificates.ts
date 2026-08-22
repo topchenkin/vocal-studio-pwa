@@ -63,3 +63,26 @@ export function giftBenefitLine(cert: Pick<
   if (cert.kind === "subscription") return `подписка ${tier}`;
   return `${lessons} ${lessons === 1 ? "занятие" : lessons < 5 ? "занятия" : "занятий"} + подписка ${tier}`;
 }
+
+export function giftIncludesLine(cert: Pick<
+  GiftCertificate,
+  "kind" | "lessons_count" | "app_sub_tier"
+>) {
+  if (cert.kind === "lesson") {
+    return "Индивидуальное занятие по вокалу в студии Unique Vocal";
+  }
+  if (cert.kind === "abonement") {
+    return `Абонемент: ${giftBenefitLine(cert)} по вокалу`;
+  }
+  if (cert.kind === "subscription") {
+    const tier = cert.app_sub_tier ?? "standard";
+    return `Подписка ${tier.charAt(0).toUpperCase() + tier.slice(1)} — упражнения, ИИ-инструменты и кабинет`;
+  }
+  return `Абонемент ${giftBenefitLine(cert)} + подписка ${(cert.app_sub_tier ?? "premium").charAt(0).toUpperCase() + (cert.app_sub_tier ?? "premium").slice(1)}`;
+}
+
+export const GIFT_ACTIVATION_STEPS = [
+  "Зарегистрируйтесь на uniquevocal.ru",
+  "Введите код при регистрации или в личном кабинете",
+  "Имя должно совпадать с сертификатом — без пробелов и опечаток",
+] as const;

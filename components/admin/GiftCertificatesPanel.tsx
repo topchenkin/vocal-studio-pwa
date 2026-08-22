@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Gift, Link2, Plus } from "lucide-react";
+import { Copy, Gift, Link2, Plus, Trash2, CheckCircle2 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import NumberInput from "@/components/ui/NumberInput";
@@ -141,6 +141,45 @@ export default function GiftCertificatesPanel() {
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Нет ссылки СБП");
+    }
+    setBusy(false);
+  };
+
+  const markPaid = async (id: string) => {
+    setError("");
+    setBusy(true);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_mark_gift_certificate_paid",
+      { p_id: id }
+    );
+    if (rpcError || !data) {
+      setError(rpcError?.message || "Не удалось отметить оплату");
+    } else {
+      await load();
+    }
+    setBusy(false);
+  };
+
+  const remove = async (id: string) => {
+    if (
+      !window.confirm(
+        "Удалить сертификат безвозвратно? Код перестанет работать."
+      )
+    ) {
+      return;
+    }
+    setError("");
+    setBusy(true);
+    const { error: rpcError } = await supabase.rpc(
+      "admin_delete_gift_certificate",
+      { p_id: id }
+    );
+    if (rpcError) {
+      setError(rpcError.message || "Не удалось удалить");
+    } else {
+      if (selectedId === id) setSelectedId(null);
+      setPayUrl("");
+      await load();
     }
     setBusy(false);
   };
@@ -341,20 +380,37 @@ export default function GiftCertificatesPanel() {
                   {copied === "code" ? "Скопировано" : "Код"}
                 </Button>
                 {selected.status === "pending_payment" && (
-                  <Button
-                    variant="secondary"
-                    disabled={busy}
-                    onClick={() => void refreshPayLink(selected.id)}
-                  >
-                    <Link2 className="h-4 w-4" />
-                    Ссылка СБП
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => void refreshPayLink(selected.id)}
+                    >
+                      <Link2 className="h-4 w-4" />
+                      Ссылка СБП
+                    </Button>
+                    <Button
+                      disabled={busy}
+                      onClick={() => void markPaid(selected.id)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Оплачен (перевод)
+                    </Button>
+                  </>
                 )}
                 {payUrl && (
-                  <Button
-                    onClick={() => void copy("url", payUrl)}
-                  >
+                  <Button onClick={() => void copy("url", payUrl)}>
                     {copied === "url" ? "Ссылка скопирована" : "Копировать оплату"}
+                  </Button>
+                )}
+                {selected.status !== "redeemed" && !selected.redeemed_by && (
+                  <Button
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => void remove(selected.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Удалить
                   </Button>
                 )}
               </div>

@@ -716,6 +716,14 @@ export interface Database {
         Args: { p_id: string };
         Returns: undefined;
       };
+      admin_mark_gift_certificate_paid: {
+        Args: { p_id: string };
+        Returns: GiftCertificateRow;
+      };
+      admin_delete_gift_certificate: {
+        Args: { p_id: string };
+        Returns: undefined;
+      };
       complete_sandbox_payment: {
         Args: {
           payment_purpose: "lesson_debt" | "app_subscription";
