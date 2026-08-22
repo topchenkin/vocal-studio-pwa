@@ -399,7 +399,7 @@ const server = createServer(async (req, res) => {
     if (!ready()) {
       return json(res, 503, {
         error:
-          "pay-api: нужны YOOKASSA_SHOP_ID и полный YOOKASSA_SECRET_KEY магазина (без *)",
+          "pay-api: нужны YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY магазина",
       });
     }
 

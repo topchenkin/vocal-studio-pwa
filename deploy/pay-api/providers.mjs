@@ -62,7 +62,7 @@ async function request(path, init = {}) {
 export const yookassa = {
   id: "yookassa",
   isReady() {
-    return Boolean(SHOP_ID && SECRET_KEY && !SECRET_KEY.includes("*"));
+    return Boolean(SHOP_ID && SECRET_KEY);
   },
   isTest: IS_TEST,
   async createPayment({ outSum, invId, description, email }) {
@@ -98,7 +98,7 @@ export const yookassa = {
     return {
       shopId: SHOP_ID,
       secretLooksTest: SECRET_KEY.startsWith("test_"),
-      secretLooksValid: Boolean(SECRET_KEY) && !SECRET_KEY.includes("*"),
+      secretConfigured: Boolean(SECRET_KEY),
     };
   },
 };

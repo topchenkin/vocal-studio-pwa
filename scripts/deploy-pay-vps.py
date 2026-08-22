@@ -72,14 +72,8 @@ def env_file_bytes() -> bytes:
     if not shop_id:
         missing.append("YOOKASSA_SHOP_ID")
     secret = local.get("YOOKASSA_SECRET_KEY", "")
-    secret_ok = bool(secret) and "*" not in secret
-    if not secret_ok:
-        print(
-            "WARNING: YOOKASSA_SECRET_KEY incomplete (empty or contains *) — "
-            "pay-api will deploy but payments stay disabled until a full shop secret is set",
-            flush=True,
-        )
-        secret = ""
+    if not secret:
+        missing.append("YOOKASSA_SECRET_KEY")
     if missing:
         raise SystemExit(f"missing env: {', '.join(missing)}")
 
