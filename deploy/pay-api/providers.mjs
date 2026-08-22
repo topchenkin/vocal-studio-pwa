@@ -5,6 +5,9 @@
  *   Basic shopId:secret → https://api.yookassa.ru/v3/payments
  * Payouts gateway (agentId) secrets authenticate for /me and /payouts but
  * cannot create payments ("Authentication type is not allowed").
+ *
+ * Health also probes the payouts gateway (SBP) via /v3/me when
+ * YOOKASSA_AGENT_ID + payout secret are set — no payout is created.
  */
 import { randomUUID } from "node:crypto";
 
@@ -15,12 +18,17 @@ const RETURN_URL = `${APP_ORIGIN}/pay/success`;
 
 const SHOP_ID = process.env.YOOKASSA_SHOP_ID || "";
 const SECRET_KEY = process.env.YOOKASSA_SECRET_KEY || "";
+/** Payouts gateway agentId (gate_id). Separate from shopId. */
+const AGENT_ID = process.env.YOOKASSA_AGENT_ID || "";
+/** Prefer dedicated payout secret; fall back to YOOKASSA_SECRET_KEY. */
+const PAYOUT_SECRET =
+  process.env.YOOKASSA_PAYOUT_SECRET_KEY || SECRET_KEY || "";
 const IS_TEST =
   process.env.YOOKASSA_IS_TEST != null
     ? ["1", "true", "yes"].includes(
         String(process.env.YOOKASSA_IS_TEST).toLowerCase()
       )
-    : SECRET_KEY.startsWith("test_");
+    : SECRET_KEY.startsWith("test_") || PAYOUT_SECRET.startsWith("test_");
 const API = "https://api.yookassa.ru/v3";
 
 const AUTH_HINT_SHOP =
@@ -28,6 +36,20 @@ const AUTH_HINT_SHOP =
 
 function authHeader(userId = SHOP_ID, secret = SECRET_KEY) {
   return `Basic ${Buffer.from(`${userId}:${secret}`).toString("base64")}`;
+}
+
+async function fetchMe(userId, secret) {
+  const response = await fetch(`${API}/me`, {
+    headers: { authorization: authHeader(userId, secret) },
+  });
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = {};
+  }
+  return { response, body };
 }
 
 async function request(path, init = {}) {
@@ -75,16 +97,7 @@ async function diagnoseAuth() {
     return { authOk: false, accountKind: "missing", hint: AUTH_HINT_SHOP };
   }
   try {
-    const response = await fetch(`${API}/me`, {
-      headers: { authorization: authHeader() },
-    });
-    const text = await response.text();
-    let body = {};
-    try {
-      body = text ? JSON.parse(text) : {};
-    } catch {
-      body = {};
-    }
+    const { response, body } = await fetchMe(SHOP_ID, SECRET_KEY);
     if (!response.ok) {
       return {
         authOk: false,
@@ -117,6 +130,74 @@ async function diagnoseAuth() {
       authOk: false,
       accountKind: "error",
       hint: error?.message || AUTH_HINT_SHOP,
+    };
+  }
+}
+
+function normalizePayoutMethods(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (typeof item === "string") return item.toLowerCase();
+      if (item && typeof item === "object") {
+        return String(item.type || item.method || item.id || "")
+          .toLowerCase()
+          .trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Probe /v3/me with agentId:payoutSecret. Reports SBP availability only —
+ * does not create a payout or move money.
+ */
+async function diagnosePayouts() {
+  if (!AGENT_ID || !PAYOUT_SECRET) {
+    return {
+      configured: false,
+      authOk: false,
+      sbpAvailable: false,
+      hint: "Задайте YOOKASSA_AGENT_ID и YOOKASSA_PAYOUT_SECRET_KEY (или YOOKASSA_SECRET_KEY).",
+    };
+  }
+  try {
+    const { response, body } = await fetchMe(AGENT_ID, PAYOUT_SECRET);
+    if (!response.ok) {
+      return {
+        configured: true,
+        authOk: false,
+        sbpAvailable: false,
+        httpStatus: response.status,
+        code: body?.code || null,
+        hint: "ЮKassa отклонила agentId:secret для /v3/me.",
+      };
+    }
+    const methods = normalizePayoutMethods(body.payout_methods);
+    const sbpAvailable = methods.some(
+      (m) => m === "sbp" || m.includes("sbp")
+    );
+    return {
+      configured: true,
+      authOk: true,
+      accountKind: "payouts_gateway",
+      accountId: body.account_id || AGENT_ID,
+      test: Boolean(body.test),
+      payoutMethods: methods,
+      sbpAvailable,
+      hint: sbpAvailable
+        ? null
+        : methods.length
+          ? "Шлюз отвечает, но SBP нет в payout_methods."
+          : "Шлюз отвечает, payout_methods пуст или отсутствует.",
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      authOk: false,
+      sbpAvailable: false,
+      hint: error?.message || "ошибка запроса /v3/me",
     };
   }
 }
@@ -158,11 +239,16 @@ export const yookassa = {
   },
   healthExtra() {
     return {
-      shopId: SHOP_ID,
+      shopId: SHOP_ID || null,
+      agentId: AGENT_ID || null,
       secretLooksTest: SECRET_KEY.startsWith("test_"),
       secretConfigured: Boolean(SECRET_KEY),
       secretHasAsterisk: SECRET_KEY.includes("*"),
+      payoutSecretConfigured: Boolean(PAYOUT_SECRET),
+      payoutSecretLooksTest: PAYOUT_SECRET.startsWith("test_"),
+      payoutSecretHasAsterisk: PAYOUT_SECRET.includes("*"),
     };
   },
   diagnoseAuth,
+  diagnosePayouts,
 };

@@ -25,9 +25,19 @@ def run(client: paramiko.SSHClient, cmd: str, timeout: int = 180) -> None:
     err = stderr.read().decode("utf-8", "replace")
     code = stdout.channel.recv_exit_status()
     if out:
-        print(out[-8000:].encode("utf-8", "replace").decode("ascii", "replace"), flush=True)
+        print(
+            out[-8000:]
+            .encode("utf-8", "replace")
+            .decode("ascii", "replace"),
+            flush=True,
+        )
     if err:
-        print(err[-4000:].encode("utf-8", "replace").decode("ascii", "replace"), flush=True)
+        print(
+            err[-4000:]
+            .encode("utf-8", "replace")
+            .decode("ascii", "replace"),
+            flush=True,
+        )
     if code != 0:
         raise SystemExit(f"remote failed ({code}): {cmd}")
 
@@ -74,6 +84,8 @@ def env_file_bytes() -> bytes:
     secret = local.get("YOOKASSA_SECRET_KEY", "")
     if not secret:
         missing.append("YOOKASSA_SECRET_KEY")
+    agent_id = local.get("YOOKASSA_AGENT_ID", "")
+    payout_secret = local.get("YOOKASSA_PAYOUT_SECRET_KEY", "") or secret
     if missing:
         raise SystemExit(f"missing env: {', '.join(missing)}")
 
@@ -87,13 +99,19 @@ def env_file_bytes() -> bytes:
         f"YOOKASSA_SECRET_KEY={secret}",
         f"YOOKASSA_IS_TEST={local.get('YOOKASSA_IS_TEST', '1')}",
         "NEXT_PUBLIC_APP_URL=https://www.uniquevocal.ru",
-        "",
     ]
+    if agent_id:
+        lines.append(f"YOOKASSA_AGENT_ID={agent_id}")
+    if payout_secret:
+        lines.append(f"YOOKASSA_PAYOUT_SECRET_KEY={payout_secret}")
+    lines.append("")
     return "\n".join(lines).encode("utf-8")
 
 
 def main() -> None:
-    if not PASSWORD:
+    local = local_env()
+    password = PASSWORD or local.get("UVS_SSH_PASS", "")
+    if not password:
         raise SystemExit("UVS_SSH_PASS is not set")
     for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL, GIFT_SIGNUP_SQL):
         if not path.is_file():
@@ -105,7 +123,7 @@ def main() -> None:
     client.connect(
         HOST,
         username="root",
-        password=PASSWORD,
+        password=password,
         timeout=30,
         allow_agent=False,
         look_for_keys=False,
