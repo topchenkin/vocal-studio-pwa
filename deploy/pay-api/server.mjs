@@ -1,9 +1,9 @@
 /**
- * Robokassa init + ResultURL for the static PWA.
- * Passwords stay on the VPS. The browser only receives a signed payment URL.
+ * Payment init + webhooks for the static PWA.
+ * Active provider: PAYMENT_PROVIDER=yookassa|robokassa (default yookassa).
  */
-import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { getProvider, robokassa, yookassa } from "./providers.mjs";
 
 const PORT = Number(process.env.PORT) || 8791;
 const BIND = process.env.BIND || "127.0.0.1";
@@ -13,26 +13,17 @@ const SUPABASE_URL = (
   ""
 ).replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const MERCHANT = process.env.ROBOKASSA_MERCHANT_LOGIN || "uniquevocal";
-const HASH_ALG = (process.env.ROBOKASSA_HASH || "md5").toLowerCase();
-const IS_TEST = ["1", "true", "yes"].includes(
-  String(process.env.ROBOKASSA_IS_TEST || "1").toLowerCase()
-);
-const PASS1 = IS_TEST
-  ? process.env.ROBOKASSA_TEST_PASS1 || ""
-  : process.env.ROBOKASSA_PASS1 || "";
-const PASS2 = IS_TEST
-  ? process.env.ROBOKASSA_TEST_PASS2 || ""
-  : process.env.ROBOKASSA_PASS2 || "";
+const PAYMENT_PROVIDER = (
+  process.env.PAYMENT_PROVIDER || "yookassa"
+).toLowerCase();
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
 ).replace(/\/$/, "");
-const PAY_URL = "https://auth.robokassa.ru/Merchant/Index.aspx";
-const SUCCESS_URL = `${APP_ORIGIN}/pay/success`;
-const FAIL_URL = `${APP_ORIGIN}/pay/fail`;
 
 const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
 const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
+
+const activeProvider = getProvider(PAYMENT_PROVIDER) || yookassa;
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -46,30 +37,6 @@ function json(res, status, body) {
 function text(res, status, body) {
   res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
   res.end(body);
-}
-
-function digest(value) {
-  const algo = HASH_ALG === "sha256" ? "sha256" : "md5";
-  return createHash(algo).update(String(value), "utf8").digest("hex");
-}
-
-function signInit(outSum, invId) {
-  return digest(
-    [
-      MERCHANT,
-      outSum,
-      String(invId),
-      encodeURIComponent(SUCCESS_URL),
-      "GET",
-      encodeURIComponent(FAIL_URL),
-      "GET",
-      PASS1,
-    ].join(":")
-  );
-}
-
-function signResult(outSum, invId) {
-  return digest(`${outSum}:${invId}:${PASS2}`);
 }
 
 function readBody(req) {
@@ -108,7 +75,6 @@ function paramsFrom(req, raw, url) {
     OutSum: pick("OutSum"),
     InvId: pick("InvId") || pick("InvoiceID"),
     SignatureValue: pick("SignatureValue"),
-    EMail: pick("EMail") || pick("Email"),
     PaymentMethod: pick("PaymentMethod"),
   };
 }
@@ -153,7 +119,34 @@ function money(value) {
   return Number(value).toFixed(2);
 }
 
-async function handleInitGift(req, res) {
+async function confirmPayment(invoiceNo, outSum, externalId, provider) {
+  return sb("/rest/v1/rpc/confirm_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      p_invoice_no: Number(invoiceNo),
+      p_out_sum: Number(outSum),
+      p_external_id: externalId || null,
+      p_provider: provider,
+    }),
+  });
+}
+
+async function buildPaymentUrl(provider, { outSum, invId, description, email }) {
+  if (provider.id === "robokassa") {
+    return provider.buildPaymentUrl({ outSum, invId, description, email });
+  }
+  return provider.createPayment({ outSum, invId, description, email });
+}
+
+async function patchExternalId(txId, externalId) {
+  if (!externalId) return;
+  await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(txId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ external_id: externalId }),
+  });
+}
+
+async function handleInitGift(req, res, provider = activeProvider) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -204,10 +197,10 @@ async function handleInitGift(req, res) {
       product_code: null,
       purpose: "gift_certificate",
       amount_rub: Number(outSum),
-      provider: "robokassa",
+      provider: provider.id,
       status: "pending",
       metadata: {
-        is_test: IS_TEST,
+        is_test: provider.isTest,
         gift_id: cert.id,
         gift_code: cert.code,
         recipient_name: cert.recipient_name,
@@ -246,32 +239,37 @@ async function handleInitGift(req, res) {
     return json(res, 500, { error: "Счёт создан, но сертификат не обновился" });
   }
 
-  const signature = signInit(outSum, invId);
-  const pay = new URL(PAY_URL);
-  pay.searchParams.set("MerchantLogin", MERCHANT);
-  pay.searchParams.set("OutSum", outSum);
-  pay.searchParams.set("InvId", String(invId));
-  pay.searchParams.set("Description", description);
-  pay.searchParams.set("SignatureValue", signature);
-  pay.searchParams.set("Culture", "ru");
-  pay.searchParams.set("IncCurrLabel", "SBP");
-  pay.searchParams.append("PaymentMethods", "SBP");
-  pay.searchParams.set("SuccessUrl2", SUCCESS_URL);
-  pay.searchParams.set("SuccessUrl2Method", "GET");
-  pay.searchParams.set("FailUrl2", FAIL_URL);
-  pay.searchParams.set("FailUrl2Method", "GET");
-  if (IS_TEST) pay.searchParams.set("IsTest", "1");
+  let paymentUrl;
+  let externalId = null;
+  try {
+    const payment = await buildPaymentUrl(provider, {
+      outSum,
+      invId,
+      description,
+      email: null,
+    });
+    paymentUrl = payment.paymentUrl;
+    externalId = payment.externalId;
+  } catch (error) {
+    console.error("gift payment init failed", error);
+    return json(res, 502, {
+      error: error instanceof Error ? error.message : "Не удалось создать платёж",
+    });
+  }
+
+  await patchExternalId(tx.id, externalId);
 
   return json(res, 200, {
-    paymentUrl: pay.toString(),
+    paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: IS_TEST,
+    isTest: provider.isTest,
+    provider: provider.id,
     code: cert.code,
   });
 }
 
-async function handleInit(req, res) {
+async function handleInit(req, res, provider = activeProvider) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -335,10 +333,10 @@ async function handleInit(req, res) {
       product_code: productCode,
       purpose,
       amount_rub: Number(outSum),
-      provider: "robokassa",
+      provider: provider.id,
       status: "pending",
       metadata: {
-        is_test: IS_TEST,
+        is_test: provider.isTest,
         tier,
         is_duo: isDuo,
         description,
@@ -358,54 +356,55 @@ async function handleInit(req, res) {
     return json(res, 500, { error: "Счёт создан без номера" });
   }
 
-  const signature = signInit(outSum, invId);
-  const pay = new URL(PAY_URL);
-  pay.searchParams.set("MerchantLogin", MERCHANT);
-  pay.searchParams.set("OutSum", outSum);
-  pay.searchParams.set("InvId", String(invId));
-  pay.searchParams.set("Description", description.slice(0, 100));
-  pay.searchParams.set("SignatureValue", signature);
-  pay.searchParams.set("Culture", "ru");
-  pay.searchParams.set("IncCurrLabel", "SBP");
-  pay.searchParams.append("PaymentMethods", "SBP");
-  pay.searchParams.set("SuccessUrl2", SUCCESS_URL);
-  pay.searchParams.set("SuccessUrl2Method", "GET");
-  pay.searchParams.set("FailUrl2", FAIL_URL);
-  pay.searchParams.set("FailUrl2Method", "GET");
-  if (IS_TEST) pay.searchParams.set("IsTest", "1");
   const email = String(user.email || profile.email || "").trim();
-  if (email) pay.searchParams.set("Email", email);
+  let paymentUrl;
+  let externalId = null;
+  try {
+    const payment = await buildPaymentUrl(provider, {
+      outSum,
+      invId,
+      description,
+      email: email || null,
+    });
+    paymentUrl = payment.paymentUrl;
+    externalId = payment.externalId;
+  } catch (error) {
+    console.error("payment init failed", error);
+    return json(res, 502, {
+      error: error instanceof Error ? error.message : "Не удалось создать платёж",
+    });
+  }
+
+  await patchExternalId(tx.id, externalId);
 
   return json(res, 200, {
-    paymentUrl: pay.toString(),
+    paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: IS_TEST,
+    isTest: provider.isTest,
+    provider: provider.id,
   });
 }
 
-async function handleResult(req, res) {
+async function handleRobokassaResult(req, res) {
   const raw = req.method === "GET" ? "" : await readBody(req);
   const url = new URL(req.url || "/", APP_ORIGIN);
   const params = paramsFrom(req, raw, url);
   const outSum = String(params.OutSum || "").trim();
   const invId = String(params.InvId || "").trim();
   const signature = String(params.SignatureValue || "").trim().toLowerCase();
-  const expected = signResult(outSum, invId).toLowerCase();
 
-  if (!outSum || !invId || !signature || signature !== expected) {
+  if (!robokassa.verifyResult({ outSum, invId, signature })) {
     console.error("robokassa bad signature", { invId, outSum });
     return text(res, 400, "bad signature");
   }
 
-  const confirm = await sb("/rest/v1/rpc/confirm_robokassa_payment", {
-    method: "POST",
-    body: JSON.stringify({
-      p_invoice_no: Number(invId),
-      p_out_sum: Number(outSum),
-      p_external_id: params.PaymentMethod || null,
-    }),
-  });
+  const confirm = await confirmPayment(
+    invId,
+    outSum,
+    params.PaymentMethod || null,
+    "robokassa"
+  );
   if (!confirm.ok) {
     const detail = await confirm.text();
     console.error("confirm failed", confirm.status, detail);
@@ -415,29 +414,108 @@ async function handleResult(req, res) {
   return text(res, 200, `OK${invId}`);
 }
 
+async function handleYookassaWebhook(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "method" });
+  const raw = await readBody(req);
+  let notification = {};
+  try {
+    notification = JSON.parse(raw || "{}");
+  } catch {
+    return json(res, 400, { error: "invalid json" });
+  }
+
+  const event = String(notification.event || "");
+  const paymentId = String(notification?.object?.id || "");
+  if (!paymentId) {
+    return json(res, 400, { error: "missing payment id" });
+  }
+
+  if (event !== "payment.succeeded") {
+    return json(res, 200, { ok: true, ignored: event || "unknown" });
+  }
+
+  let payment;
+  try {
+    payment = await yookassa.fetchPayment(paymentId);
+  } catch (error) {
+    console.error("yookassa fetch payment failed", paymentId, error);
+    return json(res, 502, { error: "verify failed" });
+  }
+
+  if (payment.status !== "succeeded") {
+    return json(res, 400, { error: "payment not succeeded" });
+  }
+
+  const invoiceNo = Number(
+    payment?.metadata?.invoice_no || notification?.object?.metadata?.invoice_no
+  );
+  const outSum = Number(payment?.amount?.value || 0);
+  if (!invoiceNo || !(outSum > 0)) {
+    console.error("yookassa webhook missing invoice", { paymentId, invoiceNo });
+    return json(res, 400, { error: "missing invoice metadata" });
+  }
+
+  const confirm = await confirmPayment(
+    invoiceNo,
+    outSum,
+    paymentId,
+    "yookassa"
+  );
+  if (!confirm.ok) {
+    const detail = await confirm.text();
+    console.error("yookassa confirm failed", confirm.status, detail);
+    return json(res, 500, { error: "confirm failed" });
+  }
+
+  return json(res, 200, { ok: true });
+}
+
 function ready() {
-  return Boolean(SUPABASE_URL && SERVICE_KEY && PASS1 && PASS2 && MERCHANT);
+  if (!SUPABASE_URL || !SERVICE_KEY) return false;
+  return activeProvider.isReady();
+}
+
+function healthPayload() {
+  return {
+    ok: ready(),
+    provider: PAYMENT_PROVIDER,
+    isTest: activeProvider.isTest,
+    robokassaReady: robokassa.isReady(),
+    yookassaReady: yookassa.isReady(),
+    ...activeProvider.healthExtra(),
+  };
 }
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const path = url.pathname.replace(/\/+$/, "") || "/";
-    if (
-      path === "/health" ||
-      path === "/api/robokassa/health" ||
-      path === "/api/robokassa"
-    ) {
-      return json(res, 200, {
-        ok: ready(),
-        isTest: IS_TEST,
-        merchant: MERCHANT,
-      });
+
+    const healthPaths = new Set([
+      "/health",
+      "/api/payments/health",
+      "/api/payments",
+      "/api/robokassa/health",
+      "/api/robokassa",
+    ]);
+    if (healthPaths.has(path)) {
+      return json(res, 200, healthPayload());
     }
-    if (!ready()) return json(res, 503, { error: "pay-api is not configured" });
-    if (path === "/api/robokassa/init") return handleInit(req, res);
-    if (path === "/api/robokassa/init-gift") return handleInitGift(req, res);
-    if (path === "/api/robokassa/result") return handleResult(req, res);
+
+    if (!ready()) {
+      return json(res, 503, { error: "pay-api is not configured" });
+    }
+
+    if (path === "/api/payments/init") return handleInit(req, res);
+    if (path === "/api/payments/init-gift") return handleInitGift(req, res);
+    if (path === "/api/yookassa/webhook") return handleYookassaWebhook(req, res);
+
+    if (path === "/api/robokassa/init") return handleInit(req, res, robokassa);
+    if (path === "/api/robokassa/init-gift") {
+      return handleInitGift(req, res, robokassa);
+    }
+    if (path === "/api/robokassa/result") return handleRobokassaResult(req, res);
+
     return json(res, 404, { error: "not found" });
   } catch (error) {
     console.error(error);
@@ -446,5 +524,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, BIND, () => {
-  console.log(`pay-api listening on ${BIND}:${PORT} test=${IS_TEST}`);
+  console.log(
+    `pay-api listening on ${BIND}:${PORT} provider=${PAYMENT_PROVIDER} test=${activeProvider.isTest}`
+  );
 });

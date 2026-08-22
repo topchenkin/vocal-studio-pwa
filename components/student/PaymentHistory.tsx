@@ -77,7 +77,12 @@ export default function PaymentHistory({
                           (item.metadata as { is_test?: boolean } | null)?.is_test
                         )
                       ? " · тест Робокассы"
-                      : ""}
+                      : item.provider === "yookassa" &&
+                          Boolean(
+                            (item.metadata as { is_test?: boolean } | null)?.is_test
+                          )
+                        ? " · тест ЮKassa"
+                        : ""}
               </p>
             </div>
             <span className="font-medium">

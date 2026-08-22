@@ -1,4 +1,4 @@
-"""Upload Robokassa pay-api, apply SQL, reload Caddy env. Requires UVS_SSH_PASS."""
+"""Upload pay-api (YooKassa/Robokassa), apply SQL, reload service. Requires UVS_SSH_PASS."""
 from __future__ import annotations
 
 import os
@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PAY = ROOT / "deploy" / "pay-api"
 SQL = ROOT / "supabase-migrations" / "2026-08-21-robokassa-confirm.sql"
 GIFT_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-certificates.sql"
+YK_SQL = ROOT / "supabase-migrations" / "2026-08-22-yookassa-confirm.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -39,13 +40,18 @@ def local_env() -> dict[str, str]:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
     for key, value in os.environ.items():
-        if key.startswith("ROBOKASSA_") or key in {
-            "UVS_SSH_PASS",
-            "SUPABASE_SERVICE_ROLE_KEY",
-            "SELFHOST_SUPABASE_URL",
-            "NEXT_PUBLIC_SUPABASE_URL",
-            "SUPABASE_URL",
-        }:
+        if (
+            key.startswith("ROBOKASSA_")
+            or key.startswith("YOOKASSA_")
+            or key in {
+                "PAYMENT_PROVIDER",
+                "UVS_SSH_PASS",
+                "SUPABASE_SERVICE_ROLE_KEY",
+                "SELFHOST_SUPABASE_URL",
+                "NEXT_PUBLIC_SUPABASE_URL",
+                "SUPABASE_URL",
+            }
+        ):
             if value:
                 values[key] = value
     return values
@@ -59,29 +65,46 @@ def env_file_bytes() -> bytes:
         or local.get("NEXT_PUBLIC_SUPABASE_URL")
         or ""
     )
-    required = [
-        "ROBOKASSA_PASS1",
-        "ROBOKASSA_PASS2",
-        "ROBOKASSA_TEST_PASS1",
-        "ROBOKASSA_TEST_PASS2",
-        "SUPABASE_SERVICE_ROLE_KEY",
-    ]
-    missing = [key for key in required if not local.get(key)]
-    if missing or not url:
-        raise SystemExit(f"missing env: {', '.join(missing + ([] if url else ['SUPABASE_URL']))}")
+    provider = local.get("PAYMENT_PROVIDER", "yookassa").lower()
+    missing: list[str] = []
+    if not url:
+        missing.append("SUPABASE_URL")
+    if not local.get("SUPABASE_SERVICE_ROLE_KEY"):
+        missing.append("SUPABASE_SERVICE_ROLE_KEY")
+    if provider == "yookassa":
+        if not local.get("YOOKASSA_SHOP_ID"):
+            missing.append("YOOKASSA_SHOP_ID")
+        if not local.get("YOOKASSA_SECRET_KEY"):
+            missing.append("YOOKASSA_SECRET_KEY")
+    else:
+        for key in (
+            "ROBOKASSA_PASS1",
+            "ROBOKASSA_PASS2",
+            "ROBOKASSA_TEST_PASS1",
+            "ROBOKASSA_TEST_PASS2",
+        ):
+            if not local.get(key):
+                missing.append(key)
+    if missing:
+        raise SystemExit(f"missing env: {', '.join(missing)}")
+
     lines = [
         "BIND=127.0.0.1",
         "PORT=8791",
+        f"PAYMENT_PROVIDER={provider}",
         f"SUPABASE_URL={url}",
         f"SUPABASE_SERVICE_ROLE_KEY={local['SUPABASE_SERVICE_ROLE_KEY']}",
+        f"YOOKASSA_SHOP_ID={local.get('YOOKASSA_SHOP_ID', '')}",
+        f"YOOKASSA_SECRET_KEY={local.get('YOOKASSA_SECRET_KEY', '')}",
+        f"YOOKASSA_IS_TEST={local.get('YOOKASSA_IS_TEST', '1')}",
         f"ROBOKASSA_MERCHANT_LOGIN={local.get('ROBOKASSA_MERCHANT_LOGIN', 'uniquevocal')}",
         f"ROBOKASSA_HASH={local.get('ROBOKASSA_HASH', 'md5')}",
         f"ROBOKASSA_IS_TEST={local.get('ROBOKASSA_IS_TEST', '1')}",
-        f"ROBOKASSA_PASS1={local['ROBOKASSA_PASS1']}",
-        f"ROBOKASSA_PASS2={local['ROBOKASSA_PASS2']}",
+        f"ROBOKASSA_PASS1={local.get('ROBOKASSA_PASS1', '')}",
+        f"ROBOKASSA_PASS2={local.get('ROBOKASSA_PASS2', '')}",
         f"ROBOKASSA_PASS3={local.get('ROBOKASSA_PASS3', '')}",
-        f"ROBOKASSA_TEST_PASS1={local['ROBOKASSA_TEST_PASS1']}",
-        f"ROBOKASSA_TEST_PASS2={local['ROBOKASSA_TEST_PASS2']}",
+        f"ROBOKASSA_TEST_PASS1={local.get('ROBOKASSA_TEST_PASS1', '')}",
+        f"ROBOKASSA_TEST_PASS2={local.get('ROBOKASSA_TEST_PASS2', '')}",
         "NEXT_PUBLIC_APP_URL=https://www.uniquevocal.ru",
         "",
     ]
@@ -91,10 +114,9 @@ def env_file_bytes() -> bytes:
 def main() -> None:
     if not PASSWORD:
         raise SystemExit("UVS_SSH_PASS is not set")
-    if not SQL.is_file():
-        raise SystemExit(f"missing {SQL}")
-    if not GIFT_SQL.is_file():
-        raise SystemExit(f"missing {GIFT_SQL}")
+    for path in (SQL, GIFT_SQL, YK_SQL):
+        if not path.is_file():
+            raise SystemExit(f"missing {path}")
     env = env_file_bytes()
 
     client = paramiko.SSHClient()
@@ -111,10 +133,9 @@ def main() -> None:
         run(client, "mkdir -p /opt/pay-api /etc/uniquevocal /opt/uvs-migrate")
         sftp = client.open_sftp()
         try:
-            with sftp.file("/opt/pay-api/server.mjs", "wb") as fh:
-                fh.write((PAY / "server.mjs").read_bytes().replace(b"\r\n", b"\n"))
-            with sftp.file("/opt/pay-api/package.json", "wb") as fh:
-                fh.write((PAY / "package.json").read_bytes().replace(b"\r\n", b"\n"))
+            for name in ("server.mjs", "providers.mjs", "package.json"):
+                with sftp.file(f"/opt/pay-api/{name}", "wb") as fh:
+                    fh.write((PAY / name).read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/etc/systemd/system/pay-api.service", "wb") as fh:
                 fh.write((PAY / "pay-api.service").read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/etc/uniquevocal/pay-api.env", "wb") as fh:
@@ -123,6 +144,8 @@ def main() -> None:
                 fh.write(SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/gift-certificates.sql", "wb") as fh:
                 fh.write(GIFT_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/yookassa-confirm.sql", "wb") as fh:
+                fh.write(YK_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -137,6 +160,10 @@ def main() -> None:
         run(
             client,
             "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/gift-certificates.sql",
+        )
+        run(
+            client,
+            "docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/yookassa-confirm.sql",
         )
         run(client, "systemctl daemon-reload")
         run(client, "systemctl enable --now pay-api")

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { Loader2, Smartphone } from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
-import { startRobokassaPayment } from "@/lib/robokassa-client";
+import { startPayment } from "@/lib/payment-client";
+import { paymentProviderLabel } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
 type PaymentPurpose =
@@ -50,7 +51,7 @@ export default function SbpPaymentSheet({
     if (!open) return;
     setError("");
     setBusy(true);
-    void startRobokassaPayment(purpose)
+    void startPayment(purpose)
       .catch((caught: unknown) => {
         setBusy(false);
         setError(
@@ -83,7 +84,7 @@ export default function SbpPaymentSheet({
         <div className="flex flex-col items-center py-10 text-center">
           <Loader2 className="h-10 w-10 animate-spin text-studio-accent" />
           <p className="mt-4 text-sm text-studio-muted">
-            Открываем страницу Робокассы…
+            Открываем страницу оплаты {paymentProviderLabel()}…
           </p>
         </div>
       ) : (
@@ -96,7 +97,7 @@ export default function SbpPaymentSheet({
             onClick={() => {
               setError("");
               setBusy(true);
-              void startRobokassaPayment(purpose).catch((caught: unknown) => {
+              void startPayment(purpose).catch((caught: unknown) => {
                 setBusy(false);
                 setError(
                   caught instanceof Error

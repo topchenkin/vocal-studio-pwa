@@ -15,7 +15,7 @@ import {
   type GiftCertificate,
   type GiftKind,
 } from "@/lib/gift-certificates";
-import { createGiftPaymentLink } from "@/lib/robokassa-client";
+import { createGiftPaymentLink } from "@/lib/payment-client";
 import { supabase } from "@/lib/supabase";
 
 const KINDS: GiftKind[] = ["lesson", "abonement", "subscription", "premium"];
