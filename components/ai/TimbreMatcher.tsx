@@ -310,6 +310,11 @@ export default function TimbreMatcher({ locked = false }: Props) {
             Выберите пол — база сразу сузится только до вашего пола.
           </p>
         )}
+        <p className="mt-2 text-xs leading-relaxed text-studio-muted">
+          Хотите увидеть, на кого из исполнителей другого пола похож ваш голос?
+          Выберите противоположный пол — после записи совпадения пересчитаются
+          сразу, петь заново не нужно.
+        </p>
       </div>
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
