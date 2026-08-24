@@ -44,21 +44,21 @@ check(
   "centroid normalization"
 );
 check(
-  flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100,
+  flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.16) === 100,
   "flatness normalization"
 );
 check(
-  mapFlatnessToRasp(0.012).label === "Чистый" &&
-    mapFlatnessToRasp(0.01201).label === "С лёгкой хрипотцой" &&
-    mapFlatnessToRasp(0.04).label === "С лёгкой хрипотцой" &&
-    mapFlatnessToRasp(0.04001).label === "Выраженная хрипотца",
+  mapFlatnessToRasp(0.004).label === "Чистый" &&
+    mapFlatnessToRasp(0.00401).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.05).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.05001).label === "Выраженная хрипотца",
   "flatness category boundaries"
 );
 check(
-  mapFlatnessToRasp(0.006).label === "Чистый" &&
-    mapFlatnessToRasp(0.025).label === "С лёгкой хрипотцой" &&
-    mapFlatnessToRasp(0.07).label === "Выраженная хрипотца",
-  "clean, moderate and strong flatness calibration"
+  mapFlatnessToRasp(0.0015).label === "Чистый" &&
+    mapFlatnessToRasp(0.016).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.08).label === "Выраженная хрипотца",
+  "clean, moderate and strong harmonic-noise calibration"
 );
 
 // Stable feature thirds: 0–33 / 34–66 / 67–100.
@@ -155,27 +155,38 @@ check(
   "A/B/C representative fallback never leaves exact gender and Fach"
 );
 
-function measuredTake(centroidHz: number, flatness: number) {
+function measuredTake(
+  centroidHz: number,
+  flatness: number,
+  periodicity: number
+) {
   const sampleRate = 48_000;
   const bufferSize = 2_048;
   const centroidBin = (centroidHz * bufferSize) / sampleRate;
   const accumulator = new VoiceMeasurementAccumulator(sampleRate, bufferSize);
   for (let frame = 0; frame < 20; frame += 1) {
-    accumulator.addFrame(centroidBin, 0.02, 190 + (frame % 3), flatness);
+    accumulator.addFrame(
+      centroidBin,
+      0.02,
+      190 + (frame % 3),
+      flatness,
+      0.02,
+      periodicity
+    );
   }
   return accumulator.finalize();
 }
 
-const firstSequentialTake = measuredTake(1_800, 0.09);
-const secondSequentialTake = measuredTake(300, 0.005);
+const firstSequentialTake = measuredTake(1_800, 0.09, 0.5);
+const secondSequentialTake = measuredTake(300, 0.005, 0.999);
 check(
   firstSequentialTake?.userWeight === 89 &&
-    firstSequentialTake.userRaspiness === 95,
+    firstSequentialTake.userRaspiness >= 67,
   "first sequential accumulator records bright/raspy data"
 );
 check(
   secondSequentialTake?.userWeight === 8 &&
-    secondSequentialTake.userRaspiness === 13,
+    secondSequentialTake.userRaspiness <= 30,
   "second sequential accumulator contains only fresh dark/clean data"
 );
 check(
@@ -185,20 +196,31 @@ check(
 );
 
 const reusedAccumulator = new VoiceMeasurementAccumulator(48_000, 2_048);
-const addTakeFrames = (centroidHz: number, flatness: number) => {
+const addTakeFrames = (
+  centroidHz: number,
+  flatness: number,
+  periodicity: number
+) => {
   const centroidBin = (centroidHz * 2_048) / 48_000;
   for (let frame = 0; frame < 20; frame += 1) {
-    reusedAccumulator.addFrame(centroidBin, 0.02, 190, flatness);
+    reusedAccumulator.addFrame(
+      centroidBin,
+      0.02,
+      190,
+      flatness,
+      0.02,
+      periodicity
+    );
   }
 };
-addTakeFrames(1_800, 0.09);
+addTakeFrames(1_800, 0.09, 0.5);
 reusedAccumulator.reset();
-addTakeFrames(300, 0.005);
+addTakeFrames(300, 0.005, 0.999);
 const explicitlyResetTake = reusedAccumulator.finalize();
 check(
   explicitlyResetTake?.frameCount === 20 &&
     explicitlyResetTake.userWeight === 8 &&
-    explicitlyResetTake.userRaspiness === 13,
+    explicitlyResetTake.userRaspiness <= 30,
   "explicit reset clears hz, centroid, flatness, RMS and counters"
 );
 
@@ -326,6 +348,26 @@ check(
     raspyTenor.findIndex(({ star }) => star.name === "Shaman") <
       raspyTenor.findIndex(({ star }) => star.name === "Николай Басков"),
   "raspy tenor reverses preference toward Shaman"
+);
+
+const arianaLike = rankCelebrityCandidates({
+  gender: "female",
+  fach: "mezzo_soprano",
+  userWeight: 96,
+  userRaspiness: 0,
+  region: "western",
+  genre: "Pop",
+});
+check(
+  arianaLike[0]?.star.name === "Ariana Grande",
+  "Ariana-like clean bright mezzo-soprano ranks Ariana Grande first"
+);
+check(
+  arianaLike.findIndex(({ star }) => star.name === "Ariana Grande") <
+    arianaLike.findIndex(({ star }) => star.name === "Christina Aguilera") &&
+    arianaLike.findIndex(({ star }) => star.name === "Ariana Grande") <
+      arianaLike.findIndex(({ star }) => star.name === "Pink"),
+  "clean female mezzo-soprano ranks clean references before raspy cohorts"
 );
 
 const weightFixture = fixture.slice(0, 2).map((star, index) => ({

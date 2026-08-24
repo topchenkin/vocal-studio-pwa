@@ -18,7 +18,7 @@
  *
  * Axes (all 0-100, FIXED linear calibration — never per-take min/max):
  *   timbreWeight ← median spectral centroid, 150..2000 Hz
- *   raspiness    ← median spectral flatness, piecewise voice calibration
+ *   raspiness    ← robust harmonic-noise evidence, piecewise calibration
  *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/match-voice/route.ts`,
@@ -55,6 +55,7 @@ export const MIN_VOICED_FRAMES = 16;
  * voiced frames so loud-but-noisy consonants still contribute spectra.
  */
 export const MIN_PITCHED_FRAMES = 12;
+export const MIN_RELIABLE_RASP_FRAMES = 16;
 
 /**
  * Calibration range for spectral centroid → `timbreWeight` (0-100).
@@ -70,10 +71,22 @@ export const MIN_PITCHED_FRAMES = 12;
 export const CENTROID_WEIGHT_MIN_HZ = 150;
 export const CENTROID_WEIGHT_MAX_HZ = 2000;
 
-/** Voiced-frame median boundaries calibrated for raw Meyda flatness (0..1). */
-export const FLATNESS_CLEAN_MAX = 0.012;
-export const FLATNESS_LIGHT_RASP_MAX = 0.04;
-export const FLATNESS_STRONG_MAX = 0.1;
+/**
+ * Boundaries for robust harmonic-noise evidence:
+ * Meyda flatness * sqrt(1 - normalized autocorrelation at F0).
+ *
+ * Deterministic Meyda 5.6.3 calibration (48 kHz, FFT 2048, hop 1024) put the
+ * p35 evidence at 0..0.0014 for clean/phone-floor/consonant-burst signals,
+ * 0.012..0.016 for moderate/breathy noise and 0.079+ for strong noise.
+ * Raw flatness alone was 0.07..0.15 for clean signals with a tiny broadband
+ * floor, proving the old 0.012/0.04 thresholds were not microphone-safe.
+ */
+export const FLATNESS_CLEAN_MAX = 0.004;
+export const FLATNESS_LIGHT_RASP_MAX = 0.05;
+export const FLATNESS_STRONG_MAX = 0.16;
+export const RASP_PERCENTILE = 0.35;
+export const MAX_VOICED_ZCR = 0.12;
+export const MIN_PERIODICITY = 0.35;
 
 export type RaspLabel =
   | "Чистый"
@@ -128,18 +141,17 @@ export function centroidHzToWeight(centroidHz: number): number {
 }
 
 /**
- * Raw Meyda spectral flatness → a strict 0..100 axis and display category.
+ * Robust harmonic-noise evidence → a strict 0..100 axis and display category.
  *
- * The old 0..0.1 linear map put ordinary phone-mic harmonic vocals into the
- * raspy middle. This piecewise calibration reserves 0..30 for clean voiced
- * medians (<= .012), 34..66 for light noise (.012..04), and 67..100 for
- * strong noise (>.04). Input is the median after RMS + valid-pitch gating.
+ * The input is deliberately not raw flatness: flatness is multiplied by the
+ * square root of periodicity loss, then reduced with p35 over reliable voiced
+ * frames. This keeps a stationary microphone floor from masquerading as rasp.
  */
-export function mapFlatnessToRasp(medianFlatness: number): {
+export function mapFlatnessToRasp(robustRaspEvidence: number): {
   raspiness: number;
   label: RaspLabel;
 } {
-  const flatness = clamp(medianFlatness, 0, 1);
+  const flatness = clamp(robustRaspEvidence, 0, 1);
   if (flatness <= FLATNESS_CLEAN_MAX) {
     return {
       raspiness: Math.round(
@@ -196,6 +208,32 @@ export function percentile(values: number[], p: number): number {
 }
 
 /**
+ * Normalized autocorrelation at the detected F0 period. A periodic harmonic
+ * vowel approaches 1; broadband/noisy energy lowers the value.
+ */
+export function normalizedPeriodicity(
+  frame: Float32Array,
+  sampleRate: number,
+  pitchHz: number | null
+): number {
+  if (!pitchHz || !Number.isFinite(pitchHz) || pitchHz <= 0) return 0;
+  const lag = Math.round(sampleRate / pitchHz);
+  if (lag < 2 || lag >= frame.length / 2) return 0;
+  let xy = 0;
+  let xx = 0;
+  let yy = 0;
+  for (let index = 0; index + lag < frame.length; index += 1) {
+    const x = frame[index] ?? 0;
+    const y = frame[index + lag] ?? 0;
+    xy += x * y;
+    xx += x * x;
+    yy += y * y;
+  }
+  if (xx <= 0 || yy <= 0) return 0;
+  return clamp(xy / Math.sqrt(xx * yy), 0, 1);
+}
+
+/**
  * Per-take adaptive gate. The low decile estimates room noise; the median cap
  * prevents a take that starts singing immediately from setting its own voice
  * as the noise floor. The absolute floor remains quiet-singing friendly.
@@ -245,9 +283,17 @@ export type VoiceMeasurement = {
   /** Median spectral centroid in Hz across non-silent frames. */
   medianCentroidHz: number;
   p75CentroidHz: number;
-  /** Median Meyda spectralFlatness (0–1) across non-silent frames. */
+  /** Raw Meyda flatness distribution across reliable sustained voiced frames. */
+  p10Flatness: number;
+  p25Flatness: number;
   medianFlatness: number;
   p75Flatness: number;
+  /** p35 raw flatness, logged independently from the final combined evidence. */
+  robustFlatness: number;
+  /** p35 of flatness * sqrt(periodicity loss), used for rasp mapping. */
+  robustRaspEvidence: number;
+  p25Periodicity: number;
+  medianPeriodicity: number;
   /** Median centroid → 0-100, same scale as the stars' `timbreWeight`. */
   userWeight: number;
   /** Median flatness → 0-100, same scale as the stars' `raspiness`. */
@@ -258,6 +304,10 @@ export type VoiceMeasurement = {
   frameCount: number;
   /** Subset of those where YIN also found an F0. */
   pitchedFrameCount: number;
+  /** Frames accepted for rasp after pitch/range/ZCR/periodicity/transient gates. */
+  reliableRaspFrameCount: number;
+  /** Above-RMS frames rejected by one of the reliability gates. */
+  rejectedRaspFrameCount: number;
   /** All analysis frames considered before the adaptive gate. */
   totalFrameCount: number;
   /** Low-percentile RMS estimate of the recording's room-noise floor. */
@@ -284,14 +334,18 @@ export class VoiceMeasurementAccumulator {
   private flatness: number[] = [];
   private pitchHz: number[] = [];
   private voicedRms: number[] = [];
+  private raspEvidence: number[] = [];
+  private periodicity: number[] = [];
   private frames = 0;
+  private rejectedRaspFrames = 0;
   private totalFrames = 0;
 
   constructor(
     private readonly sampleRate: number,
     private readonly bufferSize: number,
     private readonly noiseGateRms = RMS_NOISE_FLOOR,
-    private readonly noiseFloorRms = 0
+    private readonly noiseFloorRms = 0,
+    private readonly gender?: TimbreGender
   ) {}
 
   /** Explicitly clear every per-take DSP array/counter before reuse. */
@@ -300,7 +354,10 @@ export class VoiceMeasurementAccumulator {
     this.flatness = [];
     this.pitchHz = [];
     this.voicedRms = [];
+    this.raspEvidence = [];
+    this.periodicity = [];
     this.frames = 0;
+    this.rejectedRaspFrames = 0;
     this.totalFrames = 0;
   }
 
@@ -315,16 +372,39 @@ export class VoiceMeasurementAccumulator {
     centroidBin: number | undefined,
     rms: number | undefined,
     f0Hz?: number | null,
-    spectralFlatness?: number
+    spectralFlatness?: number,
+    zcr?: number,
+    periodicity?: number,
+    transient = false
   ): void {
     this.totalFrames += 1;
     if (typeof rms !== "number" || !Number.isFinite(rms) || rms < this.noiseGateRms) return;
 
     // A measured F0 is required for Fach anyway. Restricting all three timbre
     // axes to these frames also keeps room hiss and unpitched knocks out.
-    const pitched =
-      typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0;
-    if (!pitched) return;
+    if (typeof f0Hz !== "number" || !Number.isFinite(f0Hz) || f0Hz <= 0) {
+      this.rejectedRaspFrames += 1;
+      return;
+    }
+    const pitchValue = f0Hz;
+    const [minPitch, maxPitch] =
+      this.gender === "female"
+        ? [130, 1100]
+        : this.gender === "male"
+          ? [70, 520]
+          : [70, 1100];
+    if (
+      pitchValue < minPitch ||
+      pitchValue > maxPitch ||
+      transient ||
+      (typeof zcr === "number" && Number.isFinite(zcr) && zcr > MAX_VOICED_ZCR) ||
+      (typeof periodicity === "number" &&
+        Number.isFinite(periodicity) &&
+        periodicity < MIN_PERIODICITY)
+    ) {
+      this.rejectedRaspFrames += 1;
+      return;
+    }
 
     this.frames += 1;
     this.voicedRms.push(rms);
@@ -334,8 +414,16 @@ export class VoiceMeasurementAccumulator {
     }
     if (typeof spectralFlatness === "number" && Number.isFinite(spectralFlatness) && spectralFlatness >= 0) {
       this.flatness.push(spectralFlatness);
+      const periodicityValue =
+        typeof periodicity === "number" && Number.isFinite(periodicity)
+          ? clamp(periodicity, 0, 1)
+          : 0;
+      this.periodicity.push(periodicityValue);
+      this.raspEvidence.push(
+        spectralFlatness * Math.sqrt(Math.max(0, 1 - periodicityValue))
+      );
     }
-    this.pitchHz.push(f0Hz as number);
+    this.pitchHz.push(pitchValue);
   }
 
   get frameCount(): number {
@@ -352,6 +440,7 @@ export class VoiceMeasurementAccumulator {
     if (this.pitchHz.length < MIN_PITCHED_FRAMES) return null;
     if (this.centroidBins.length === 0) return null;
     if (this.flatness.length === 0) return null;
+    if (this.raspEvidence.length < MIN_RELIABLE_RASP_FRAMES) return null;
     const medianCentroidHz = centroidBinToHz(
       median(this.centroidBins),
       this.sampleRate,
@@ -362,12 +451,16 @@ export class VoiceMeasurementAccumulator {
       this.sampleRate,
       this.bufferSize
     );
+    const p10Flatness = percentile(this.flatness, 0.1);
+    const p25Flatness = percentile(this.flatness, 0.25);
     const medianFlatness = median(this.flatness);
     const p75Flatness = percentile(this.flatness, 0.75);
+    const robustFlatness = percentile(this.flatness, RASP_PERCENTILE);
+    const robustRaspEvidence = percentile(this.raspEvidence, RASP_PERCENTILE);
     const p25Hz = percentile(this.pitchHz, 0.25);
     const p75Hz = percentile(this.pitchHz, 0.75);
     const userWeight = centroidHzToWeight(medianCentroidHz);
-    const userRaspiness = flatnessToRaspiness(medianFlatness);
+    const userRaspiness = flatnessToRaspiness(robustRaspEvidence);
 
     return {
       medianHz: median(this.pitchHz),
@@ -375,13 +468,21 @@ export class VoiceMeasurementAccumulator {
       p75Hz,
       medianCentroidHz,
       p75CentroidHz,
+      p10Flatness,
+      p25Flatness,
       medianFlatness,
       p75Flatness,
+      robustFlatness,
+      robustRaspEvidence,
+      p25Periodicity: percentile(this.periodicity, 0.25),
+      medianPeriodicity: median(this.periodicity),
       userWeight: Math.max(0, Math.min(100, userWeight)),
       userRaspiness: Math.max(0, Math.min(100, userRaspiness)),
       tessituraSpan: pitchIqrToSpan(p25Hz, p75Hz),
       frameCount: this.frames,
       pitchedFrameCount: this.pitchHz.length,
+      reliableRaspFrameCount: this.raspEvidence.length,
+      rejectedRaspFrameCount: this.rejectedRaspFrames,
       totalFrameCount: this.totalFrames,
       noiseFloorRms: this.noiseFloorRms,
       noiseGateRms: this.noiseGateRms,

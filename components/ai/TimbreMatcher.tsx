@@ -125,7 +125,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
 
       setStage("extracting");
-      const result = await analyzeVoiceBuffer(audioBuffer);
+      const result = await analyzeVoiceBuffer(audioBuffer, gender!);
       if (isStale(analysisId)) return;
       if (!result) {
         throw new Error(
@@ -142,7 +142,18 @@ export default function TimbreMatcher({ locked = false }: Props) {
           durationSeconds: audioBuffer.duration,
         },
         centroidHz: result.medianCentroidHz,
-        spectralFlatness: result.medianFlatness,
+        spectralFlatness: {
+          p10: result.p10Flatness,
+          p25: result.p25Flatness,
+          median: result.medianFlatness,
+          p75: result.p75Flatness,
+          robustP35: result.robustFlatness,
+          harmonicNoiseEvidenceP35: result.robustRaspEvidence,
+        },
+        periodicity: {
+          p25: result.p25Periodicity,
+          median: result.medianPeriodicity,
+        },
         normalized: {
           brightness: result.userWeight,
           rasp: result.userRaspiness,
@@ -160,11 +171,17 @@ export default function TimbreMatcher({ locked = false }: Props) {
         frames: {
           valid: result.frameCount,
           pitched: result.pitchedFrameCount,
+          reliableRasp: result.reliableRaspFrameCount,
+          rejectedRasp: result.rejectedRaspFrameCount,
           total: result.totalFrameCount,
+        },
+        finalRasp: {
+          numeric: result.userRaspiness,
+          label: mapFlatnessToRasp(result.robustRaspEvidence).label,
         },
       });
 
-      const rasp = mapFlatnessToRasp(result.medianFlatness);
+      const rasp = mapFlatnessToRasp(result.robustRaspEvidence);
       const fach = classifyVocalFach(gender!, result.medianHz);
       const sortedForLog = rankCelebrityCandidates({
         gender: gender!,

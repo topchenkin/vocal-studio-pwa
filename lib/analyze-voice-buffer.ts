@@ -13,7 +13,10 @@ import type { MeydaFeaturesObject } from "meyda";
 import { createYinDetector } from "@/lib/pitch";
 import {
   deriveAdaptiveNoiseGate,
+  normalizedPeriodicity,
+  percentile,
   VoiceMeasurementAccumulator,
+  type TimbreGender,
   type VoiceMeasurement,
 } from "@/lib/timbre-features";
 
@@ -24,6 +27,7 @@ const HOP = 1024;
 const FEATURES = [
   "spectralCentroid",
   "spectralFlatness",
+  "zcr",
   "rms",
 ] as const;
 
@@ -82,10 +86,22 @@ function frameRms(
  * voiced/pitched content (same gates as VoiceMeasurementAccumulator.finalize).
  */
 export async function analyzeVoiceBuffer(
-  audioBuffer: AudioBuffer
+  audioBuffer: AudioBuffer,
+  gender: TimbreGender
 ): Promise<VoiceMeasurement | null> {
-  const channel = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
+  return analyzeVoiceSamples(
+    audioBuffer.getChannelData(0),
+    audioBuffer.sampleRate,
+    gender
+  );
+}
+
+/** Same production extractor exposed for deterministic Node-side calibration. */
+export async function analyzeVoiceSamples(
+  channel: Float32Array,
+  sampleRate: number,
+  gender: TimbreGender
+): Promise<VoiceMeasurement | null> {
   if (channel.length < SPECTRAL_BUFFER) return null;
 
   const Meyda = await loadMeyda();
@@ -102,7 +118,8 @@ export async function analyzeVoiceBuffer(
     sampleRate,
     SPECTRAL_BUFFER,
     gate.thresholdRms,
-    gate.noiseFloorRms
+    gate.noiseFloorRms,
+    gender
   );
   // Explicit hard reset documents and enforces fresh hz/centroid/flatness
   // arrays even if the collector implementation is later pooled.
@@ -112,6 +129,7 @@ export async function analyzeVoiceBuffer(
   const pitchFrame = new Float32Array(PITCH_WINDOW);
   let framesSeen = 0;
 
+  let frameIndex = 0;
   for (let start = 0; start + SPECTRAL_BUFFER <= channel.length; start += HOP) {
     spectralFrame.set(channel.subarray(start, start + SPECTRAL_BUFFER));
 
@@ -124,14 +142,27 @@ export async function analyzeVoiceBuffer(
       pitchFrame.set(channel.subarray(pitchStart, pitchStart + PITCH_WINDOW));
       f0 = yin(pitchFrame);
     }
+    const periodicity = normalizedPeriodicity(pitchFrame, sampleRate, f0);
+    const localRms = rmsValues.slice(
+      Math.max(0, frameIndex - 2),
+      Math.min(rmsValues.length, frameIndex + 3)
+    );
+    const localMedianRms = percentile(localRms, 0.5);
+    const transient =
+      localMedianRms > 0 &&
+      (features.rms ?? 0) > Math.max(gate.thresholdRms, localMedianRms) * 2.2;
 
     accumulator.addFrame(
       features.spectralCentroid,
       features.rms,
       f0,
-      features.spectralFlatness
+      features.spectralFlatness,
+      typeof features.zcr === "number" ? features.zcr / SPECTRAL_BUFFER : undefined,
+      periodicity,
+      transient
     );
 
+    frameIndex += 1;
     framesSeen += 1;
     if (framesSeen % 24 === 0) await yieldToUi();
   }
