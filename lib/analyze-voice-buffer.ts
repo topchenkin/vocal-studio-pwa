@@ -4,7 +4,7 @@
  * Deliberately runs AFTER the take ends so we can spend analysis time on the
  * full PCM buffer (overlapping frames, YIN on 4096 windows, Meyda spectra)
  * instead of racing live callbacks. Libraries used honestly:
- *   - meyda: rms, spectralCentroid, spectralFlatness, zcr, amplitudeSpectrum
+ *   - meyda: rms, spectralCentroid, spectralFlatness, zcr
  *   - pitchfinder (YIN via lib/pitch): F0
  * No fabricated axes — every displayed parameter maps to a measured feature.
  */
@@ -26,7 +26,6 @@ const FEATURES = [
   "spectralFlatness",
   "zcr",
   "rms",
-  "amplitudeSpectrum",
 ] as const;
 
 type MeydaExtract = {
@@ -117,8 +116,7 @@ export async function analyzeVoiceBuffer(
       features.rms,
       f0,
       flatness,
-      features.zcr,
-      features.amplitudeSpectrum
+      features.zcr
     );
 
     framesSeen += 1;

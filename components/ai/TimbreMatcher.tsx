@@ -8,11 +8,12 @@ import {
   CELEBRITY_GENRES,
   CELEBRITY_REGIONS,
   DECADE_LABEL_RU,
-  FACH_MISMATCH_SIMILARITY,
+  FACH_MISMATCH_PENALTY,
   GENRE_LABEL_RU,
   MIN_DISPLAY_PERCENT,
-  RECALIBRATION_CAP_PERCENT,
-  RECALIBRATION_TARGET_PERCENT,
+  RAW_DISTANCE_GARBAGE_THRESHOLD,
+  RECALIBRATION_BEST_MAX_PERCENT,
+  RECALIBRATION_BEST_MIN_PERCENT,
   REGION_LABEL_RU,
   VOCAL_FACH_LABEL_RU,
   classifyVocalFach,
@@ -116,6 +117,27 @@ export default function TimbreMatcher({ locked = false }: Props) {
           "Слишком мало голосового сигнала — спойте пару фраз обычным голосом ближе к микрофону (кричать не нужно)."
         );
       }
+
+      if (!gender) throw new Error("Сначала выберите пол");
+      const detectedFach = classifyVocalFach(gender, result.medianHz);
+      console.info("[DSP_DEBUG]", {
+        rawMedians: {
+          spectralCentroidHz: result.medianCentroidHz,
+          spectralFlatness: result.medianFlatness,
+          zcr: {
+            rawCountPerFrame: result.medianZcrCount,
+            frameLengthSamples: result.zcrFrameLength,
+            normalizedRateCrossingsPerSample: result.medianZcrRate,
+          },
+        },
+        normalized0To100: {
+          timbreBrightness: result.userWeight,
+          airiness: result.userAiriness,
+          raspiness: result.userRaspiness,
+        },
+        gender,
+        fach: detectedFach,
+      });
 
       setStage("matching");
       // Let the matching stage paint before the sync rank.
@@ -275,20 +297,10 @@ export default function TimbreMatcher({ locked = false }: Props) {
     return counts;
   }, [matches]);
 
-  const topMatch =
-    matches[0] && matches[0].percent >= MIN_DISPLAY_PERCENT
-      ? matches[0]
-      : matches[0] ?? null;
+  const topMatch = matches[0] ?? null;
   const bestRawPercent = matches.reduce(
     (m, x) => Math.max(m, x.rawPercent),
     0
-  );
-  const fachAdjustedRaw = (m: CelebrityMatch) =>
-    m.fachMismatch
-      ? Math.round(m.rawPercent * FACH_MISMATCH_SIMILARITY)
-      : m.rawPercent;
-  const recalibrated = matches.some(
-    (m) => m.percent > fachAdjustedRaw(m) + 1
   );
   const isBusy = stage === "recording" || stage === "extracting" || stage === "matching";
 
@@ -448,7 +460,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
             fach={fach}
             topMatch={topMatch}
             bestRawPercent={bestRawPercent}
-            recalibrated={recalibrated}
           />
 
           <div className="flex gap-1 rounded-xl bg-studio-card p-1 ring-1 ring-studio-border">
@@ -532,22 +543,22 @@ function DebugParamsPanel({
   fach,
   topMatch,
   bestRawPercent,
-  recalibrated,
 }: {
   measurement: VoiceMeasurement;
   fach: NonNullable<ReturnType<typeof classifyVocalFach>>;
   topMatch: CelebrityMatch | null;
   bestRawPercent: number;
-  recalibrated: boolean;
 }) {
   const rows: Array<[string, string]> = [
     ["Тембр / яркость (timbreWeight)", `${measurement.userWeight}/100`],
     ["Воздух (airiness)", `${measurement.userAiriness}/100`],
-    [
-      "HF ratio median / p75",
-      `${measurement.medianHfRatio.toFixed(4)} / ${measurement.p75HfRatio.toFixed(4)}`,
-    ],
     ["Расщепление / rasp", `${measurement.userRaspiness}/100`],
+    ["Centroid median", `${measurement.medianCentroidHz.toFixed(1)} Hz`],
+    ["Flatness median", measurement.medianFlatness.toFixed(5)],
+    [
+      "ZCR median: count / rate",
+      `${measurement.medianZcrCount.toFixed(1)} / ${measurement.medianZcrRate.toFixed(5)} crossings/sample (${measurement.zcrFrameLength} samples)`,
+    ],
     ["Ширина тесситуры", `${measurement.tessituraSpan}/100`],
     ["Определённый fach", VOCAL_FACH_LABEL_RU[fach]],
     [
@@ -555,8 +566,8 @@ function DebugParamsPanel({
       `${Math.round(measurement.medianHz)} / ${Math.round(measurement.p25Hz)} / ${Math.round(measurement.p75Hz)} Hz`,
     ],
     [
-      "Кадры: voiced / pitched / HF",
-      `${measurement.frameCount} / ${measurement.pitchedFrameCount} / ${measurement.hfFrameCount}`,
+      "Кадры: voiced / pitched",
+      `${measurement.frameCount} / ${measurement.pitchedFrameCount}`,
     ],
     [
       "Presence / quality",
@@ -569,18 +580,14 @@ function DebugParamsPanel({
       topMatch
         ? `${topMatch.distance.toFixed(1)} / ${topMatch.rawPercent}% → ${topMatch.percent}%${
             topMatch.fachMismatch
-              ? ` (fach ×${FACH_MISMATCH_SIMILARITY})`
+              ? ` (fach +${FACH_MISMATCH_PENALTY})`
               : ""
           }`
         : "—",
     ],
     [
       "Пул: лучший raw %",
-      `${bestRawPercent}%${
-        recalibrated
-          ? ` → перекалибровка к ~${RECALIBRATION_TARGET_PERCENT}% (cap ${RECALIBRATION_CAP_PERCENT}%)`
-          : " (без перекалибровки)"
-      }`,
+      `${bestRawPercent}% → лучший ${RECALIBRATION_BEST_MIN_PERCENT}–${RECALIBRATION_BEST_MAX_PERCENT}%; отсев d>${RAW_DISTANCE_GARBAGE_THRESHOLD}`,
     ],
   ];
 

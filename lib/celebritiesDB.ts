@@ -6,15 +6,15 @@
  *   1. Student picks gender → pool = that gender only (opposite excluded).
  *   2. Record → offline feature extract (meyda + YIN) after the take.
  *   3. Measure axes on the same 0–100 scale the stars are authored on.
- *   4. Multi-parameter weighted distance → %; soft fach (−18% on mismatch);
- *      soft floor recalibration to ~80% when the whole pool is <50%.
- *   5. UI: region tabs (Российские / Зарубежные) → decade × genre top-5.
+ *   4. Required 60/20/20 weighted 3-D distance + soft fach distance prior.
+ *   5. Reject raw garbage, then globally recalibrate the eligible cohort.
+ *   6. UI: region tabs (Российские / Зарубежные) → decade × genre top-5.
  *      Opposite gender never appears; empty DB never shown.
  *
  * Axes:
  *   1. `vocalFach`      — display / soft prior from median F0 (not a hard filter).
  *   2. `timbreWeight`   — 0 dark/heavy … 100 bright/ringing (spectral centroid).
- *   3. `airiness`       — 0 dense … 100 breathy (high-frequency energy).
+ *   3. `airiness`       — 0 dense … 100 airy (zero-crossing rate).
  *   4. `raspiness`      — 0 clean … 100 rasp/split (spectral flatness).
  *   5. `tessituraSpan`  — 0 narrow hook … 100 very wide working range.
  *   6. `region`         — russian | western.
@@ -67,8 +67,8 @@ export const GENRE_LABEL_RU: Record<Genre, string> = {
   Rock: "Рок",
 };
 
-/** Hide weak neighbours in the twin-result UI. */
-export const MIN_DISPLAY_PERCENT = 50;
+/** Displayed eligible candidates are recalibrated to at least 70%. */
+export const MIN_DISPLAY_PERCENT = 60;
 
 export type VocalFach =
   | "bass_baritone"
@@ -126,42 +126,23 @@ function slugify(name: string): string {
 
 type RawEntry = Omit<CelebrityProfile, "id">;
 
-/**
- * Balanced multi-parameter weights. Rasp was previously 1.85× and, combined
- * with a hard vocalFach cut into tiny rock-heavy pools, made mid-range
- * amateur takes look like “only rock” or empty. Style still matters, but no
- * single axis may dominate commercial matching.
- */
+/** Required 3-D weighted-Euclidean coefficients; they sum to exactly 1. */
 export const AXIS_WEIGHTS = {
-  timbreWeight: 1,
-  airiness: 1,
-  raspiness: 1.15,
-  tessituraSpan: 0.75,
+  timbreWeight: 0.6,
+  airiness: 0.2,
+  raspiness: 0.2,
 } as const;
 
 /**
- * Soft fach prior: when the take’s median-F0 fach differs from the star’s
- * authored fach, shrink the *display* similarity by
- * `(1 − FACH_MISMATCH_SIMILARITY)` (~18%). Never a hard filter — bass↔tenor
- * still appears, just lower. Ranking uses the same adjusted percent.
+ * Separate soft fach prior in distance points. The current enum has only two
+ * fach values per gender, so there is one mismatch severity (no honest
+ * adjacent/extreme distinction is representable). It is noticeable but never
+ * a hard block.
  */
-export const FACH_MISMATCH_SIMILARITY = 0.82;
+export const FACH_MISMATCH_PENALTY = 12;
 
-/**
- * @deprecated Prefer `FACH_MISMATCH_SIMILARITY` on the display %. Kept so
- * older imports/tests keep compiling; no longer added to L2 distance.
- */
-export const FACH_MISMATCH_PENALTY = 10;
-
-export const DEFAULT_USER_SPAN = 45;
-
-/** Theoretical max weighted L2 on 0–100 axes (for docs / tests). */
-export const MAX_WEIGHTED_DISTANCE = Math.sqrt(
-  (100 * AXIS_WEIGHTS.timbreWeight) ** 2 +
-    (100 * AXIS_WEIGHTS.airiness) ** 2 +
-    (100 * AXIS_WEIGHTS.raspiness) ** 2 +
-    (100 * AXIS_WEIGHTS.tessituraSpan) ** 2
-);
+/** Theoretical max of sqrt(.6*dT² + .2*dA² + .2*dR²). */
+export const MAX_WEIGHTED_DISTANCE = 100;
 
 // prettier-ignore
 const RAW_ENTRIES: RawEntry[] = [
@@ -962,13 +943,13 @@ export function classifyVocalFach(
 
 export type CelebrityMatch = {
   celebrity: CelebrityProfile;
-  /** Weighted multi-parameter distance. Smaller = better match. */
+  /** Final distance: required 3-D distance plus separate soft fach prior. */
   distance: number;
-  /** 0-100 display score after soft fach + optional recalibration. */
+  /** UX-calibrated score; eligible candidates are always in [70,96]. */
   percent: number;
-  /** Raw distance→% before soft fach and before floor recalibration. */
+  /** Monotonic raw distance similarity, before UX recalibration. */
   rawPercent: number;
-  /** True when soft fach similarity factor was applied. */
+  /** True when the separate soft fach distance prior was applied. */
   fachMismatch?: boolean;
 };
 
@@ -990,40 +971,40 @@ export function euclideanDistance3D(user: TimbreVector, star: TimbreVector): num
 }
 
 export type DistanceOptions = {
-  /**
-   * Soft fach prior — mismatch multiplies display % by
-   * `FACH_MISMATCH_SIMILARITY`, never excludes from the pool.
-   */
+  /** Optional fach used only by the separate soft prior, never as a 4th axis. */
   userFach?: VocalFach | null;
 };
 
 /**
- * Multi-parameter weighted L2 on the 0–100 axes:
+ * Required 3-D weighted Euclidean distance on consistent 0–100 axes:
  *
- *   d = sqrt( Σ_i (w_i · Δ_i)² )
+ *   d3 = sqrt(0.6·Δt² + 0.2·Δa² + 0.2·Δr²)
  *
- * Each Δ_i is |user − star| on that axis. Weights live in `AXIS_WEIGHTS`.
- * Soft fach is applied later on the display %, not here.
+ * `tessituraSpan` is intentionally excluded: it may inform fach elsewhere but
+ * must not silently distort the requested 60/20/20 geometry.
  */
 export function weightedDistance(
   user: TimbreVector,
   star: CelebrityProfile,
   _options?: DistanceOptions
 ): number {
-  const span = user.tessituraSpan ?? DEFAULT_USER_SPAN;
-  const dw = (user.timbreWeight - star.timbreWeight) * AXIS_WEIGHTS.timbreWeight;
-  const da = (user.airiness - star.airiness) * AXIS_WEIGHTS.airiness;
-  const dr = (user.raspiness - star.raspiness) * AXIS_WEIGHTS.raspiness;
-  const ds = (span - star.tessituraSpan) * AXIS_WEIGHTS.tessituraSpan;
-  return Math.sqrt(dw * dw + da * da + dr * dr + ds * ds);
+  const dt = user.timbreWeight - star.timbreWeight;
+  const da = user.airiness - star.airiness;
+  const dr = user.raspiness - star.raspiness;
+  return Math.sqrt(
+    AXIS_WEIGHTS.timbreWeight * dt * dt +
+      AXIS_WEIGHTS.airiness * da * da +
+      AXIS_WEIGHTS.raspiness * dr * dr
+  );
 }
 
 /**
- * Distance → display %. TAU chosen so a solid nearest neighbour (~35) lands
- * around the mid-70s and a near-exact match (~15) ~86% — honest, not 99%,
- * and not collapsed into a flat 50–60% band for every star.
+ * Raw final distance → raw similarity:
+ *   s_raw(d) = exp(-d / 30)
+ * This is strictly monotonic for finite d≥0 and is used for diagnostics and
+ * garbage rejection only; UX percentages are calibrated separately.
  */
-export const DISTANCE_PERCENT_TAU = 100;
+export const DISTANCE_PERCENT_TAU = 30;
 
 export function distanceToPercent(distance: number): number {
   if (!Number.isFinite(distance) || distance <= 0) return 100;
@@ -1034,30 +1015,57 @@ export function distanceToPercent(distance: number): number {
 }
 
 /**
- * If the entire gender pool sits below the 50% display floor (unusual mic /
- * extreme vector), stretch scores so the best neighbour lands at
- * `RECALIBRATION_TARGET_PERCENT` (~80, in the 75–85 band) and others scale
- * proportionally — ranking preserved, capped so we never mint fake 99%s.
+ * Reject candidates beyond 32 weighted points before any UX inflation. This
+ * means the weighted RMS feature mismatch is greater than 32% of an axis and
+ * prevents sparse era/genre cells from promoting unrelated voices.
  */
-export const RECALIBRATION_TARGET_PERCENT = 80;
-export const RECALIBRATION_CAP_PERCENT = 85;
+export const RAW_DISTANCE_GARBAGE_THRESHOLD = 32;
+export const RECALIBRATION_BEST_MIN_PERCENT = 85;
+export const RECALIBRATION_BEST_MAX_PERCENT = 96;
+export const RECALIBRATION_OTHERS_MIN_PERCENT = 70;
+export const RECALIBRATION_OTHERS_MAX_PERCENT = 85;
 
-export function recalibratePercentsIfEmpty(
-  matches: CelebrityMatch[],
-  minPercent = MIN_DISPLAY_PERCENT
+/**
+ * Global eligible-cohort recalibration. The best maps to 85–96 according to
+ * its raw similarity; every remaining eligible candidate maps monotonically
+ * to 70–85 relative to best and the garbage boundary. No bucket is calibrated
+ * independently, so sparse cells cannot manufacture an 85% result.
+ */
+export function recalibrateEligiblePercents(
+  matches: CelebrityMatch[]
 ): CelebrityMatch[] {
   if (matches.length === 0) return matches;
-  const best = matches.reduce((m, x) => (x.percent > m ? x.percent : m), 0);
-  if (best >= minPercent) return matches;
-  if (best <= 0) return matches;
-  const scale = RECALIBRATION_TARGET_PERCENT / best;
-  return matches.map((m) => ({
-    ...m,
-    percent: Math.min(
-      RECALIBRATION_CAP_PERCENT,
-      Math.max(0, Math.round(m.percent * scale))
-    ),
-  }));
+  const bestDistance = matches[0]?.distance ?? RAW_DISTANCE_GARBAGE_THRESHOLD;
+  const bestRaw = Math.max(0, Math.min(100, matches[0]?.rawPercent ?? 0));
+  const bestPercent = Math.round(
+    RECALIBRATION_BEST_MIN_PERCENT +
+      (RECALIBRATION_BEST_MAX_PERCENT - RECALIBRATION_BEST_MIN_PERCENT) *
+        (bestRaw / 100)
+  );
+  const denominator = Math.max(
+    Number.EPSILON,
+    RAW_DISTANCE_GARBAGE_THRESHOLD - bestDistance
+  );
+
+  return matches.map((match, index) => {
+    if (index === 0) return { ...match, percent: bestPercent };
+    const relative = Math.max(
+      0,
+      Math.min(
+        1,
+        (RAW_DISTANCE_GARBAGE_THRESHOLD - match.distance) / denominator
+      )
+    );
+    return {
+      ...match,
+      percent: Math.round(
+        RECALIBRATION_OTHERS_MIN_PERCENT +
+          (RECALIBRATION_OTHERS_MAX_PERCENT -
+            RECALIBRATION_OTHERS_MIN_PERCENT) *
+            relative
+      ),
+    };
+  });
 }
 
 /** Gender-only filter — opposite gender is excluded entirely. */
@@ -1079,8 +1087,8 @@ export function filterCelebrities(
 }
 
 /**
- * Rank an already-filtered pool by adjusted similarity %, descending
- * (ties broken by distance, then `id` so the order is stable).
+ * Rank an already-filtered pool by final distance. Garbage rejection and UX
+ * calibration happen after this raw ranking.
  */
 export function rankCelebrities(
   pool: CelebrityProfile[],
@@ -1089,33 +1097,28 @@ export function rankCelebrities(
 ): CelebrityMatch[] {
   return pool
     .map((celebrity) => {
-      const distance = weightedDistance(user, celebrity, options);
-      const rawPercent = distanceToPercent(distance);
+      const baseDistance = weightedDistance(user, celebrity, options);
       const fachMismatch = Boolean(
         options?.userFach && celebrity.vocalFach !== options.userFach
       );
-      const percent = fachMismatch
-        ? Math.max(0, Math.round(rawPercent * FACH_MISMATCH_SIMILARITY))
-        : rawPercent;
+      const distance =
+        baseDistance + (fachMismatch ? FACH_MISMATCH_PENALTY : 0);
+      const rawPercent = distanceToPercent(distance);
+      const percent = rawPercent;
       return { celebrity, distance, percent, rawPercent, fachMismatch };
     })
     .sort((a, b) =>
-      a.percent === b.percent
-        ? a.distance === b.distance
-          ? a.celebrity.id.localeCompare(b.celebrity.id)
-          : a.distance - b.distance
-        : b.percent - a.percent
+      a.distance === b.distance
+        ? a.celebrity.id.localeCompare(b.celebrity.id)
+        : a.distance - b.distance
     );
 }
 
-export type MatchCelebritiesOptions = DistanceOptions & {
-  /** When true (default), lift scores if nothing clears the 50% floor. */
-  recalibrateIfEmpty?: boolean;
-};
+export type MatchCelebritiesOptions = DistanceOptions;
 
 /**
- * Commercial matcher: gender-only pool, soft fach prior, weighted multi-param
- * distance → %, optional floor recalibration. Opposite gender never appears.
+ * Commercial matcher: gender-only pool → 3-D distance + fach prior → raw
+ * garbage rejection → one global eligible-cohort UX recalibration.
  */
 export function matchCelebrities(
   gender: CelebrityGender,
@@ -1125,15 +1128,16 @@ export function matchCelebrities(
   const ranked = rankCelebrities(filterCelebritiesByGender(gender), user, {
     userFach: options?.userFach,
   });
-  if (options?.recalibrateIfEmpty === false) return ranked;
-  return recalibratePercentsIfEmpty(ranked);
+  const eligible = ranked.filter(
+    (match) => match.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD
+  );
+  return recalibrateEligiblePercents(eligible);
 }
 
 /**
  * Groups an already filtered + ranked match list by `celebrity.genre`, keeping
- * only the top `perGenreLimit` (default 5) per genre. Prefers scores ≥
- * `minPercent`; if a cell is short, pads with the next-best below the floor
- * so TOP-5 stays filled whenever the pool allows. Empty genres are omitted.
+ * only the top `perGenreLimit` (default 5) eligible candidates per genre.
+ * Never pads a sparse cell with rejected candidates.
  */
 export function groupMatchesByGenre(
   matches: CelebrityMatch[],
@@ -1149,29 +1153,12 @@ function fillGenreBuckets(
   minPercent: number
 ): Partial<Record<Genre, CelebrityMatch[]>> {
   const groups: Partial<Record<Genre, CelebrityMatch[]>> = {};
-  const below: Partial<Record<Genre, CelebrityMatch[]>> = {};
   for (const match of matches) {
     const genre = match.celebrity.genre;
     if (match.percent >= minPercent) {
       const bucket = groups[genre] ?? (groups[genre] = []);
       if (bucket.length < perGenreLimit) bucket.push(match);
-    } else {
-      const pad = below[genre] ?? (below[genre] = []);
-      pad.push(match);
     }
-  }
-  for (const genre of CELEBRITY_GENRES) {
-    const bucket = groups[genre] ?? [];
-    if (bucket.length >= perGenreLimit) {
-      groups[genre] = bucket;
-      continue;
-    }
-    const pad = below[genre] ?? [];
-    for (const m of pad) {
-      if (bucket.length >= perGenreLimit) break;
-      bucket.push(m);
-    }
-    if (bucket.length > 0) groups[genre] = bucket;
   }
   return groups;
 }
@@ -1200,9 +1187,8 @@ export type DecadeGenreGroups = Partial<
 >;
 
 /**
- * Display grouping for the twin-result UI: era × genre, top-N per cell,
- * scores below `minPercent` used only to pad short cells. Empty eras/genres
- * are omitted.
+ * Display grouping for the twin-result UI: era × genre, up to top-N eligible
+ * candidates per cell. Empty eras/genres are omitted; no garbage padding.
  */
 export function groupMatchesByDecadeAndGenre(
   matches: CelebrityMatch[],

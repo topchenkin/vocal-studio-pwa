@@ -1,244 +1,198 @@
 /**
- * Sanity-check gender-only matching + style separation + ≥50% display floor.
+ * Deterministic DSP/ranking sanity suite.
  * Run: npx tsx scripts/verify-voice-match.ts
  */
 import {
   CELEBRITIES_DB,
-  matchCelebrities,
-  groupMatchesByDecadeAndGenre,
+  FACH_MISMATCH_PENALTY,
   MIN_DISPLAY_PERCENT,
-  RECALIBRATION_CAP_PERCENT,
-  recalibratePercentsIfEmpty,
+  RAW_DISTANCE_GARBAGE_THRESHOLD,
+  RECALIBRATION_BEST_MAX_PERCENT,
+  RECALIBRATION_BEST_MIN_PERCENT,
+  RECALIBRATION_OTHERS_MAX_PERCENT,
+  RECALIBRATION_OTHERS_MIN_PERCENT,
   distanceToPercent,
+  groupMatchesByDecadeAndGenre,
+  matchCelebrities,
+  rankCelebrities,
   weightedDistance,
-  FACH_MISMATCH_SIMILARITY,
+  type CelebrityProfile,
   type TimbreVector,
-  type VocalFach,
-  type CelebrityGender,
 } from "../lib/celebritiesDB";
-
-function topNames(
-  gender: CelebrityGender,
-  user: TimbreVector,
-  fach: VocalFach | null,
-  n = 3
-) {
-  return matchCelebrities(gender, user, { userFach: fach })
-    .slice(0, n)
-    .map((m) => m.celebrity.name);
-}
-
-const cleanPop: TimbreVector = {
-  timbreWeight: 78,
-  airiness: 38,
-  raspiness: 8,
-  tessituraSpan: 42,
-};
-const gritRock: TimbreVector = {
-  timbreWeight: 58,
-  airiness: 14,
-  raspiness: 78,
-  tessituraSpan: 62,
-};
-const breathy: TimbreVector = {
-  timbreWeight: 84,
-  airiness: 88,
-  raspiness: 6,
-  tessituraSpan: 24,
-};
-/** Mid-range laptop take that used to hard-filter into tiny rock pools. */
-const midNoisy: TimbreVector = {
-  timbreWeight: 70,
-  airiness: 22,
-  raspiness: 48,
-  tessituraSpan: 28,
-};
-
-const cases: Array<[string, CelebrityGender, VocalFach | null, TimbreVector]> = [
-  ["female mezzo clean pop", "female", "mezzo_soprano", cleanPop],
-  ["female mezzo grit rock", "female", "mezzo_soprano", gritRock],
-  ["female mezzo breathy", "female", "mezzo_soprano", breathy],
-  ["female contralto mid-noisy", "female", "contralto", midNoisy],
-  ["male tenor clean pop", "male", "tenor", cleanPop],
-  ["male tenor grit rock", "male", "tenor", gritRock],
-  ["male baritone grit rock", "male", "bass_baritone", gritRock],
-];
+import {
+  clampAndMap,
+  centroidHzToWeight,
+  flatnessToRaspiness,
+  zcrCountToRate,
+  zcrRateToAiriness,
+} from "../lib/timbre-features";
 
 let failed = 0;
-for (const [label, gender, fach, vec] of cases) {
-  const names = topNames(gender, vec, fach, 5);
-  console.log(label + ":", names.join(", "));
-}
 
-const popTop = topNames("female", cleanPop, "mezzo_soprano", 1)[0];
-const rockTop = topNames("female", gritRock, "mezzo_soprano", 1)[0];
-const breathTop = topNames("female", breathy, "mezzo_soprano", 1)[0];
-if (popTop === rockTop) {
-  console.error("FAIL: clean pop and grit rock share top star", popTop);
-  failed += 1;
-}
-if (popTop === breathTop) {
-  console.error("FAIL: clean pop and breathy share top star", popTop);
-  failed += 1;
-}
-
-const malePop = topNames("male", cleanPop, "tenor", 1)[0];
-const maleRock = topNames("male", gritRock, "tenor", 1)[0];
-if (malePop === maleRock) {
-  console.error("FAIL: male pop/rock share top star", malePop);
-  failed += 1;
-}
-
-// Opposite gender must never appear
-const femaleMatches = matchCelebrities("female", cleanPop);
-if (femaleMatches.some((m) => m.celebrity.gender !== "female")) {
-  console.error("FAIL: opposite gender leaked into female pool");
-  failed += 1;
-}
-
-const buckets: Record<string, number> = {};
-for (const c of CELEBRITIES_DB) {
-  const key = `${c.decade}/${c.region}/${c.genre}`;
-  buckets[key] = (buckets[key] ?? 0) + 1;
-}
-console.log("\nDB size", CELEBRITIES_DB.length);
-console.log("Buckets", buckets);
-
-const midMatches = matchCelebrities("female", midNoisy, {
-  userFach: "contralto",
-});
-const midAbove = midMatches.filter((m) => m.percent >= MIN_DISPLAY_PERCENT);
-const midPop = midAbove.filter((m) => m.celebrity.genre === "Pop").length;
-const midRock = midAbove.filter((m) => m.celebrity.genre === "Rock").length;
-console.log(
-  `\nFemale mid-noisy: above50=${midAbove.length} Pop=${midPop} Rock=${midRock}`
-);
-console.log(
-  "  top8:",
-  midMatches
-    .slice(0, 8)
-    .map((m) => `${m.celebrity.name} ${m.percent}% ${m.celebrity.genre}`)
-    .join(" | ")
-);
-if (midAbove.length < 10) {
-  console.error("FAIL: mid-noisy female should clear ≥50% for many neighbours", midAbove.length);
-  failed += 1;
-}
-if (midPop === 0) {
-  console.error("FAIL: mid-noisy female must surface Pop, not only Rock");
-  failed += 1;
-}
-
-const grouped = groupMatchesByDecadeAndGenre(
-  matchCelebrities("female", cleanPop, { userFach: "mezzo_soprano" }),
-  5
-);
-let erasWithHits = 0;
-for (const decade of ["1990s", "2000s", "2010s", "2020s"] as const) {
-  const cell = grouped[decade];
-  if (!cell) continue;
-  const popN = cell.Pop?.length ?? 0;
-  const rockN = cell.Rock?.length ?? 0;
-  if (popN + rockN > 0) erasWithHits += 1;
-  console.log(
-    `\nFemale clean — ${decade} pop`,
-    cell.Pop?.map((m) => `${m.celebrity.name} ${m.percent}%`)
-  );
-  console.log(
-    `Female clean — ${decade} rock`,
-    cell.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
-  );
-}
-if (erasWithHits < 2) {
-  console.error("FAIL: clean pop should fill at least 2 eras above 50%", erasWithHits);
-  failed += 1;
-}
-
-const cleanAbove = matchCelebrities("female", cleanPop, {
-  userFach: "mezzo_soprano",
-}).filter((m) => m.percent >= MIN_DISPLAY_PERCENT).length;
-if (cleanAbove < 20) {
-  console.error("FAIL: too few ≥50% neighbours for a normal pop vector", cleanAbove);
-  failed += 1;
-}
-
-// Recalibration must not mint 99%s
-const far: TimbreVector = {
-  timbreWeight: 5,
-  airiness: 5,
-  raspiness: 5,
-  tessituraSpan: 5,
-};
-const rawFar = CELEBRITIES_DB.filter((c) => c.gender === "male").map((celebrity) => {
-  const distance = weightedDistance(far, celebrity);
-  const rawPercent = distanceToPercent(distance);
-  return {
-    celebrity,
-    distance,
-    percent: rawPercent,
-    rawPercent,
-  };
-});
-const recal = recalibratePercentsIfEmpty(rawFar);
-const maxRecal = recal.reduce((m, x) => Math.max(m, x.percent), 0);
-console.log("\nFar-vector recal max%", maxRecal);
-if (maxRecal > RECALIBRATION_CAP_PERCENT) {
-  console.error(
-    `FAIL: recalibration minted >${RECALIBRATION_CAP_PERCENT}%`,
-    maxRecal
-  );
-  failed += 1;
-}
-if (maxRecal < MIN_DISPLAY_PERCENT) {
-  console.error("FAIL: recalibration should lift best to ≥50%", maxRecal);
-  failed += 1;
-}
-
-// Soft fach: mismatch shrinks display % by ~18%, never empties the pool
-const sameFach = matchCelebrities("male", gritRock, {
-  userFach: "bass_baritone",
-  recalibrateIfEmpty: false,
-});
-const crossFach = matchCelebrities("male", gritRock, {
-  userFach: "tenor",
-  recalibrateIfEmpty: false,
-});
-const crossHit = crossFach.find(
-  (m) => m.celebrity.vocalFach === "bass_baritone" && m.fachMismatch
-);
-if (!crossHit) {
-  console.error("FAIL: fach mismatch should still keep opposite-fach stars");
-  failed += 1;
-} else {
-  const expected = Math.round(crossHit.rawPercent * FACH_MISMATCH_SIMILARITY);
-  if (crossHit.percent !== expected) {
-    console.error(
-      "FAIL: fach mismatch percent factor",
-      crossHit.percent,
-      "!=",
-      expected
-    );
+function check(condition: boolean, message: string): void {
+  if (!condition) {
+    console.error(`FAIL: ${message}`);
     failed += 1;
   }
 }
-if (sameFach.length === 0 || crossFach.length === 0) {
-  console.error("FAIL: fach prior must never empty the DB");
-  failed += 1;
+
+function close(actual: number, expected: number, message: string): void {
+  check(Math.abs(actual - expected) < 1e-9, `${message}: ${actual} != ${expected}`);
 }
 
-for (const decade of Object.keys(grouped)) {
-  for (const genre of Object.keys(grouped[decade as keyof typeof grouped] ?? {})) {
-    const list = grouped[decade as "1990s"]?.[genre as "Pop"] ?? [];
-    if (list.length > 5) {
-      console.error("FAIL: more than 5 in a cell", decade, genre, list.length);
-      failed += 1;
+// Fixed linear normalization and strict clamping.
+close(clampAndMap(150, 150, 1500), 0, "centroid lower boundary");
+close(clampAndMap(825, 150, 1500), 50, "centroid midpoint");
+close(clampAndMap(1500, 150, 1500), 100, "centroid upper boundary");
+close(clampAndMap(-999, 0, 0.1), 0, "strict low clamp");
+close(clampAndMap(999, 0, 0.1), 100, "strict high clamp");
+check(centroidHzToWeight(150) === 0 && centroidHzToWeight(1500) === 100, "centroid map");
+check(flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100, "flatness map");
+
+// Meyda 5.6.3 returns crossing count/frame. 80 / 2048 is the actual rate.
+close(zcrCountToRate(80, 2048), 80 / 2048, "ZCR count-to-rate");
+check(zcrRateToAiriness(0) === 0, "ZCR air lower boundary");
+check(zcrRateToAiriness(0.1) === 50, "ZCR air midpoint");
+check(zcrRateToAiriness(0.2) === 100, "ZCR air upper boundary");
+check(zcrRateToAiriness(80) === 100, "ZCR air strict high clamp");
+
+const origin: TimbreVector = {
+  timbreWeight: 0,
+  airiness: 0,
+  raspiness: 0,
+};
+const tenEach = {
+  ...origin,
+  timbreWeight: 10,
+  airiness: 10,
+  raspiness: 10,
+} as CelebrityProfile;
+close(weightedDistance(origin, tenEach), 10, "weighted Euclidean sum");
+close(
+  weightedDistance(origin, { ...tenEach, airiness: 0, raspiness: 0 }),
+  Math.sqrt(0.6 * 100),
+  "60% timbre coefficient"
+);
+
+const mockBase: CelebrityProfile = {
+  id: "same",
+  name: "Same",
+  gender: "male",
+  vocalFach: "tenor",
+  genre: "Pop",
+  region: "western",
+  decade: "2010s",
+  timbreWeight: 50,
+  airiness: 50,
+  raspiness: 50,
+  tessituraSpan: 50,
+};
+const fachRank = rankCelebrities(
+  [
+    mockBase,
+    { ...mockBase, id: "cross", name: "Cross", vocalFach: "bass_baritone" },
+  ],
+  { timbreWeight: 50, airiness: 50, raspiness: 50 },
+  { userFach: "tenor" }
+);
+close(fachRank[0]?.distance ?? -1, 0, "same fach distance");
+close(fachRank[1]?.distance ?? -1, FACH_MISMATCH_PENALTY, "soft fach prior");
+
+check(distanceToPercent(5) > distanceToPercent(15), "raw similarity monotonicity");
+check(distanceToPercent(15) > distanceToPercent(30), "raw similarity monotonicity 2");
+
+const bieberLike: TimbreVector = {
+  timbreWeight: 90,
+  airiness: 52,
+  raspiness: 2,
+  tessituraSpan: 5, // deliberately irrelevant to required 3-D geometry
+};
+const deepRaspy: TimbreVector = {
+  timbreWeight: 35,
+  airiness: 10,
+  raspiness: 92,
+  tessituraSpan: 100,
+};
+const malePool = CELEBRITIES_DB.filter((c) => c.gender === "male");
+const byName = (name: string) => {
+  const star = malePool.find((c) => c.name === name);
+  if (!star) throw new Error(`Missing required DB fixture: ${name}`);
+  return star;
+};
+const bieber = byName("Justin Bieber");
+const leps = byName("Григорий Лепс");
+const kipelov = byName("Валерий Кипелов");
+
+const lightDistances = {
+  bieber: weightedDistance(bieberLike, bieber),
+  leps: weightedDistance(bieberLike, leps),
+  kipelov: weightedDistance(bieberLike, kipelov),
+};
+check(lightDistances.bieber < lightDistances.leps, "Bieber-like ranks ahead of Leps");
+check(lightDistances.bieber < lightDistances.kipelov, "Bieber-like ranks ahead of Kipelov");
+check(
+  lightDistances.kipelov > RAW_DISTANCE_GARBAGE_THRESHOLD,
+  "Kipelov rejected for light/airy/clean vector"
+);
+
+const deepDistances = {
+  bieber: weightedDistance(deepRaspy, bieber),
+  leps: weightedDistance(deepRaspy, leps),
+  kipelov: weightedDistance(deepRaspy, kipelov),
+};
+check(deepDistances.leps < deepDistances.bieber, "deep/raspy ranks Leps ahead of Bieber");
+check(deepDistances.kipelov < deepDistances.bieber, "deep/raspy ranks Kipelov ahead of Bieber");
+
+// DB semantic audit: larger timbreWeight is brighter/lighter, matching centroid.
+check(bieber.timbreWeight > leps.timbreWeight, "DB brightness direction Bieber > Leps");
+check(kipelov.timbreWeight > leps.timbreWeight, "DB bright ringing tenor > dark Leps");
+
+for (const [label, vector, fach] of [
+  ["light", bieberLike, "tenor"],
+  ["deep", deepRaspy, "bass_baritone"],
+] as const) {
+  const matches = matchCelebrities("male", vector, { userFach: fach });
+  check(matches.length > 0, `${label}: eligible cohort exists`);
+  check(
+    matches.every((m) => m.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD),
+    `${label}: garbage rejected before UX calibration`
+  );
+  check(
+    matches.every((m) => m.percent >= MIN_DISPLAY_PERCENT && m.percent <= 100),
+    `${label}: displayed percent bounds`
+  );
+  check(
+    (matches[0]?.percent ?? 0) >= RECALIBRATION_BEST_MIN_PERCENT &&
+      (matches[0]?.percent ?? 101) <= RECALIBRATION_BEST_MAX_PERCENT,
+    `${label}: best in 85-96`
+  );
+  check(
+    matches.slice(1, 5).every(
+      (m) =>
+        m.percent >= RECALIBRATION_OTHERS_MIN_PERCENT &&
+        m.percent <= RECALIBRATION_OTHERS_MAX_PERCENT
+    ),
+    `${label}: remaining top-5 in 70-85`
+  );
+  check(
+    matches.every((m, i) => i === 0 || matches[i - 1]!.distance <= m.distance),
+    `${label}: distance ordering preserved`
+  );
+
+  const grouped = groupMatchesByDecadeAndGenre(matches, 5);
+  for (const eras of Object.values(grouped)) {
+    for (const bucket of Object.values(eras ?? {})) {
+      check((bucket?.length ?? 0) <= 5, `${label}: bucket is up to five`);
+      check(
+        (bucket ?? []).every((m) => m.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD),
+        `${label}: no garbage bucket padding`
+      );
     }
   }
 }
 
-if (failed > 0) {
-  process.exit(1);
-}
-console.log(
-  "\nOK: gender-only matching + style separation + soft fach + floor recalibration"
-);
+console.log("Bieber-like distances:", lightDistances);
+console.log("Deep/raspy distances:", deepDistances);
+
+if (failed > 0) process.exit(1);
+console.log("OK: DSP normalization, 3-D ranking, fach prior, UX calibration, DB semantics");
