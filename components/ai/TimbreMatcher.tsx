@@ -4,17 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, Sparkles, Square, Stars } from "lucide-react";
 import type { MeydaFeaturesObject } from "meyda";
 import Button from "@/components/ui/Button";
-import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
+  CELEBRITY_DECADES,
   CELEBRITY_GENRES,
-  CELEBRITY_REGIONS,
-  REGION_LABEL_RU,
+  DECADE_LABEL_RU,
+  GENRE_LABEL_RU,
+  MIN_DISPLAY_PERCENT,
   VOCAL_FACH_LABEL_RU,
   classifyVocalFach,
-  groupMatchesByRegionAndGenre,
+  groupMatchesByDecadeAndGenre,
   matchCelebrities,
   type CelebrityMatch,
-  type CelebrityRegion,
   type Genre,
 } from "@/lib/celebritiesDB";
 import {
@@ -81,14 +81,6 @@ type Stage = "idle" | "recording" | "extracting" | "matching" | "done";
 
 type Props = { locked?: boolean };
 
-const GENRE_LABEL_RU: Record<Genre, string> = {
-  Pop: "Поп",
-  Rock: "Рок",
-  "Rap/Hip-Hop": "Рэп",
-  "Estrada/Chanson": "Шансон",
-  "Jazz/Soul": "Джаз",
-};
-
 const GENDERS: TimbreGender[] = ["male", "female"];
 
 const GENDER_LABEL_RU: Record<TimbreGender, string> = {
@@ -127,8 +119,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * mislabel low male voices and match them against tenors.
    */
   const [gender, setGender] = useState<TimbreGender | null>(null);
-  const [activeRegion, setActiveRegion] = useState<CelebrityRegion>("russian");
-  const [activeGenre, setActiveGenre] = useState<Genre>("Pop");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -214,8 +204,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
 
       setMeasurement(result);
-      setActiveRegion("russian");
-      setActiveGenre("Pop");
       setStage("done");
     } catch (err) {
       if (isStale(analysisId)) return;
@@ -240,8 +228,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
     setError("");
     setMeasurement(null);
-    setActiveRegion("russian");
-    setActiveGenre("Pop");
     setProgress(0);
 
     try {
@@ -430,36 +416,23 @@ export default function TimbreMatcher({ locked = false }: Props) {
     });
   }, [measurement, gender, fach]);
 
-  const groupedByRegion = useMemo(
-    () => groupMatchesByRegionAndGenre(matches, 5),
+  const groupedByDecade = useMemo(
+    () => groupMatchesByDecadeAndGenre(matches, 5, MIN_DISPLAY_PERCENT),
     [matches]
   );
 
-  const visibleRegions = useMemo(
+  const visibleDecades = useMemo(
     () =>
-      CELEBRITY_REGIONS.filter((region) => {
-        const genres = groupedByRegion[region];
+      CELEBRITY_DECADES.filter((decade) => {
+        const genres = groupedByDecade[decade];
         if (!genres) return false;
         return CELEBRITY_GENRES.some((genre) => (genres[genre]?.length ?? 0) > 0);
       }),
-    [groupedByRegion]
+    [groupedByDecade]
   );
 
-  const shownRegion: CelebrityRegion = visibleRegions.includes(activeRegion)
-    ? activeRegion
-    : (visibleRegions[0] ?? "russian");
-
-  const regionGroups = groupedByRegion[shownRegion] ?? {};
-
-  const visibleGenres = useMemo(
-    () => CELEBRITY_GENRES.filter((genre) => (regionGroups[genre]?.length ?? 0) > 0),
-    [regionGroups]
-  );
-
-  const shownGenre: Genre =
-    visibleGenres.includes(activeGenre) ? activeGenre : (visibleGenres[0] ?? "Pop");
-
-  const topMatch = matches[0];
+  const topMatch =
+    matches[0] && matches[0].percent >= MIN_DISPLAY_PERCENT ? matches[0] : null;
   const isBusy = stage === "recording" || stage === "extracting" || stage === "matching";
 
   if (locked) {
@@ -591,7 +564,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
             </p>
             {topMatch && (
               <p className="mt-3 text-base text-studio-text">
-                Абсолютный мэтч:{" "}
+                Ближайший двойник:{" "}
                 <span className="font-semibold text-pink-300">
                   {topMatch.celebrity.name}
                 </span>{" "}
@@ -600,106 +573,51 @@ export default function TimbreMatcher({ locked = false }: Props) {
                   {topMatch.percent}%
                 </span>
                 )
+                <span className="text-studio-muted">
+                  {" "}
+                  · {DECADE_LABEL_RU[topMatch.celebrity.decade]},{" "}
+                  {GENRE_LABEL_RU[topMatch.celebrity.genre]}
+                </span>
               </p>
             )}
           </div>
 
-          <VoiceRadarChart
-            user={{
-              timbreWeight: measurement.userWeight,
-              airiness: measurement.userAiriness,
-              raspiness: measurement.userRaspiness,
-            }}
-            match={
-              topMatch
-                ? {
-                    name: topMatch.celebrity.name,
-                    timbreWeight: topMatch.celebrity.timbreWeight,
-                    airiness: topMatch.celebrity.airiness,
-                    raspiness: topMatch.celebrity.raspiness,
-                  }
-                : null
-            }
-          />
-
-          {visibleRegions.length === 0 ? (
+          {visibleDecades.length === 0 ? (
             <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
-              Нет исполнителей с типом голоса «{VOCAL_FACH_LABEL_RU[fach]}».
+              Похожих голосов с совпадением от {MIN_DISPLAY_PERCENT}% не нашлось.
             </p>
           ) : (
-            <div>
-              <div className="mb-2 flex gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
-                {visibleRegions.map((region) => (
-                  <button
-                    key={region}
-                    type="button"
-                    onClick={() => {
-                      setActiveRegion(region);
-                      setActiveGenre("Pop");
-                    }}
-                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                      shownRegion === region
-                        ? "bg-studio-accent/20 text-studio-accent-light"
-                        : "text-studio-muted hover:text-studio-text"
-                    }`}
+            <div className="space-y-4">
+              {visibleDecades.map((decade) => {
+                const genreGroups = groupedByDecade[decade] ?? {};
+                const visibleGenres = CELEBRITY_GENRES.filter(
+                  (genre) => (genreGroups[genre]?.length ?? 0) > 0
+                );
+                if (visibleGenres.length === 0) return null;
+                return (
+                  <div
+                    key={decade}
+                    className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4"
                   >
-                    {REGION_LABEL_RU[region]}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
-                {visibleGenres.map((genre) => {
-                  const count = regionGroups[genre]?.length ?? 0;
-                  return (
-                    <button
-                      key={genre}
-                      type="button"
-                      onClick={() => setActiveGenre(genre)}
-                      className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        shownGenre === genre
-                          ? "bg-studio-accent/20 text-studio-accent-light"
-                          : "text-studio-muted hover:text-studio-text"
+                    <h3 className="mb-3 font-display text-lg font-semibold text-studio-text">
+                      {DECADE_LABEL_RU[decade]}
+                    </h3>
+                    <div
+                      className={`grid gap-5 ${
+                        visibleGenres.length > 1 ? "sm:grid-cols-2" : ""
                       }`}
                     >
-                      {GENRE_LABEL_RU[genre]}
-                      <span className="ml-1.5 tabular-nums opacity-70">
-                        ({count})
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
-                <h3 className="mb-3 text-sm font-semibold text-studio-text">
-                  Топ совпадений — {REGION_LABEL_RU[shownRegion]},{" "}
-                  {GENRE_LABEL_RU[shownGenre]}
-                </h3>
-                <ul className="space-y-4">
-                  {(regionGroups[shownGenre] ?? []).map((m, i) => (
-                    <li key={m.celebrity.id}>
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
-                          <span className="mr-1.5 text-studio-muted">
-                            {i + 1}.
-                          </span>
-                          {m.celebrity.name}
-                        </p>
-                        <span className="shrink-0 text-xs font-semibold tabular-nums text-studio-accent-light">
-                          {m.percent}% сходства
-                        </span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-studio-bg">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent"
-                          style={{ width: `${Math.max(4, m.percent)}%` }}
+                      {visibleGenres.map((genre) => (
+                        <EraGenreList
+                          key={genre}
+                          genre={genre}
+                          matches={genreGroups[genre] ?? []}
                         />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -712,6 +630,43 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
     </section>
+  );
+}
+
+function EraGenreList({
+  genre,
+  matches,
+}: {
+  genre: Genre;
+  matches: CelebrityMatch[];
+}) {
+  return (
+    <div>
+      <h4 className="mb-2.5 text-sm font-semibold text-studio-muted">
+        {GENRE_LABEL_RU[genre]}
+      </h4>
+      <ul className="space-y-3">
+        {matches.map((m, i) => (
+          <li key={m.celebrity.id}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
+                <span className="mr-1.5 text-studio-muted">{i + 1}.</span>
+                {m.celebrity.name}
+              </p>
+              <span className="shrink-0 text-xs font-semibold tabular-nums text-studio-accent-light">
+                {m.percent}%
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-studio-bg">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent"
+                style={{ width: `${Math.max(4, m.percent)}%` }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

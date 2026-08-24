@@ -5,7 +5,8 @@
 import {
   CELEBRITIES_DB,
   matchCelebrities,
-  groupMatchesByRegionAndGenre,
+  groupMatchesByDecadeAndGenre,
+  MIN_DISPLAY_PERCENT,
   type TimbreVector,
   type VocalFach,
   type CelebrityGender,
@@ -77,27 +78,51 @@ if (malePop === maleRock) {
 
 const buckets: Record<string, number> = {};
 for (const c of CELEBRITIES_DB) {
-  const key = `${c.region}/${c.genre}`;
+  const key = `${c.decade}/${c.region}/${c.genre}`;
   buckets[key] = (buckets[key] ?? 0) + 1;
 }
 console.log("\nDB size", CELEBRITIES_DB.length);
 console.log("Buckets", buckets);
 
-const grouped = groupMatchesByRegionAndGenre(
+const grouped = groupMatchesByDecadeAndGenre(
   matchCelebrities("female", "mezzo_soprano", cleanPop),
   5
 );
-console.log("\nFemale mezzo clean — RU pop", grouped.russian?.Pop?.map((m) => m.celebrity.name));
-console.log("Female mezzo clean — RU rock", grouped.russian?.Rock?.map((m) => m.celebrity.name));
-console.log("Female mezzo clean — W pop", grouped.western?.Pop?.map((m) => m.celebrity.name));
-console.log("Female mezzo clean — W rock", grouped.western?.Rock?.map((m) => m.celebrity.name));
+for (const decade of ["1990s", "2000s", "2010s", "2020s"] as const) {
+  const cell = grouped[decade];
+  if (!cell) continue;
+  console.log(
+    `\nFemale mezzo clean — ${decade} pop`,
+    cell.Pop?.map((m) => `${m.celebrity.name} ${m.percent}%`)
+  );
+  console.log(
+    `Female mezzo clean — ${decade} rock`,
+    cell.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
+  );
+}
 
-const groupedRock = groupMatchesByRegionAndGenre(
+const groupedRock = groupMatchesByDecadeAndGenre(
   matchCelebrities("female", "mezzo_soprano", gritRock),
   5
 );
-console.log("\nFemale mezzo grit — W rock", groupedRock.western?.Rock?.map((m) => m.celebrity.name));
-console.log("Female mezzo grit — RU rock", groupedRock.russian?.Rock?.map((m) => m.celebrity.name));
+console.log(
+  "\nFemale mezzo grit — 2010s rock",
+  groupedRock["2010s"]?.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
+);
+
+for (const decade of Object.keys(grouped)) {
+  for (const genre of Object.keys(grouped[decade as keyof typeof grouped] ?? {})) {
+    const list = grouped[decade as "1990s"]?.[genre as "Pop"] ?? [];
+    if (list.some((m) => m.percent < MIN_DISPLAY_PERCENT)) {
+      console.error("FAIL: displayed match below 50%", decade, genre);
+      failed += 1;
+    }
+    if (list.length > 5) {
+      console.error("FAIL: more than 5 in a cell", decade, genre, list.length);
+      failed += 1;
+    }
+  }
+}
 
 if (failed > 0) {
   process.exit(1);
