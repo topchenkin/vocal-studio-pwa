@@ -976,11 +976,19 @@ export function weightedDistance(user: TimbreVector, star: CelebrityProfile): nu
  * Distance → display percentage. Exponential so a 10-point style gap is
  * visible (the old linear map over ~173 made every mid-cluster star look
  * like 90%+).
+ *
+ * TAU ≈ 52: a solid nearest neighbour at weighted distance ~36 still clears
+ * the 50% UI floor (`exp(-36/52) ≈ 0.50`). TAU=36 pushed almost every real
+ * take (especially with airiness stuck at 0) below the floor → empty UI.
  */
+export const DISTANCE_PERCENT_TAU = 52;
+
 export function distanceToPercent(distance: number): number {
-  const TAU = 36;
   if (!Number.isFinite(distance) || distance <= 0) return 100;
-  return Math.max(0, Math.min(100, Math.round(100 * Math.exp(-distance / TAU))));
+  return Math.max(
+    0,
+    Math.min(100, Math.round(100 * Math.exp(-distance / DISTANCE_PERCENT_TAU)))
+  );
 }
 
 /** STRICT filter: only profiles whose gender AND vocalFach both match. */

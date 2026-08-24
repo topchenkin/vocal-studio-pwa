@@ -18,7 +18,7 @@
  *
  * Axes (all 0-100, FIXED calibration — never per-take min/max):
  *   timbreWeight ← spectral centroid (Hz, log map), blended median + p75
- *   airiness     ← high-frequency energy ratio (4–12 kHz), not ZCR
+ *   airiness     ← high-frequency energy ratio (2.5–10 kHz), not ZCR
  *   raspiness    ← spectral flatness, blended median + p75 so grit *moments*
  *                  (rock rasp, belt distortion) actually move the vector
  *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
@@ -30,7 +30,7 @@
  * Air used to be mapped from zero-crossing rate. That is almost always 0 for
  * sung vowels: a 150 Hz chest tone at 44.1 kHz has ZCR ≈ 0.007, below the
  * old 0.015 floor, and ZCR mostly tracks F0 rather than breath. Breath / air
- * lives in the 4–12 kHz band.
+ * lives in the upper mid band (~2.5–10 kHz on consumer mics).
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/match-voice/route.ts`,
  * `lib/neural-voice-match.ts`, `lib/singing-gender.ts`, `lib/voice-embed.ts`
@@ -42,11 +42,12 @@ export type TimbreGender = "female" | "male";
 /**
  * Frames quieter than this (Meyda's `rms`, a 0..1 amplitude-domain value) are
  * treated as silence/room-noise and skipped so they don't drag the medians
- * around. ~0.012 is roughly -38 dBFS — quiet room noise / breathing on a
- * typical mic gain, well below actual singing. Do NOT raise this enough to
- * reject normal (even quiet) singing.
+ * around. ~0.004 ≈ -48 dBFS — above typical room hiss on a laptop mic, but
+ * low enough that quiet / normal singing (often 0.006–0.02) still accumulates.
+ * The previous 0.012 floor forced students to shout before any frames passed.
+ * Keep in sync with `assessVocalPresence` (~0.0035 active threshold).
  */
-export const RMS_NOISE_FLOOR = 0.012;
+export const RMS_NOISE_FLOOR = 0.004;
 
 /**
  * Minimum number of above-noise-floor frames required before we trust the
@@ -122,25 +123,29 @@ export const FLATNESS_RASP_MAX = 0.25;
 /**
  * High-frequency energy ratio → airiness (0-100).
  *
- * `hfRatio` is energy in 4–12 kHz divided by energy in 80 Hz–12 kHz, from
- * Meyda's amplitude spectrum (or an equivalent FFT). Dense chest vowels sit
- * ~0.02–0.08; mixed / light ~0.10–0.18; breathy pop ~0.22–0.40.
+ * `hfRatio` is energy in the air band divided by energy in 80 Hz–airHi, from
+ * Meyda's amplitude spectrum (or an equivalent FFT).
  *
- *   0.03 → 0     (dense)
- *   0.12 → 35
- *   0.28 → 100   (very breathy)
+ * Band starts at 2.5 kHz (not 4 kHz): consumer / laptop mics roll off hard
+ * above ~6–8 kHz, and breath / air cues for amateur singing live mostly in
+ * 2.5–6 kHz. With a 4 kHz floor almost every take mapped to ratio ≪ 0.03 →
+ * airiness stuck at 0/100.
+ *
+ *   0.008 → 0    (dense chest)
+ *   0.06  → ~35
+ *   0.22  → 100  (very breathy)
  */
-export const HF_AIR_MIN = 0.03;
-export const HF_AIR_MAX = 0.28;
-export const HF_AIR_BAND_LO_HZ = 4000;
-export const HF_AIR_BAND_HI_HZ = 12000;
+export const HF_AIR_MIN = 0.008;
+export const HF_AIR_MAX = 0.22;
+export const HF_AIR_BAND_LO_HZ = 2500;
+export const HF_AIR_BAND_HI_HZ = 10000;
 
 /**
  * Calibration range for zero-crossing RATE → `airiness` (0-100).
  * Fallback only, when no amplitude spectrum is available.
  */
-export const ZCR_AIR_MIN = 0.004;
-export const ZCR_AIR_MAX = 0.08;
+export const ZCR_AIR_MIN = 0.003;
+export const ZCR_AIR_MAX = 0.06;
 
 /**
  * Meyda's `spectralCentroid` is `mu(1, ampSpectrum)` — the amplitude-weighted
@@ -208,7 +213,13 @@ export function amplitudeSpectrumToHfRatio(
   fftSize: number
 ): number {
   if (!spectrum.length || sampleRate <= 0 || fftSize <= 0) return 0;
-  const binHz = sampleRate / fftSize;
+  // Meyda's ampSpectrum is bufferSize/2 (or /2+1). Prefer an fftSize that
+  // matches the supplied spectrum so a wrong bufferSize can't map every bin
+  // into the voiced band and force airiness to 0.
+  const inferredFft = Math.max(2, (spectrum.length - 1) * 2);
+  const resolvedFft =
+    Math.abs(inferredFft - fftSize) <= 2 ? fftSize : Math.max(fftSize, inferredFft);
+  const binHz = sampleRate / resolvedFft;
   const nyquist = sampleRate / 2;
   const airHi = Math.min(HF_AIR_BAND_HI_HZ, nyquist);
   let voiced = 0;
@@ -216,7 +227,8 @@ export function amplitudeSpectrumToHfRatio(
   for (let i = 1; i < spectrum.length; i += 1) {
     const hz = i * binHz;
     if (hz < 80 || hz > airHi) continue;
-    const mag = spectrum[i] ?? 0;
+    const mag = Math.abs(spectrum[i] ?? 0);
+    if (!Number.isFinite(mag)) continue;
     const energy = mag * mag;
     if (hz < HF_AIR_BAND_LO_HZ) voiced += energy;
     else air += energy;
@@ -267,6 +279,9 @@ export const WEIGHT_MEDIAN_MIX = 0.45;
 export const WEIGHT_P75_MIX = 0.55;
 export const RASP_MEDIAN_MIX = 0.3;
 export const RASP_P75_MIX = 0.7;
+/** Air: median = stable colour, p75 = breathy peaks / consonants. */
+export const AIR_MEDIAN_MIX = 0.4;
+export const AIR_P75_MIX = 0.6;
 
 /** Robust summary of a single take — medians plus style-sensitive tails. */
 export type VoiceMeasurement = {
@@ -399,12 +414,28 @@ export class VoiceMeasurementAccumulator {
     const p75Flatness = percentile(this.flatness, 0.75);
     const medianZcrRate = median(this.zcrRates);
     const medianHfRatio = median(this.hfRatios);
+    const p75HfRatio = percentile(this.hfRatios, 0.75);
     const p25Hz = percentile(this.pitchHz, 0.25);
     const p75Hz = percentile(this.pitchHz, 0.75);
-    const userAiriness =
-      this.hfRatios.length > 0
-        ? hfRatioToAiriness(medianHfRatio)
-        : zcrRateToAiriness(medianZcrRate);
+    // Prefer HF-ratio (breath lives there). Blend median + p75 so breathy
+    // consonants / airy peaks move the axis. If the spectrum path produced
+    // only near-zero ratios (old 4 kHz floor bug), fall back to ZCR rather
+    // than locking airiness at 0 while hfRatios.length > 0.
+    let userAiriness: number;
+    if (this.hfRatios.length > 0) {
+      const fromHf = Math.round(
+        AIR_MEDIAN_MIX * hfRatioToAiriness(medianHfRatio) +
+          AIR_P75_MIX * hfRatioToAiriness(p75HfRatio)
+      );
+      if (fromHf > 0 || this.zcrRates.length === 0) {
+        userAiriness = fromHf;
+      } else {
+        const fromZcr = zcrRateToAiriness(medianZcrRate);
+        userAiriness = Math.round(0.35 * fromHf + 0.65 * fromZcr);
+      }
+    } else {
+      userAiriness = zcrRateToAiriness(medianZcrRate);
+    }
 
     const userWeight = Math.round(
       WEIGHT_MEDIAN_MIX * centroidHzToWeight(medianCentroidHz) +
@@ -426,7 +457,7 @@ export class VoiceMeasurementAccumulator {
       medianZcrRate,
       medianHfRatio,
       userWeight: Math.max(0, Math.min(100, userWeight)),
-      userAiriness,
+      userAiriness: Math.max(0, Math.min(100, userAiriness)),
       userRaspiness: Math.max(0, Math.min(100, userRaspiness)),
       tessituraSpan: pitchIqrToSpan(p25Hz, p75Hz),
       frameCount: this.frames,

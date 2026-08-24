@@ -198,7 +198,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       const result = accumulator.finalize();
       if (!result) {
         throw new Error(
-          "Звук не распознан, пойте громче — не хватило голосового сигнала для анализа тембра."
+          "Звук не распознан — спойте ближе к микрофону пару фраз на обычной громкости (кричать не нужно)."
         );
       }
       if (isStale(analysisId)) return;

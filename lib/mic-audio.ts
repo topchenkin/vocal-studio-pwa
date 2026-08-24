@@ -37,9 +37,13 @@ export function singingMicConstraints(): MediaTrackConstraints {
   };
 }
 
-/** Linear gain applied after the mic node. ~12 dB on iOS, unity elsewhere. */
+/**
+ * Linear gain after the mic node. iOS still needs ~12 dB (Voice Processing
+ * ducks hard). Elsewhere a mild +6 dB helps quiet / laptop mics clear the
+ * RMS voiced gate without forcing students to shout.
+ */
 export function singingInputGainValue(): number {
-  return isAppleWebKit() ? 4 : 1;
+  return isAppleWebKit() ? 4 : 2;
 }
 
 /**

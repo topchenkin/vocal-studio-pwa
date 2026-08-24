@@ -88,9 +88,13 @@ const grouped = groupMatchesByDecadeAndGenre(
   matchCelebrities("female", "mezzo_soprano", cleanPop),
   5
 );
+let erasWithHits = 0;
 for (const decade of ["1990s", "2000s", "2010s", "2020s"] as const) {
   const cell = grouped[decade];
   if (!cell) continue;
+  const popN = cell.Pop?.length ?? 0;
+  const rockN = cell.Rock?.length ?? 0;
+  if (popN + rockN > 0) erasWithHits += 1;
   console.log(
     `\nFemale mezzo clean — ${decade} pop`,
     cell.Pop?.map((m) => `${m.celebrity.name} ${m.percent}%`)
@@ -99,6 +103,18 @@ for (const decade of ["1990s", "2000s", "2010s", "2020s"] as const) {
     `Female mezzo clean — ${decade} rock`,
     cell.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
   );
+}
+if (erasWithHits < 2) {
+  console.error("FAIL: clean pop should fill at least 2 eras above 50%", erasWithHits);
+  failed += 1;
+}
+
+const cleanAbove = matchCelebrities("female", "mezzo_soprano", cleanPop).filter(
+  (m) => m.percent >= MIN_DISPLAY_PERCENT
+).length;
+if (cleanAbove < 20) {
+  console.error("FAIL: too few ≥50% neighbours for a normal pop vector", cleanAbove);
+  failed += 1;
 }
 
 const groupedRock = groupMatchesByDecadeAndGenre(
