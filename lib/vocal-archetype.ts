@@ -129,6 +129,11 @@ export function deriveVocalArchetype(
 }
 
 const BIN_INDEX: Record<FeatureBin, number> = { low: 0, mid: 1, high: 2 };
+const BIN_CENTRE: Record<FeatureBin, number> = {
+  low: 16.5,
+  mid: 50,
+  high: 83.5,
+};
 const DECADE_INDEX: Record<CelebrityProfile["decade"], number> = {
   "1990s": 0,
   "2000s": 1,
@@ -170,11 +175,18 @@ export function selectArchetypeRepresentatives(
       const categoryDistance =
         Math.abs(BIN_INDEX[brightness] - BIN_INDEX[options.brightness]) +
         Math.abs(BIN_INDEX[rasp] - BIN_INDEX[options.rasp]);
-      return { star, categoryDistance };
+      // Sparse catalogue cells can give every eligible singer the same
+      // categorical distance. Use the hand-authored values only as a stable
+      // tie-break inside that nearest category, never as a similarity score.
+      const manualValueDistance =
+        Math.abs(star.timbreWeight - BIN_CENTRE[options.brightness]) +
+        Math.abs(star.raspiness - BIN_CENTRE[options.rasp]);
+      return { star, categoryDistance, manualValueDistance };
     })
     .sort(
       (a, b) =>
         a.categoryDistance - b.categoryDistance ||
+        a.manualValueDistance - b.manualValueDistance ||
         DECADE_INDEX[b.star.decade] - DECADE_INDEX[a.star.decade] ||
         a.star.id.localeCompare(b.star.id)
     )

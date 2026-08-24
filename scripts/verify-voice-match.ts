@@ -20,6 +20,7 @@ import {
   selectArchetypeRepresentatives,
 } from "../lib/vocal-archetype";
 import {
+  VoiceMeasurementAccumulator,
   clampAndMap,
   centroidHzToWeight,
   flatnessToRaspiness,
@@ -94,6 +95,78 @@ check(
   changedGender.fach === "contralto" &&
     changedGender.name === "Драматический контральто",
   "archetype derives entirely from stored metrics and selected gender"
+);
+
+const syntheticTakes = {
+  A: deriveVocalArchetype("male", 190, 90, 10),
+  B: deriveVocalArchetype("male", 190, 10, 90),
+  C: deriveVocalArchetype("male", 190, 50, 50),
+};
+check(
+  syntheticTakes.A.name === "Звонкий тенор" &&
+    syntheticTakes.B.name === "Хриплый тенор" &&
+    syntheticTakes.C.name === "Характерный тенор",
+  "opposite A/B/C feature vectors produce distinct tenor archetypes"
+);
+check(
+  Object.values(syntheticTakes).every((take) => take.fach === "tenor"),
+  "A/B/C remain inside exact male tenor Fach"
+);
+
+const syntheticRepresentatives = Object.fromEntries(
+  Object.entries(syntheticTakes).map(([key, take]) => [
+    key,
+    selectArchetypeRepresentatives({
+      gender: "male",
+      fach: take.fach,
+      brightness: take.brightness,
+      rasp: take.rasp,
+      region: "western",
+      genre: "Pop",
+      limit: 5,
+    }),
+  ])
+) as Record<keyof typeof syntheticTakes, CelebrityProfile[]>;
+const representativeIds = (key: keyof typeof syntheticTakes) =>
+  syntheticRepresentatives[key].map((star) => star.id).join(",");
+check(
+  representativeIds("A") !== representativeIds("B"),
+  "bright-clean and dark-raspy tenor representative ordering/lists differ"
+);
+check(
+  Object.values(syntheticRepresentatives)
+    .flat()
+    .every((star) => star.gender === "male" && star.vocalFach === "tenor"),
+  "A/B/C representative fallback never leaves exact gender and Fach"
+);
+
+function measuredTake(centroidHz: number, flatness: number) {
+  const sampleRate = 48_000;
+  const bufferSize = 2_048;
+  const centroidBin = (centroidHz * bufferSize) / sampleRate;
+  const accumulator = new VoiceMeasurementAccumulator(sampleRate, bufferSize);
+  for (let frame = 0; frame < 20; frame += 1) {
+    accumulator.addFrame(centroidBin, 0.02, 190 + (frame % 3), flatness);
+  }
+  return accumulator.finalize();
+}
+
+const firstSequentialTake = measuredTake(1_800, 0.09);
+const secondSequentialTake = measuredTake(300, 0.005);
+check(
+  firstSequentialTake?.userWeight === 89 &&
+    firstSequentialTake.userRaspiness === 90,
+  "first sequential accumulator records bright/raspy data"
+);
+check(
+  secondSequentialTake?.userWeight === 8 &&
+    secondSequentialTake.userRaspiness === 5,
+  "second sequential accumulator contains only fresh dark/clean data"
+);
+check(
+  firstSequentialTake?.frameCount === 20 &&
+    secondSequentialTake?.frameCount === 20,
+  "per-take feature frame arrays reset instead of accumulating"
 );
 
 const fixture: CelebrityProfile[] = [
@@ -196,10 +269,45 @@ const componentSource = readFileSync(
   new URL("../components/ai/TimbreMatcher.tsx", import.meta.url),
   "utf8"
 );
+const captureSource = readFileSync(
+  new URL("../lib/pcm-capture.ts", import.meta.url),
+  "utf8"
+);
 check(!componentSource.includes(".percent"), "UI does not render match percentages");
 check(!componentSource.includes("Ближайший двойник"), "UI makes no celebrity-match claim");
+check(
+  componentSource.includes("setMeasurement(null)") &&
+    componentSource.indexOf("setMeasurement(null)") <
+      componentSource.indexOf("getSingingMicStream()"),
+  "previous result is cleared before a new microphone capture"
+);
+check(
+  !componentSource.includes("localStorage") &&
+    !componentSource.includes("sessionStorage"),
+  "component does not persist audio or analysis results"
+);
+check(
+  captureSource.includes("const chunks: TimedChunk[] = [];") &&
+    captureSource.includes("chunks.length = 0;"),
+  "PCM chunks are session-local and cleared on stop/abort"
+);
 
 if (failed > 0) process.exit(1);
 console.log(
-  "OK: normalization, Fach, bins, archetype names and reference filtering"
+  `A ${syntheticTakes.A.name}: ${syntheticRepresentatives.A
+    .map((star) => star.name)
+    .join(", ")}`
+);
+console.log(
+  `B ${syntheticTakes.B.name}: ${syntheticRepresentatives.B
+    .map((star) => star.name)
+    .join(", ")}`
+);
+console.log(
+  `C ${syntheticTakes.C.name}: ${syntheticRepresentatives.C
+    .map((star) => star.name)
+    .join(", ")}`
+);
+console.log(
+  "OK: A/B/C archetypes, categorical representatives and sequential-take isolation"
 );

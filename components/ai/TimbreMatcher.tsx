@@ -36,6 +36,7 @@ import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
 const REPRESENTATIVES_PER_GENRE = 5;
+let nextAnalysisId = 0;
 
 type Stage = "idle" | "recording" | "extracting" | "done";
 type Props = { locked?: boolean };
@@ -46,11 +47,24 @@ const GENDER_LABEL_RU: Record<TimbreGender, string> = {
   female: "Женский",
 };
 
+function pcmFingerprint(audioBuffer: AudioBuffer): string {
+  const samples = audioBuffer.getChannelData(0);
+  const stride = Math.max(1, Math.floor(samples.length / 2048));
+  let hash = 2166136261;
+  for (let index = 0; index < samples.length; index += stride) {
+    const quantized = Math.round((samples[index] ?? 0) * 32767);
+    hash ^= quantized & 0xffff;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 export default function TimbreMatcher({ locked = false }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [measurement, setMeasurement] = useState<VoiceMeasurement | null>(null);
+  const [activeTakeId, setActiveTakeId] = useState<number | null>(null);
   const [gender, setGender] = useState<TimbreGender | null>(null);
   const [regionTab, setRegionTab] =
     useState<CelebrityRegion>("russian");
@@ -109,6 +123,13 @@ export default function TimbreMatcher({ locked = false }: Props) {
       }
 
       console.info("[DSP_DEBUG]", {
+        analysisId,
+        pcm: {
+          fingerprint: pcmFingerprint(audioBuffer),
+          sampleRate: audioBuffer.sampleRate,
+          samples: audioBuffer.length,
+          durationSeconds: audioBuffer.duration,
+        },
         centroidHz: result.medianCentroidHz,
         spectralFlatness: result.medianFlatness,
         normalized: {
@@ -151,8 +172,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
   const start = async () => {
     if (busyRef.current || stage === "recording" || !gender) return;
     busyRef.current = true;
-    const analysisId = analysisIdRef.current + 1;
+    const analysisId = ++nextAnalysisId;
     analysisIdRef.current = analysisId;
+    setActiveTakeId(analysisId);
     setError("");
     setMeasurement(null);
     setProgress(0);
@@ -340,11 +362,16 @@ export default function TimbreMatcher({ locked = false }: Props) {
       </div>
 
       {stage === "recording" && (
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-studio-bg">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent transition-all"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="mt-4">
+          <p className="mb-2 text-center text-xs text-studio-muted">
+            Записывается дубль №{activeTakeId}
+          </p>
+          <div className="h-2 overflow-hidden rounded-full bg-studio-bg">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
         </div>
       )}
 
@@ -352,7 +379,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
         <div className="mt-5 rounded-2xl bg-studio-bg/80 px-4 py-7 text-center ring-1 ring-studio-border">
           <p className="font-medium text-studio-text">Считаем параметры голоса…</p>
           <p className="mt-1 text-sm text-studio-muted">
-            Pitchfinder/YIN и Meyda обрабатывают сохранённый в памяти PCM локально.
+            Дубль №{activeTakeId}: Pitchfinder/YIN и Meyda обрабатывают свежий
+            PCM локально.
           </p>
         </div>
       )}
@@ -367,7 +395,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
               {archetype.name}
             </h3>
             <p className="mt-2 text-sm text-studio-muted">
-              Ориентировочная интерпретация по этой записи
+              Ориентировочная интерпретация по дублю №{activeTakeId}
             </p>
           </div>
 
