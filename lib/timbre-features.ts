@@ -55,21 +55,17 @@ export const RMS_NOISE_FLOOR = 0.004;
  * at ~44.1kHz that's a new frame roughly every ~46ms (~21 frames/sec), so 30
  * frames ≈ 1.4s of real, non-silent singing.
  */
-export const MIN_VOICED_FRAMES = 30;
+/**
+ * ~0.7s of non-silent frames at ~21 fps. Kept low so quiet / soft singing
+ * still finalises; extreme silence is caught by vocal-presence instead.
+ */
+export const MIN_VOICED_FRAMES = 16;
 
 /**
- * Minimum number of *pitched* frames (frames where YIN additionally found an
- * F0) required before `medianHz` is trustworthy enough to classify a Vocal
- * Fach from. Deliberately smaller than `MIN_VOICED_FRAMES` — not every voiced
- * frame carries a clean, YIN-detectable pitch (breath noise, consonants) —
- * but still ~1s of clearly pitched singing, which rejects an all-noise take.
- *
- * These two gates are DECOUPLED on purpose: a frame that is loud enough but
- * unpitched still contributes centroid / flatness / zcr samples. Coupling
- * them is what used to produce the bogus "звук не распознан" rejection on
- * perfectly normal singing. F0 is accumulated ONLY from YIN-success frames.
+ * Minimum pitched frames for a usable median F0 / tessitura. Decoupled from
+ * voiced frames so loud-but-noisy consonants still contribute spectra.
  */
-export const MIN_PITCHED_FRAMES = 20;
+export const MIN_PITCHED_FRAMES = 12;
 
 /**
  * Calibration range for spectral centroid → `timbreWeight` (0-100).
@@ -271,17 +267,18 @@ export function pitchIqrToSpan(p25Hz: number, p75Hz: number): number {
 }
 
 /**
- * Matching axes blend median (stable colour) with p75 (style peaks).
- * Grit/brightness of rock vs breathy pop lives in the upper tail — a pure
- * median of 10 s of vowels always looked like the same clean pop take.
+ * Matching axes blend median (stable colour) with a lighter p75 (style peaks).
+ * Rasp used to be 30/70 median/p75 — mic hiss spikes flattened the spectrum
+ * and pushed almost every laptop take into “rock grit” territory. Median-led
+ * rasp keeps grit when it is sustained, without inventing rasp from noise.
  */
-export const WEIGHT_MEDIAN_MIX = 0.45;
-export const WEIGHT_P75_MIX = 0.55;
-export const RASP_MEDIAN_MIX = 0.3;
-export const RASP_P75_MIX = 0.7;
+export const WEIGHT_MEDIAN_MIX = 0.55;
+export const WEIGHT_P75_MIX = 0.45;
+export const RASP_MEDIAN_MIX = 0.7;
+export const RASP_P75_MIX = 0.3;
 /** Air: median = stable colour, p75 = breathy peaks / consonants. */
-export const AIR_MEDIAN_MIX = 0.4;
-export const AIR_P75_MIX = 0.6;
+export const AIR_MEDIAN_MIX = 0.55;
+export const AIR_P75_MIX = 0.45;
 
 /** Robust summary of a single take — medians plus style-sensitive tails. */
 export type VoiceMeasurement = {

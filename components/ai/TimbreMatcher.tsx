@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Sparkles, Square, Stars } from "lucide-react";
-import type { MeydaFeaturesObject } from "meyda";
+import { Mic, Square, Stars } from "lucide-react";
 import Button from "@/components/ui/Button";
 import {
   CELEBRITY_DECADES,
@@ -18,64 +17,19 @@ import {
   type Genre,
 } from "@/lib/celebritiesDB";
 import {
-  VoiceMeasurementAccumulator,
   type TimbreGender,
   type VoiceMeasurement,
 } from "@/lib/timbre-features";
+import { analyzeVoiceBuffer } from "@/lib/analyze-voice-buffer";
 import { assessVocalPresence } from "@/lib/vocal-presence";
-import { createYinDetector, type PitchDetectorFn } from "@/lib/pitch";
 import {
   startContextPcmCapture,
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
-import {
-  connectAnalyserToDestination,
-  getSingingMicStream,
-  readAnalyserTimeDomain,
-  singingInputGainValue,
-} from "@/lib/mic-audio";
+import { getSingingMicStream } from "@/lib/mic-audio";
 import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
-/**
- * Power-of-two analysis window shared by BOTH detectors running on every
- * frame: Meyda (spectralCentroid / spectralFlatness / zcr / rms) AND
- * pitchfinder's YIN (fed raw PCM tapped from a parallel AnalyserNode — see
- * the analyzer callback below; YIN deliberately does NOT use Meyda's own
- * `buffer` feature, which is the *windowed*, not raw, signal and badly
- * degrades pitch detection). 2048 samples ≈ 46ms @44.1kHz — long enough to
- * contain 2+ full periods even of a low male chest voice (~85Hz → ~520
- * samples/period), which YIN needs for a reliable F0 read, while still short
- * enough to gate out brief silences cleanly.
- */
-const ANALYSIS_BUFFER_SIZE = 2048;
-/**
- * Window size of the separate raw-PCM tap that feeds YIN — deliberately LARGER
- * than Meyda's frame.
- *
- * pitchfinder's YIN rounds its input down to the nearest power of two and then
- * only searches lags up to a QUARTER of that (`yinBufferLength = bufferSize/2`,
- * lags `2..yinBufferLength`). With a 2048-sample tap that caps the usable lag
- * at 511 samples, and — because YIN's cumulative-mean normalisation seeds
- * `yinBuffer[1] = 1` — the difference function of a low, slowly-varying voice
- * never gets large enough for the 0.1 threshold to trigger at the true lag.
- * Measured on synthetic voices (48kHz, realistic mic noise floor, 4s takes,
- * frames counted the same way this component counts them):
- *
- *          2048-sample tap        4096-sample tap
- *  110Hz    0/93 pitched          31/93 pitched, median 110.2
- *  120Hz    0/93 pitched          50/93 pitched, median 119.9
- *  135Hz    0/93 pitched          80/93 pitched, median 135.0
- *  150Hz    0/93 pitched          92/93 pitched, median 150.1
- *  210Hz   93/93 pitched          92/93 pitched, median 210.1
- *
- * i.e. at 2048 the pipeline is structurally blind to EVERY male voice below
- * ~165Hz — the exact population this feature kept misclassifying. Doubling the
- * tap costs ~6ms of YIN per frame instead of ~1.5ms, comfortably inside the
- * ~43ms frame cadence. 8192 was rejected: ~24ms/frame is too close to the
- * cadence, and YIN is O(n²).
- */
-const PITCH_WINDOW_SIZE = 4096;
 
 type Stage = "idle" | "recording" | "extracting" | "matching" | "done";
 
@@ -88,43 +42,19 @@ const GENDER_LABEL_RU: Record<TimbreGender, string> = {
   female: "Женский",
 };
 
-type MeydaAnalyzerHandle = { start: () => void; stop: () => void };
-
-async function loadMeydaCreate() {
-  const mod = (await import("meyda")) as {
-    default?: { createMeydaAnalyzer?: unknown };
-    createMeydaAnalyzer?: unknown;
-  };
-  const Meyda = mod.default ?? mod;
-  if (typeof Meyda.createMeydaAnalyzer !== "function") {
-    throw new Error("Анализ тембра недоступен в этом браузере");
-  }
-  return Meyda.createMeydaAnalyzer as (options: {
-    audioContext: AudioContext;
-    source: AudioNode;
-    bufferSize: number;
-    featureExtractors: string[];
-    callback: (features: Partial<MeydaFeaturesObject>) => void;
-  }) => MeydaAnalyzerHandle;
-}
-
 export default function TimbreMatcher({ locked = false }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [measurement, setMeasurement] = useState<VoiceMeasurement | null>(null);
   /**
-   * MANDATORY, explicitly chosen by the student BEFORE recording — never
-   * auto-detected. F0-threshold auto-detection is precisely what used to
-   * mislabel low male voices and match them against tenors.
+   * MANDATORY, explicitly chosen BEFORE recording — never auto-detected.
+   * Filters the celebrity pool to this gender only.
    */
   const [gender, setGender] = useState<TimbreGender | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const meydaSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const pitchAnalyserRef = useRef<AnalyserNode | null>(null);
-  const analyzerRef = useRef<MeydaAnalyzerHandle | null>(null);
   const pcmSessionRef = useRef<PcmCaptureSession | null>(null);
   const timersRef = useRef<number[]>([]);
   const busyRef = useRef(false);
@@ -132,28 +62,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
   const finishingRef = useRef(false);
   const endCaptureRef = useRef<(() => Promise<void>) | null>(null);
 
-  /** Full teardown of mic/analyzer/context — used on early stop, error, and unmount. */
   const cleanupAudio = () => {
     timersRef.current.forEach((id) => window.clearInterval(id));
     timersRef.current = [];
-    try {
-      analyzerRef.current?.stop();
-    } catch {
-      /* already stopped */
-    }
-    analyzerRef.current = null;
-    try {
-      pitchAnalyserRef.current?.disconnect();
-    } catch {
-      /* already disconnected */
-    }
-    pitchAnalyserRef.current = null;
-    try {
-      meydaSourceRef.current?.disconnect();
-    } catch {
-      /* already disconnected */
-    }
-    meydaSourceRef.current = null;
     try {
       pcmSessionRef.current?.abort();
     } catch {
@@ -174,33 +85,33 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
   const isStale = (id: number) => id !== analysisIdRef.current;
 
-  const finalize = async (
-    audioBuffer: AudioBuffer,
-    accumulator: VoiceMeasurementAccumulator,
-    analysisId: number
-  ) => {
+  const finalize = async (audioBuffer: AudioBuffer, analysisId: number) => {
     try {
       if (audioBuffer.duration < 0.8 || audioBuffer.length < 8000) {
         throw new Error("Запись слишком короткая — спойте ещё раз");
       }
 
-      // "Is there a voice at all" guard (lib/vocal-presence.ts) — rejects real
-      // silence / knocks, tuned permissively so quiet or hoarse singing still
-      // passes.
+      // Extreme silence / knocks only — quiet normal singing must pass.
       const presence = assessVocalPresence(audioBuffer);
       if (!presence.ok) {
         throw new Error(presence.reason || "Голос не обнаружен");
       }
       if (isStale(analysisId)) return;
 
-      setStage("matching");
+      setStage("extracting");
+      // Careful offline pass over the full PCM (meyda + YIN), with UI yields.
+      const result = await analyzeVoiceBuffer(audioBuffer);
+      if (isStale(analysisId)) return;
 
-      const result = accumulator.finalize();
       if (!result) {
         throw new Error(
-          "Звук не распознан — спойте ближе к микрофону пару фраз на обычной громкости (кричать не нужно)."
+          "Слишком мало голосового сигнала — спойте пару фраз обычным голосом ближе к микрофону (кричать не нужно)."
         );
       }
+
+      setStage("matching");
+      // Let the matching stage paint before the sync rank.
+      await new Promise((r) => setTimeout(r, 40));
       if (isStale(analysisId)) return;
 
       setMeasurement(result);
@@ -249,77 +160,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (ctx.state === "suspended") await ctx.resume();
       audioContextRef.current = ctx;
 
-      // Same-context PCM tap, used only for the post-hoc "is there a voice at
-      // all" guard (assessVocalPresence) and the duration check.
       const pcmSession = startContextPcmCapture(ctx, stream, ctx.currentTime);
       pcmSessionRef.current = pcmSession;
-
-      // Independent MediaStreamSource tap on the same context for Meyda —
-      // multiple taps on one context/stream is standard and doesn't affect the mic.
-      const meydaSource = ctx.createMediaStreamSource(stream);
-      const inputGain = ctx.createGain();
-      inputGain.gain.value = singingInputGainValue();
-      meydaSource.connect(inputGain);
-      meydaSourceRef.current = meydaSource;
-
-      const accumulator = new VoiceMeasurementAccumulator(
-        ctx.sampleRate,
-        ANALYSIS_BUFFER_SIZE
-      );
-
-      // Single YIN detector instance reused across the whole take — cheaper
-      // than rebuilding pitchfinder's internal state every frame, and it is
-      // the SAME tested primitive the pitch tuner uses (lib/pitch.ts).
-      const yinDetector: PitchDetectorFn = createYinDetector(ctx.sampleRate);
-
-      // Raw (non-windowed) time-domain tap for YIN, via a plain AnalyserNode
-      // on the SAME source. IMPORTANT: Meyda's `buffer` feature is NOT raw
-      // PCM — Meyda applies its windowing function (Hanning by default) to
-      // every frame before computing ANY feature, including the `buffer`
-      // pseudo-feature, which just hands back that already-windowed signal
-      // (tapered to ~0 at both edges). Feeding a Hanning-windowed buffer into
-      // YIN's difference function corrupts exactly the periodicity structure
-      // it depends on, which made YIN return null on almost every frame of
-      // real singing. AnalyserNode.getFloatTimeDomainData() returns genuine
-      // unprocessed samples, decoupled from whatever Meyda does internally.
-      const pitchAnalyser = ctx.createAnalyser();
-      pitchAnalyser.fftSize = PITCH_WINDOW_SIZE;
-      pitchAnalyser.smoothingTimeConstant = 0;
-      inputGain.connect(pitchAnalyser);
-      connectAnalyserToDestination(ctx, pitchAnalyser);
-      pitchAnalyserRef.current = pitchAnalyser;
-      const rawTimeDomain = new Float32Array(PITCH_WINDOW_SIZE);
-
-      const createMeydaAnalyzer = await loadMeydaCreate();
-      const analyzer = createMeydaAnalyzer({
-        audioContext: ctx,
-        source: inputGain,
-        bufferSize: ANALYSIS_BUFFER_SIZE,
-        featureExtractors: [
-          "spectralCentroid",
-          "spectralFlatness",
-          "zcr",
-          "rms",
-          "amplitudeSpectrum",
-        ],
-        callback: (features: Partial<MeydaFeaturesObject>) => {
-          // YIN runs on raw PCM tapped straight from the AnalyserNode above —
-          // NOT on Meyda's (windowed) features — over roughly the same time
-          // window as this Meyda callback.
-          readAnalyserTimeDomain(pitchAnalyser, rawTimeDomain);
-          const f0 = yinDetector(rawTimeDomain);
-          accumulator.addFrame(
-            features.spectralCentroid,
-            features.rms,
-            f0,
-            features.spectralFlatness,
-            features.zcr,
-            features.amplitudeSpectrum
-          );
-        },
-      });
-      analyzerRef.current = analyzer;
-      analyzer.start();
 
       finishingRef.current = false;
       setStage("recording");
@@ -333,25 +175,14 @@ export default function TimbreMatcher({ locked = false }: Props) {
         setStage("extracting");
 
         try {
-          analyzer.stop();
-          try {
-            pitchAnalyser.disconnect();
-            inputGain.disconnect();
-            meydaSource.disconnect();
-          } catch {
-            /* already disconnected */
-          }
           const audioBuffer = await pcmSession.stop();
           stream.getTracks().forEach((t) => t.stop());
           if (streamRef.current === stream) streamRef.current = null;
           pcmSessionRef.current = null;
-          if (analyzerRef.current === analyzer) analyzerRef.current = null;
-          if (pitchAnalyserRef.current === pitchAnalyser) pitchAnalyserRef.current = null;
-          if (meydaSourceRef.current === meydaSource) meydaSourceRef.current = null;
           if (audioContextRef.current === ctx) audioContextRef.current = null;
           await ctx.close().catch(() => undefined);
 
-          await finalize(audioBuffer, accumulator, analysisId);
+          await finalize(audioBuffer, analysisId);
         } catch (err) {
           if (isStale(analysisId)) return;
           cleanupAudio();
@@ -373,12 +204,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
       }, RECORD_MS);
       timersRef.current = [progressTimer, finishTimer];
       endCaptureRef.current = endCapture;
-    } catch (err) {
-      setError(
-        err instanceof Error && /тембра/i.test(err.message)
-          ? err.message
-          : "Не удалось включить микрофон"
-      );
+    } catch {
+      setError("Не удалось включить микрофон");
       cleanupAudio();
       busyRef.current = false;
       setStage("idle");
@@ -390,30 +217,26 @@ export default function TimbreMatcher({ locked = false }: Props) {
   };
 
   /**
-   * Vocal Fach from the take's median F0 + the gender the student selected.
-   * Pure math over the already-stored medians, so flipping the gender toggle
-   * after the fact instantly reclassifies and re-matches with no re-recording.
+   * Fach is informational + soft prior in ranking — NOT a hard DB filter.
+   * Flipping gender after the take re-matches the full gender pool instantly.
    */
   const fach = useMemo(
     () => (measurement && gender ? classifyVocalFach(gender, measurement.medianHz) : null),
     [measurement, gender]
   );
 
-  /**
-   * STRICT (gender × vocalFach) filter lives entirely inside
-   * `matchCelebrities` (lib/celebritiesDB.ts) — it only ever scores candidates
-   * whose gender AND fach both equal the arguments passed here, with no
-   * fallback pool, so a bass can never surface a tenor. Ranking is weighted
-   * distance on [timbreWeight, airiness, raspiness, tessituraSpan].
-   */
   const matches: CelebrityMatch[] = useMemo(() => {
-    if (!measurement || !gender || !fach) return [];
-    return matchCelebrities(gender, fach, {
-      timbreWeight: measurement.userWeight,
-      airiness: measurement.userAiriness,
-      raspiness: measurement.userRaspiness,
-      tessituraSpan: measurement.tessituraSpan,
-    });
+    if (!measurement || !gender) return [];
+    return matchCelebrities(
+      gender,
+      {
+        timbreWeight: measurement.userWeight,
+        airiness: measurement.userAiriness,
+        raspiness: measurement.userRaspiness,
+        tessituraSpan: measurement.tessituraSpan,
+      },
+      { userFach: fach }
+    );
   }, [measurement, gender, fach]);
 
   const groupedByDecade = useMemo(
@@ -455,16 +278,13 @@ export default function TimbreMatcher({ locked = false }: Props) {
             Звёздный двойник
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
-            Спойте десять секунд — Звёздный двойник разберёт ваш голос и
-            покажет, с какими исполнителями вы звучите в одном поле. Живой
-            анализ, а не гадание: тип голоса и список совпадений, которыми
-            хочется поделиться.
+            Выберите пол, спойте десять секунд обычным голосом — после записи
+            мы разберём тембр и покажем ближайших исполнителей по эпохам и
+            жанрам. Кричать не нужно.
           </p>
         </div>
       </div>
 
-      {/* Пол выбирается ВРУЧНУЮ до записи — от него напрямую зависят пороги
-          классификации Vocal Fach (165 Гц для мужчин, 220 Гц для женщин). */}
       <div className="mt-5 rounded-2xl bg-studio-bg/80 p-3 ring-1 ring-studio-border">
         <p className="mb-2 text-sm font-medium text-studio-text">Ваш пол:</p>
         <div className="flex gap-1 rounded-xl bg-studio-card p-1">
@@ -487,7 +307,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
         {!gender && (
           <p className="mt-2 text-xs text-amber-300">
-            Выберите пол — без него нельзя определить тип голоса.
+            Выберите пол — база сразу сузится только до вашего пола.
           </p>
         )}
       </div>
@@ -533,11 +353,12 @@ export default function TimbreMatcher({ locked = false }: Props) {
           />
           <p className="font-medium text-studio-text">
             {stage === "extracting"
-              ? "Ищем ваш звёздный двойник…"
-              : "Подбираем исполнителей с вашим голосом…"}
+              ? "Считаем параметры голоса…"
+              : "Подбираем исполнителей…"}
           </p>
           <p className="max-w-xs text-sm text-studio-muted">
-            Это займёт долю секунды — не закрывайте страницу.
+            Анализ идёт после записи — это займёт несколько секунд, не
+            закрывайте страницу.
           </p>
         </div>
       )}
@@ -647,22 +468,19 @@ function EraGenreList({
       </h4>
       <ul className="space-y-3">
         {matches.map((m, i) => (
-          <li key={m.celebrity.id}>
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <p className="text-[13px] leading-snug text-studio-text sm:text-sm">
-                <span className="mr-1.5 text-studio-muted">{i + 1}.</span>
-                {m.celebrity.name}
-              </p>
-              <span className="shrink-0 text-xs font-semibold tabular-nums text-studio-accent-light">
-                {m.percent}%
+          <li
+            key={m.celebrity.id}
+            className="flex items-baseline justify-between gap-3 text-sm"
+          >
+            <span className="min-w-0 text-studio-text">
+              <span className="mr-1.5 tabular-nums text-studio-muted">
+                {i + 1}.
               </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-studio-bg">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-pink-500 to-studio-accent"
-                style={{ width: `${Math.max(4, m.percent)}%` }}
-              />
-            </div>
+              {m.celebrity.name}
+            </span>
+            <span className="shrink-0 font-semibold tabular-nums text-pink-300">
+              {m.percent}%
+            </span>
           </li>
         ))}
       </ul>
@@ -672,9 +490,8 @@ function EraGenreList({
 
 function LockedCard({ title, text }: { title: string; text: string }) {
   return (
-    <section className="rounded-3xl bg-studio-surface p-6 text-center ring-1 ring-studio-border">
-      <Sparkles className="mx-auto h-8 w-8 text-amber-300" />
-      <h2 className="mt-3 font-display text-2xl font-semibold">{title}</h2>
+    <section className="rounded-3xl bg-studio-surface p-6 ring-1 ring-studio-border">
+      <h2 className="font-display text-2xl font-semibold">{title}</h2>
       <p className="mt-2 text-sm text-studio-muted">{text}</p>
     </section>
   );

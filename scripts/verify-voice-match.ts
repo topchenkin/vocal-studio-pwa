@@ -1,5 +1,5 @@
 /**
- * Sanity-check that clean-pop vs gritty-rock takes no longer share a top star.
+ * Sanity-check gender-only matching + style separation + ≥50% display floor.
  * Run: npx tsx scripts/verify-voice-match.ts
  */
 import {
@@ -7,6 +7,9 @@ import {
   matchCelebrities,
   groupMatchesByDecadeAndGenre,
   MIN_DISPLAY_PERCENT,
+  recalibratePercentsIfEmpty,
+  distanceToPercent,
+  weightedDistance,
   type TimbreVector,
   type VocalFach,
   type CelebrityGender,
@@ -14,11 +17,11 @@ import {
 
 function topNames(
   gender: CelebrityGender,
-  fach: VocalFach,
   user: TimbreVector,
+  fach: VocalFach | null,
   n = 3
 ) {
-  return matchCelebrities(gender, fach, user)
+  return matchCelebrities(gender, user, { userFach: fach })
     .slice(0, n)
     .map((m) => m.celebrity.name);
 }
@@ -41,11 +44,19 @@ const breathy: TimbreVector = {
   raspiness: 6,
   tessituraSpan: 24,
 };
+/** Mid-range laptop take that used to hard-filter into tiny rock pools. */
+const midNoisy: TimbreVector = {
+  timbreWeight: 70,
+  airiness: 22,
+  raspiness: 48,
+  tessituraSpan: 28,
+};
 
-const cases: Array<[string, CelebrityGender, VocalFach, TimbreVector]> = [
+const cases: Array<[string, CelebrityGender, VocalFach | null, TimbreVector]> = [
   ["female mezzo clean pop", "female", "mezzo_soprano", cleanPop],
   ["female mezzo grit rock", "female", "mezzo_soprano", gritRock],
   ["female mezzo breathy", "female", "mezzo_soprano", breathy],
+  ["female contralto mid-noisy", "female", "contralto", midNoisy],
   ["male tenor clean pop", "male", "tenor", cleanPop],
   ["male tenor grit rock", "male", "tenor", gritRock],
   ["male baritone grit rock", "male", "bass_baritone", gritRock],
@@ -53,13 +64,13 @@ const cases: Array<[string, CelebrityGender, VocalFach, TimbreVector]> = [
 
 let failed = 0;
 for (const [label, gender, fach, vec] of cases) {
-  const names = topNames(gender, fach, vec, 5);
+  const names = topNames(gender, vec, fach, 5);
   console.log(label + ":", names.join(", "));
 }
 
-const popTop = topNames("female", "mezzo_soprano", cleanPop, 1)[0];
-const rockTop = topNames("female", "mezzo_soprano", gritRock, 1)[0];
-const breathTop = topNames("female", "mezzo_soprano", breathy, 1)[0];
+const popTop = topNames("female", cleanPop, "mezzo_soprano", 1)[0];
+const rockTop = topNames("female", gritRock, "mezzo_soprano", 1)[0];
+const breathTop = topNames("female", breathy, "mezzo_soprano", 1)[0];
 if (popTop === rockTop) {
   console.error("FAIL: clean pop and grit rock share top star", popTop);
   failed += 1;
@@ -69,10 +80,17 @@ if (popTop === breathTop) {
   failed += 1;
 }
 
-const malePop = topNames("male", "tenor", cleanPop, 1)[0];
-const maleRock = topNames("male", "tenor", gritRock, 1)[0];
+const malePop = topNames("male", cleanPop, "tenor", 1)[0];
+const maleRock = topNames("male", gritRock, "tenor", 1)[0];
 if (malePop === maleRock) {
   console.error("FAIL: male pop/rock share top star", malePop);
+  failed += 1;
+}
+
+// Opposite gender must never appear
+const femaleMatches = matchCelebrities("female", cleanPop);
+if (femaleMatches.some((m) => m.celebrity.gender !== "female")) {
+  console.error("FAIL: opposite gender leaked into female pool");
   failed += 1;
 }
 
@@ -84,8 +102,33 @@ for (const c of CELEBRITIES_DB) {
 console.log("\nDB size", CELEBRITIES_DB.length);
 console.log("Buckets", buckets);
 
+const midMatches = matchCelebrities("female", midNoisy, {
+  userFach: "contralto",
+});
+const midAbove = midMatches.filter((m) => m.percent >= MIN_DISPLAY_PERCENT);
+const midPop = midAbove.filter((m) => m.celebrity.genre === "Pop").length;
+const midRock = midAbove.filter((m) => m.celebrity.genre === "Rock").length;
+console.log(
+  `\nFemale mid-noisy: above50=${midAbove.length} Pop=${midPop} Rock=${midRock}`
+);
+console.log(
+  "  top8:",
+  midMatches
+    .slice(0, 8)
+    .map((m) => `${m.celebrity.name} ${m.percent}% ${m.celebrity.genre}`)
+    .join(" | ")
+);
+if (midAbove.length < 10) {
+  console.error("FAIL: mid-noisy female should clear ≥50% for many neighbours", midAbove.length);
+  failed += 1;
+}
+if (midPop === 0) {
+  console.error("FAIL: mid-noisy female must surface Pop, not only Rock");
+  failed += 1;
+}
+
 const grouped = groupMatchesByDecadeAndGenre(
-  matchCelebrities("female", "mezzo_soprano", cleanPop),
+  matchCelebrities("female", cleanPop, { userFach: "mezzo_soprano" }),
   5
 );
 let erasWithHits = 0;
@@ -96,11 +139,11 @@ for (const decade of ["1990s", "2000s", "2010s", "2020s"] as const) {
   const rockN = cell.Rock?.length ?? 0;
   if (popN + rockN > 0) erasWithHits += 1;
   console.log(
-    `\nFemale mezzo clean — ${decade} pop`,
+    `\nFemale clean — ${decade} pop`,
     cell.Pop?.map((m) => `${m.celebrity.name} ${m.percent}%`)
   );
   console.log(
-    `Female mezzo clean — ${decade} rock`,
+    `Female clean — ${decade} rock`,
     cell.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
   );
 }
@@ -109,22 +152,36 @@ if (erasWithHits < 2) {
   failed += 1;
 }
 
-const cleanAbove = matchCelebrities("female", "mezzo_soprano", cleanPop).filter(
-  (m) => m.percent >= MIN_DISPLAY_PERCENT
-).length;
+const cleanAbove = matchCelebrities("female", cleanPop, {
+  userFach: "mezzo_soprano",
+}).filter((m) => m.percent >= MIN_DISPLAY_PERCENT).length;
 if (cleanAbove < 20) {
   console.error("FAIL: too few ≥50% neighbours for a normal pop vector", cleanAbove);
   failed += 1;
 }
 
-const groupedRock = groupMatchesByDecadeAndGenre(
-  matchCelebrities("female", "mezzo_soprano", gritRock),
-  5
-);
-console.log(
-  "\nFemale mezzo grit — 2010s rock",
-  groupedRock["2010s"]?.Rock?.map((m) => `${m.celebrity.name} ${m.percent}%`)
-);
+// Recalibration must not mint 99%s
+const far: TimbreVector = {
+  timbreWeight: 5,
+  airiness: 5,
+  raspiness: 5,
+  tessituraSpan: 5,
+};
+const rawFar = CELEBRITIES_DB.filter((c) => c.gender === "male").map((celebrity) => {
+  const distance = weightedDistance(far, celebrity);
+  return { celebrity, distance, percent: distanceToPercent(distance) };
+});
+const recal = recalibratePercentsIfEmpty(rawFar);
+const maxRecal = recal.reduce((m, x) => Math.max(m, x.percent), 0);
+console.log("\nFar-vector recal max%", maxRecal);
+if (maxRecal > 78) {
+  console.error("FAIL: recalibration minted >78%", maxRecal);
+  failed += 1;
+}
+if (maxRecal < MIN_DISPLAY_PERCENT) {
+  console.error("FAIL: recalibration should lift best to ≥50%", maxRecal);
+  failed += 1;
+}
 
 for (const decade of Object.keys(grouped)) {
   for (const genre of Object.keys(grouped[decade as keyof typeof grouped] ?? {})) {
@@ -143,4 +200,4 @@ for (const decade of Object.keys(grouped)) {
 if (failed > 0) {
   process.exit(1);
 }
-console.log("\nOK: style vectors produce distinct top stars");
+console.log("\nOK: gender-only matching + style separation + floor recalibration");

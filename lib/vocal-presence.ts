@@ -113,11 +113,12 @@ export function assessVocalPresence(
   const meanRms = energyCount > 0 ? Math.sqrt(energySum / energyCount) : 0;
   const crestFactor = meanRms > 1e-6 ? globalPeak / meanRms : 99;
 
-  if (activeRatio < 0.05 || meanRms < 0.0045) {
+  // Extreme silence / knocks only — quiet normal singing must pass.
+  if (activeRatio < 0.03 || meanRms < 0.0025) {
     return {
       ok: false,
       reason:
-        "Слишком тихо. Подойдите ближе к микрофону и спойте чуть громче — хриплый тихий голос тоже подойдёт.",
+        "Слишком тихо или почти тишина. Подойдите ближе к микрофону и спойте пару фраз обычным голосом — кричать не нужно.",
       voicedRatio,
       crestFactor,
       activeRatio,
@@ -125,7 +126,7 @@ export function assessVocalPresence(
   }
 
   // Impulsive knocks only
-  if (crestFactor >= 12 && vocalishRatio < 0.1 && voicedRatio < 0.08) {
+  if (crestFactor >= 14 && vocalishRatio < 0.06 && voicedRatio < 0.05) {
     return {
       ok: false,
       reason:
@@ -137,7 +138,7 @@ export function assessVocalPresence(
   }
 
   // Accept either clear pitch OR sustained vocal-band energy (hoarse/weak)
-  if (vocalishRatio < 0.08 && voicedRatio < 0.06) {
+  if (vocalishRatio < 0.04 && voicedRatio < 0.03) {
     return {
       ok: false,
       reason:
@@ -148,11 +149,11 @@ export function assessVocalPresence(
     };
   }
 
-  if (maxVocalRun < 2) {
+  if (maxVocalRun < 1) {
     return {
       ok: false,
       reason:
-        "Голос слишком обрывистый. Спойте непрерывно хотя бы 2 секунды.",
+        "Голос слишком обрывистый. Спойте непрерывно хотя бы пару секунд.",
       voicedRatio,
       crestFactor,
       activeRatio,

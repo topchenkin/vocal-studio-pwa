@@ -1,11 +1,16 @@
 /**
  * Reference database of well-known singers for the Voice Celebrity Match
- * (Vocal Fach + timbre weight / airiness / raspiness / tessitura span).
+ * (gender + timbre weight / airiness / raspiness / tessitura span).
  *
- * ARCHITECTURE: a voice is described by a tessitura bucket plus a timbre
- * vector that is independently measurable on the student's microphone —
+ * PIPELINE:
+ *   1. Student picks gender → pool = that gender only (opposite excluded).
+ *   2. Record → offline feature extract (meyda + YIN) after the take.
+ *   3. Measure axes on the same 0–100 scale the stars are authored on.
+ *   4. Multi-parameter weighted distance → honest %; per decade × genre
+ *      top-5 with ≥50%; empty eras hidden. Soft fach prior (not a hard cut).
  *
- *   1. `vocalFach`      — where the voice LIVES (median F0), not its extremes.
+ * Axes:
+ *   1. `vocalFach`      — display / soft prior from median F0 (not a hard filter).
  *   2. `timbreWeight`   — 0 dark/heavy … 100 bright/ringing (spectral centroid).
  *   3. `airiness`       — 0 dense … 100 breathy (high-frequency energy).
  *   4. `raspiness`      — 0 clean … 100 rasp/split (spectral flatness).
@@ -13,10 +18,6 @@
  *   6. `region`         — russian | western.
  *   7. `decade`         — 1990s | 2000s | 2010s | 2020s (UI era buckets).
  *   8. `genre`          — Pop | Rock (эстрада/шансон/pop-rap live in Pop).
- *
- * Matching is a STRICT filter on (gender × vocalFach) followed by weighted
- * nearest-neighbour ranking. A bass can never be matched against a tenor.
- * Display grouping is by decade × genre; scores below 50% are hidden.
  *
  * DATA QUALITY: per-artist numbers are curated from well-known public
  * descriptions (voice type, typical range, dark/bright, belt vs head, grit).
@@ -124,18 +125,34 @@ function slugify(name: string): string {
 type RawEntry = Omit<CelebrityProfile, "id">;
 
 /**
- * Raspiness is the main style discriminator (clean pop vs grit rock), then
- * air, then brightness, then range width. Equal Euclidean on a 3-D cube made
- * every amateur take land next to the same mid-pop cluster.
+ * Balanced multi-parameter weights. Rasp was previously 1.85× and, combined
+ * with a hard vocalFach cut into tiny rock-heavy pools, made mid-range
+ * amateur takes look like “only rock” or empty. Style still matters, but no
+ * single axis may dominate commercial matching.
  */
 export const AXIS_WEIGHTS = {
   timbreWeight: 1,
-  airiness: 1.2,
-  raspiness: 1.85,
-  tessituraSpan: 0.9,
+  airiness: 1,
+  raspiness: 1.15,
+  tessituraSpan: 0.75,
 } as const;
 
+/**
+ * Soft prior when the take’s median-F0 fach differs from the star’s authored
+ * fach. Added to the weighted distance (same units), NOT a hard filter —
+ * a mezzo singing mid-chest must still see mezzo AND contralto pop neighbours.
+ */
+export const FACH_MISMATCH_PENALTY = 10;
+
 export const DEFAULT_USER_SPAN = 45;
+
+/** Theoretical max weighted L2 on 0–100 axes (for docs / tests). */
+export const MAX_WEIGHTED_DISTANCE = Math.sqrt(
+  (100 * AXIS_WEIGHTS.timbreWeight) ** 2 +
+    (100 * AXIS_WEIGHTS.airiness) ** 2 +
+    (100 * AXIS_WEIGHTS.raspiness) ** 2 +
+    (100 * AXIS_WEIGHTS.tessituraSpan) ** 2
+);
 
 // prettier-ignore
 const RAW_ENTRIES: RawEntry[] = [
@@ -936,14 +953,14 @@ export function classifyVocalFach(
 
 export type CelebrityMatch = {
   celebrity: CelebrityProfile;
-  /** Weighted distance in the 0-100 cube. Smaller = better match. */
+  /** Weighted multi-parameter distance. Smaller = better match. */
   distance: number;
-  /** 0-100 display score, see `distanceToPercent`. */
+  /** 0-100 display score, see `distanceToPercent` (+ optional recalibration). */
   percent: number;
 };
 
 /**
- * Maximum Euclidean distance in the 0-100 cube:
+ * Maximum Euclidean distance in the 0-100 cube (legacy 3-axis helper):
  *   sqrt((100-0)^2 + (100-0)^2 + (100-0)^2) = sqrt(30000) ≈ 173.205
  */
 export const MAX_3D_DISTANCE = Math.sqrt(3 * 100 * 100);
@@ -959,29 +976,45 @@ export function euclideanDistance3D(user: TimbreVector, star: TimbreVector): num
   return Math.sqrt(dw * dw + da * da + dr * dr);
 }
 
+export type DistanceOptions = {
+  /** Soft fach prior — mismatch adds `FACH_MISMATCH_PENALTY`, never excludes. */
+  userFach?: VocalFach | null;
+};
+
 /**
- * Style-weighted distance. Raspiness is amplified so a clean pop take and a
- * gritty rock take cannot collapse onto the same nearest neighbours.
+ * Multi-parameter weighted L2 on the 0–100 axes:
+ *
+ *   d = sqrt( Σ_i (w_i · Δ_i)² )  [+ soft fach penalty]
+ *
+ * Each Δ_i is |user − star| on that axis. Weights live in `AXIS_WEIGHTS`.
  */
-export function weightedDistance(user: TimbreVector, star: CelebrityProfile): number {
+export function weightedDistance(
+  user: TimbreVector,
+  star: CelebrityProfile,
+  options?: DistanceOptions
+): number {
   const span = user.tessituraSpan ?? DEFAULT_USER_SPAN;
   const dw = (user.timbreWeight - star.timbreWeight) * AXIS_WEIGHTS.timbreWeight;
   const da = (user.airiness - star.airiness) * AXIS_WEIGHTS.airiness;
   const dr = (user.raspiness - star.raspiness) * AXIS_WEIGHTS.raspiness;
   const ds = (span - star.tessituraSpan) * AXIS_WEIGHTS.tessituraSpan;
-  return Math.sqrt(dw * dw + da * da + dr * dr + ds * ds);
+  let d = Math.sqrt(dw * dw + da * da + dr * dr + ds * ds);
+  if (options?.userFach && star.vocalFach !== options.userFach) {
+    d += FACH_MISMATCH_PENALTY;
+  }
+  return d;
 }
 
 /**
- * Distance → display percentage. Exponential so a 10-point style gap is
- * visible (the old linear map over ~173 made every mid-cluster star look
- * like 90%+).
+ * Distance → display %. Exponential decay with TAU chosen so a solid nearest
+ * neighbour at weighted distance ~50 still clears the 50% UI floor
+ * (`exp(-50/72) ≈ 0.50`), while a near-exact match (~15) lands ~81% — honest,
+ * not inflated to 99%.
  *
- * TAU ≈ 52: a solid nearest neighbour at weighted distance ~36 still clears
- * the 50% UI floor (`exp(-36/52) ≈ 0.50`). TAU=36 pushed almost every real
- * take (especially with airiness stuck at 0) below the floor → empty UI.
+ * Per-axis reading: a 20-point gap on one unit-weight axis alone is distance 20
+ * → ~76%; gaps of ~35 on two axes → distance ~50 → ~50%.
  */
-export const DISTANCE_PERCENT_TAU = 52;
+export const DISTANCE_PERCENT_TAU = 72;
 
 export function distanceToPercent(distance: number): number {
   if (!Number.isFinite(distance) || distance <= 0) return 100;
@@ -991,7 +1024,44 @@ export function distanceToPercent(distance: number): number {
   );
 }
 
-/** STRICT filter: only profiles whose gender AND vocalFach both match. */
+/**
+ * If the entire gender pool sits below the 50% display floor (unusual mic /
+ * extreme vector), stretch scores so the best neighbour lands at
+ * `RECALIBRATION_TARGET_PERCENT` and others scale proportionally — ranking
+ * preserved, capped so we never mint fake 99%s.
+ */
+export const RECALIBRATION_TARGET_PERCENT = 62;
+export const RECALIBRATION_CAP_PERCENT = 78;
+
+export function recalibratePercentsIfEmpty(
+  matches: CelebrityMatch[],
+  minPercent = MIN_DISPLAY_PERCENT
+): CelebrityMatch[] {
+  if (matches.length === 0) return matches;
+  const best = matches.reduce((m, x) => (x.percent > m ? x.percent : m), 0);
+  if (best >= minPercent) return matches;
+  if (best <= 0) return matches;
+  const scale = RECALIBRATION_TARGET_PERCENT / best;
+  return matches.map((m) => ({
+    ...m,
+    percent: Math.min(
+      RECALIBRATION_CAP_PERCENT,
+      Math.max(0, Math.round(m.percent * scale))
+    ),
+  }));
+}
+
+/** Gender-only filter — opposite gender is excluded entirely. */
+export function filterCelebritiesByGender(
+  gender: CelebrityGender
+): CelebrityProfile[] {
+  return CELEBRITIES_DB.filter((c) => c.gender === gender);
+}
+
+/**
+ * @deprecated Hard fach filter — kept for older callers/tests. Prefer
+ * `filterCelebritiesByGender` + soft fach via `matchCelebrities`.
+ */
 export function filterCelebrities(
   gender: CelebrityGender,
   fach: VocalFach
@@ -1005,11 +1075,12 @@ export function filterCelebrities(
  */
 export function rankCelebrities(
   pool: CelebrityProfile[],
-  user: TimbreVector
+  user: TimbreVector,
+  options?: DistanceOptions
 ): CelebrityMatch[] {
   return pool
     .map((celebrity) => {
-      const distance = weightedDistance(user, celebrity);
+      const distance = weightedDistance(user, celebrity, options);
       return { celebrity, distance, percent: distanceToPercent(distance) };
     })
     .sort((a, b) =>
@@ -1019,16 +1090,25 @@ export function rankCelebrities(
     );
 }
 
+export type MatchCelebritiesOptions = DistanceOptions & {
+  /** When true (default), lift scores if nothing clears the 50% floor. */
+  recalibrateIfEmpty?: boolean;
+};
+
 /**
- * The one and only matcher: STRICT (gender × vocalFach) filter, then weighted
- * rank. No fallback pool — a bass cannot surface a tenor.
+ * Commercial matcher: gender-only pool, soft fach prior, weighted multi-param
+ * distance → %, optional floor recalibration. Opposite gender never appears.
  */
 export function matchCelebrities(
   gender: CelebrityGender,
-  fach: VocalFach,
-  user: TimbreVector
+  user: TimbreVector,
+  options?: MatchCelebritiesOptions
 ): CelebrityMatch[] {
-  return rankCelebrities(filterCelebrities(gender, fach), user);
+  const ranked = rankCelebrities(filterCelebritiesByGender(gender), user, {
+    userFach: options?.userFach,
+  });
+  if (options?.recalibrateIfEmpty === false) return ranked;
+  return recalibratePercentsIfEmpty(ranked);
 }
 
 /**
