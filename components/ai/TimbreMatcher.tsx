@@ -6,14 +6,20 @@ import Button from "@/components/ui/Button";
 import {
   CELEBRITY_DECADES,
   CELEBRITY_GENRES,
+  CELEBRITY_REGIONS,
   DECADE_LABEL_RU,
+  FACH_MISMATCH_SIMILARITY,
   GENRE_LABEL_RU,
   MIN_DISPLAY_PERCENT,
+  RECALIBRATION_CAP_PERCENT,
+  RECALIBRATION_TARGET_PERCENT,
+  REGION_LABEL_RU,
   VOCAL_FACH_LABEL_RU,
   classifyVocalFach,
   groupMatchesByDecadeAndGenre,
   matchCelebrities,
   type CelebrityMatch,
+  type CelebrityRegion,
   type Genre,
 } from "@/lib/celebritiesDB";
 import {
@@ -52,6 +58,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * Filters the celebrity pool to this gender only.
    */
   const [gender, setGender] = useState<TimbreGender | null>(null);
+  /** Results tab: Russian vs Western — never mixed in one list. */
+  const [regionTab, setRegionTab] = useState<CelebrityRegion>("russian");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -239,9 +247,14 @@ export default function TimbreMatcher({ locked = false }: Props) {
     );
   }, [measurement, gender, fach]);
 
+  const regionMatches = useMemo(
+    () => matches.filter((m) => m.celebrity.region === regionTab),
+    [matches, regionTab]
+  );
+
   const groupedByDecade = useMemo(
-    () => groupMatchesByDecadeAndGenre(matches, 5, MIN_DISPLAY_PERCENT),
-    [matches]
+    () => groupMatchesByDecadeAndGenre(regionMatches, 5, MIN_DISPLAY_PERCENT),
+    [regionMatches]
   );
 
   const visibleDecades = useMemo(
@@ -254,8 +267,29 @@ export default function TimbreMatcher({ locked = false }: Props) {
     [groupedByDecade]
   );
 
+  const regionCounts = useMemo(() => {
+    const counts: Record<CelebrityRegion, number> = { russian: 0, western: 0 };
+    for (const m of matches) {
+      if (m.percent >= MIN_DISPLAY_PERCENT) counts[m.celebrity.region] += 1;
+    }
+    return counts;
+  }, [matches]);
+
   const topMatch =
-    matches[0] && matches[0].percent >= MIN_DISPLAY_PERCENT ? matches[0] : null;
+    matches[0] && matches[0].percent >= MIN_DISPLAY_PERCENT
+      ? matches[0]
+      : matches[0] ?? null;
+  const bestRawPercent = matches.reduce(
+    (m, x) => Math.max(m, x.rawPercent),
+    0
+  );
+  const fachAdjustedRaw = (m: CelebrityMatch) =>
+    m.fachMismatch
+      ? Math.round(m.rawPercent * FACH_MISMATCH_SIMILARITY)
+      : m.rawPercent;
+  const recalibrated = matches.some(
+    (m) => m.percent > fachAdjustedRaw(m) + 1
+  );
   const isBusy = stage === "recording" || stage === "extracting" || stage === "matching";
 
   if (locked) {
@@ -401,16 +435,50 @@ export default function TimbreMatcher({ locked = false }: Props) {
                 )
                 <span className="text-studio-muted">
                   {" "}
-                  · {DECADE_LABEL_RU[topMatch.celebrity.decade]},{" "}
+                  · {REGION_LABEL_RU[topMatch.celebrity.region]},{" "}
+                  {DECADE_LABEL_RU[topMatch.celebrity.decade]},{" "}
                   {GENRE_LABEL_RU[topMatch.celebrity.genre]}
                 </span>
               </p>
             )}
           </div>
 
+          <DebugParamsPanel
+            measurement={measurement}
+            fach={fach}
+            topMatch={topMatch}
+            bestRawPercent={bestRawPercent}
+            recalibrated={recalibrated}
+          />
+
+          <div className="flex gap-1 rounded-xl bg-studio-card p-1 ring-1 ring-studio-border">
+            {CELEBRITY_REGIONS.map((region) => (
+              <button
+                key={region}
+                type="button"
+                onClick={() => setRegionTab(region)}
+                aria-pressed={regionTab === region}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  regionTab === region
+                    ? "bg-studio-accent/20 text-studio-accent-light ring-1 ring-studio-accent/40"
+                    : "text-studio-muted hover:text-studio-text"
+                }`}
+              >
+                {REGION_LABEL_RU[region]}
+                {regionCounts[region] > 0 ? (
+                  <span className="ml-1.5 tabular-nums text-xs opacity-70">
+                    ({Math.min(regionCounts[region], 99)})
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+
           {visibleDecades.length === 0 ? (
             <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
-              Похожих голосов с совпадением от {MIN_DISPLAY_PERCENT}% не нашлось.
+              В разделе «{REGION_LABEL_RU[regionTab]}» пока мало совпадений —
+              переключите вкладку или пол выше. База не пустая: попробуйте
+              другой регион.
             </p>
           ) : (
             <div className="space-y-4">
@@ -456,6 +524,83 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
     </section>
+  );
+}
+
+function DebugParamsPanel({
+  measurement,
+  fach,
+  topMatch,
+  bestRawPercent,
+  recalibrated,
+}: {
+  measurement: VoiceMeasurement;
+  fach: NonNullable<ReturnType<typeof classifyVocalFach>>;
+  topMatch: CelebrityMatch | null;
+  bestRawPercent: number;
+  recalibrated: boolean;
+}) {
+  const rows: Array<[string, string]> = [
+    ["Тембр / яркость (timbreWeight)", `${measurement.userWeight}/100`],
+    ["Воздух (airiness)", `${measurement.userAiriness}/100`],
+    [
+      "HF ratio median / p75",
+      `${measurement.medianHfRatio.toFixed(4)} / ${measurement.p75HfRatio.toFixed(4)}`,
+    ],
+    ["Расщепление / rasp", `${measurement.userRaspiness}/100`],
+    ["Ширина тесситуры", `${measurement.tessituraSpan}/100`],
+    ["Определённый fach", VOCAL_FACH_LABEL_RU[fach]],
+    [
+      "Средний F0 / p25 / p75",
+      `${Math.round(measurement.medianHz)} / ${Math.round(measurement.p25Hz)} / ${Math.round(measurement.p75Hz)} Hz`,
+    ],
+    [
+      "Кадры: voiced / pitched / HF",
+      `${measurement.frameCount} / ${measurement.pitchedFrameCount} / ${measurement.hfFrameCount}`,
+    ],
+    [
+      "Presence / quality",
+      measurement.frameCount >= 16 && measurement.pitchedFrameCount >= 12
+        ? "ok (достаточно кадров)"
+        : "слабо (мало кадров)",
+    ],
+    [
+      "Distance / raw % → после",
+      topMatch
+        ? `${topMatch.distance.toFixed(1)} / ${topMatch.rawPercent}% → ${topMatch.percent}%${
+            topMatch.fachMismatch
+              ? ` (fach ×${FACH_MISMATCH_SIMILARITY})`
+              : ""
+          }`
+        : "—",
+    ],
+    [
+      "Пул: лучший raw %",
+      `${bestRawPercent}%${
+        recalibrated
+          ? ` → перекалибровка к ~${RECALIBRATION_TARGET_PERCENT}% (cap ${RECALIBRATION_CAP_PERCENT}%)`
+          : " (без перекалибровки)"
+      }`,
+    ],
+  ];
+
+  return (
+    <details className="rounded-2xl bg-amber-500/5 px-3 py-3 ring-1 ring-amber-500/30 open:pb-3">
+      <summary className="cursor-pointer select-none text-sm font-semibold text-amber-200/90">
+        Отладка параметров (временно)
+      </summary>
+      <dl className="mt-3 space-y-1.5 text-xs text-studio-muted">
+        {rows.map(([label, value]) => (
+          <div
+            key={label}
+            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b border-studio-border/40 pb-1.5 last:border-0"
+          >
+            <dt>{label}</dt>
+            <dd className="font-mono tabular-nums text-studio-text">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 

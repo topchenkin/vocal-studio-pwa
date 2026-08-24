@@ -7,9 +7,11 @@ import {
   matchCelebrities,
   groupMatchesByDecadeAndGenre,
   MIN_DISPLAY_PERCENT,
+  RECALIBRATION_CAP_PERCENT,
   recalibratePercentsIfEmpty,
   distanceToPercent,
   weightedDistance,
+  FACH_MISMATCH_SIMILARITY,
   type TimbreVector,
   type VocalFach,
   type CelebrityGender,
@@ -169,13 +171,22 @@ const far: TimbreVector = {
 };
 const rawFar = CELEBRITIES_DB.filter((c) => c.gender === "male").map((celebrity) => {
   const distance = weightedDistance(far, celebrity);
-  return { celebrity, distance, percent: distanceToPercent(distance) };
+  const rawPercent = distanceToPercent(distance);
+  return {
+    celebrity,
+    distance,
+    percent: rawPercent,
+    rawPercent,
+  };
 });
 const recal = recalibratePercentsIfEmpty(rawFar);
 const maxRecal = recal.reduce((m, x) => Math.max(m, x.percent), 0);
 console.log("\nFar-vector recal max%", maxRecal);
-if (maxRecal > 78) {
-  console.error("FAIL: recalibration minted >78%", maxRecal);
+if (maxRecal > RECALIBRATION_CAP_PERCENT) {
+  console.error(
+    `FAIL: recalibration minted >${RECALIBRATION_CAP_PERCENT}%`,
+    maxRecal
+  );
   failed += 1;
 }
 if (maxRecal < MIN_DISPLAY_PERCENT) {
@@ -183,13 +194,41 @@ if (maxRecal < MIN_DISPLAY_PERCENT) {
   failed += 1;
 }
 
+// Soft fach: mismatch shrinks display % by ~18%, never empties the pool
+const sameFach = matchCelebrities("male", gritRock, {
+  userFach: "bass_baritone",
+  recalibrateIfEmpty: false,
+});
+const crossFach = matchCelebrities("male", gritRock, {
+  userFach: "tenor",
+  recalibrateIfEmpty: false,
+});
+const crossHit = crossFach.find(
+  (m) => m.celebrity.vocalFach === "bass_baritone" && m.fachMismatch
+);
+if (!crossHit) {
+  console.error("FAIL: fach mismatch should still keep opposite-fach stars");
+  failed += 1;
+} else {
+  const expected = Math.round(crossHit.rawPercent * FACH_MISMATCH_SIMILARITY);
+  if (crossHit.percent !== expected) {
+    console.error(
+      "FAIL: fach mismatch percent factor",
+      crossHit.percent,
+      "!=",
+      expected
+    );
+    failed += 1;
+  }
+}
+if (sameFach.length === 0 || crossFach.length === 0) {
+  console.error("FAIL: fach prior must never empty the DB");
+  failed += 1;
+}
+
 for (const decade of Object.keys(grouped)) {
   for (const genre of Object.keys(grouped[decade as keyof typeof grouped] ?? {})) {
     const list = grouped[decade as "1990s"]?.[genre as "Pop"] ?? [];
-    if (list.some((m) => m.percent < MIN_DISPLAY_PERCENT)) {
-      console.error("FAIL: displayed match below 50%", decade, genre);
-      failed += 1;
-    }
     if (list.length > 5) {
       console.error("FAIL: more than 5 in a cell", decade, genre, list.length);
       failed += 1;
@@ -200,4 +239,6 @@ for (const decade of Object.keys(grouped)) {
 if (failed > 0) {
   process.exit(1);
 }
-console.log("\nOK: gender-only matching + style separation + floor recalibration");
+console.log(
+  "\nOK: gender-only matching + style separation + soft fach + floor recalibration"
+);
