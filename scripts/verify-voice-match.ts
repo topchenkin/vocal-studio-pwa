@@ -1,38 +1,31 @@
 /**
- * Deterministic DSP/ranking sanity suite.
+ * Deterministic Vocal Archetype sanity suite.
  * Run: npx tsx scripts/verify-voice-match.ts
  */
+import { readFileSync } from "node:fs";
 import {
   CELEBRITIES_DB,
   FEMALE_FACH_SPLIT_HZ,
   MALE_FACH_SPLIT_HZ,
-  MIN_DISPLAY_PERCENT,
-  RAW_DISTANCE_GARBAGE_THRESHOLD,
-  RECALIBRATION_BEST_MAX_PERCENT,
-  RECALIBRATION_BEST_MIN_PERCENT,
-  RECALIBRATION_OTHERS_MAX_PERCENT,
-  RECALIBRATION_OTHERS_MIN_PERCENT,
   classifyVocalFach,
-  filterCelebrities,
-  distanceToPercent,
-  groupMatchesByDecadeAndGenre,
-  matchCelebrities,
-  rankCelebrities,
-  weightedDistance,
   type CelebrityProfile,
-  type TimbreVector,
 } from "../lib/celebritiesDB";
 import {
+  FEATURE_BIN_HIGH_START,
+  FEATURE_BIN_MID_START,
+  archetypeName,
+  deriveVocalArchetype,
+  featureBin,
+  pitchHeight,
+  selectArchetypeRepresentatives,
+} from "../lib/vocal-archetype";
+import {
   clampAndMap,
-  clamp,
   centroidHzToWeight,
   flatnessToRaspiness,
-  zcrCountToRate,
-  zcrRateToAiriness,
 } from "../lib/timbre-features";
 
 let failed = 0;
-
 function check(condition: boolean, message: string): void {
   if (!condition) {
     console.error(`FAIL: ${message}`);
@@ -40,179 +33,173 @@ function check(condition: boolean, message: string): void {
   }
 }
 
-function close(actual: number, expected: number, message: string): void {
-  check(Math.abs(actual - expected) < 1e-9, `${message}: ${actual} != ${expected}`);
-}
-
-// Fixed linear normalization and strict clamping.
-close(clampAndMap(150, 150, 2000), 0, "centroid lower boundary");
-close(clampAndMap(1075, 150, 2000), 50, "centroid midpoint");
-close(clampAndMap(2000, 150, 2000), 100, "centroid upper boundary");
-close(clampAndMap(-999, 0, 0.1), 0, "strict low clamp");
-close(clampAndMap(999, 0, 0.1), 100, "strict high clamp");
-close(clamp(-5, 0, 100), 0, "clamp lower bound");
-close(clamp(105, 0, 100), 100, "clamp upper bound");
-check(centroidHzToWeight(150) === 0 && centroidHzToWeight(2000) === 100, "centroid map");
-check(flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100, "flatness map");
-
-// Meyda 5.6.3 returns crossing count/frame. 80 / 2048 is the actual rate.
-close(zcrCountToRate(80, 2048), 80 / 2048, "ZCR count-to-rate");
-check(zcrRateToAiriness(0) === 0, "ZCR air lower boundary");
-check(zcrRateToAiriness(0.1) === 50, "ZCR air midpoint");
-check(zcrRateToAiriness(0.2) === 100, "ZCR air upper boundary");
-check(zcrRateToAiriness(80) === 100, "ZCR air strict high clamp");
-
-const origin: TimbreVector = {
-  timbreWeight: 0,
-  airiness: 0,
-  raspiness: 0,
-};
-const tenEach = {
-  ...origin,
-  timbreWeight: 10,
-  airiness: 10,
-  raspiness: 10,
-} as CelebrityProfile;
-close(weightedDistance(origin, tenEach), 10, "weighted Euclidean sum");
-close(
-  weightedDistance(origin, { ...tenEach, airiness: 0, raspiness: 0 }),
-  Math.sqrt(0.6 * 100),
-  "60% timbre coefficient"
+// Fixed normalization is strictly clamped to 0–100.
+check(clampAndMap(-1, 0, 1) === 0, "normalization lower clamp");
+check(clampAndMap(2, 0, 1) === 100, "normalization upper clamp");
+check(
+  centroidHzToWeight(150) === 0 && centroidHzToWeight(2000) === 100,
+  "centroid normalization"
+);
+check(
+  flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100,
+  "flatness normalization"
 );
 
+// Stable feature thirds: 0–33 / 34–66 / 67–100.
+check(featureBin(0) === "low" && featureBin(33) === "low", "low bin");
 check(
-  classifyVocalFach("male", MALE_FACH_SPLIT_HZ - 0.01) === "bass_baritone" &&
+  featureBin(FEATURE_BIN_MID_START) === "mid" &&
+    featureBin(66) === "mid",
+  "mid bin"
+);
+check(
+  featureBin(FEATURE_BIN_HIGH_START) === "high" &&
+    featureBin(100) === "high",
+  "high bin"
+);
+
+// Median F0 drives deterministic selected-gender Fach and height.
+check(
+  classifyVocalFach("male", MALE_FACH_SPLIT_HZ - 0.01) ===
+    "bass_baritone" &&
     classifyVocalFach("male", MALE_FACH_SPLIT_HZ) === "tenor",
-  "male hard Fach threshold"
+  "male Fach boundary"
 );
 check(
-  classifyVocalFach("female", FEMALE_FACH_SPLIT_HZ - 0.01) === "contralto" &&
+  classifyVocalFach("female", FEMALE_FACH_SPLIT_HZ - 0.01) ===
+    "contralto" &&
     classifyVocalFach("female", FEMALE_FACH_SPLIT_HZ) === "mezzo_soprano",
-  "female hard Fach threshold"
+  "female Fach boundary"
 );
-const hardFachPool = filterCelebrities("male", "tenor");
 check(
-  hardFachPool.length > 0 &&
-    hardFachPool.every(
-      (star) => star.gender === "male" && star.vocalFach === "tenor"
-    ),
-  "hard gender and exact-Fach pool"
+  pitchHeight("male", 120) === "low" &&
+    pitchHeight("male", 165) === "mid" &&
+    pitchHeight("male", 200) === "high",
+  "male pitch-height bands"
 );
-const fachRank = rankCelebrities(hardFachPool, {
-  timbreWeight: 50,
-  airiness: 50,
-  raspiness: 50,
-});
 check(
-  fachRank.every((match) => match.celebrity.vocalFach === "tenor"),
-  "ranking cannot include cross-Fach candidates"
+  pitchHeight("female", 180) === "low" &&
+    pitchHeight("female", 220) === "mid" &&
+    pitchHeight("female", 270) === "high",
+  "female pitch-height bands"
 );
 
-check(distanceToPercent(5) > distanceToPercent(15), "raw similarity monotonicity");
-check(distanceToPercent(15) > distanceToPercent(30), "raw similarity monotonicity 2");
-
-const bieberLike: TimbreVector = {
-  timbreWeight: 90,
-  airiness: 52,
-  raspiness: 2,
-  tessituraSpan: 5, // deliberately irrelevant to required 3-D geometry
-};
-const deepRaspy: TimbreVector = {
-  timbreWeight: 35,
-  airiness: 10,
-  raspiness: 92,
-  tessituraSpan: 100,
-};
-const malePool = CELEBRITIES_DB.filter((c) => c.gender === "male");
-const byName = (name: string) => {
-  const star = malePool.find((c) => c.name === name);
-  if (!star) throw new Error(`Missing required DB fixture: ${name}`);
-  return star;
-};
-const bieber = byName("Justin Bieber");
-const leps = byName("Григорий Лепс");
-const kipelov = byName("Валерий Кипелов");
-
-const lightDistances = {
-  bieber: weightedDistance(bieberLike, bieber),
-  leps: weightedDistance(bieberLike, leps),
-  kipelov: weightedDistance(bieberLike, kipelov),
-};
-check(lightDistances.bieber < lightDistances.leps, "Bieber-like ranks ahead of Leps");
-check(lightDistances.bieber < lightDistances.kipelov, "Bieber-like ranks ahead of Kipelov");
 check(
-  lightDistances.kipelov > RAW_DISTANCE_GARBAGE_THRESHOLD,
-  "Kipelov rejected for light/airy/clean vector"
+  archetypeName("bass_baritone", "low", "mid") ===
+    "Драматический бас-баритон",
+  "archetype naming matrix"
+);
+const changedGender = deriveVocalArchetype("female", 180, 20, 50);
+check(
+  changedGender.fach === "contralto" &&
+    changedGender.name === "Драматический контральто",
+  "archetype derives entirely from stored metrics and selected gender"
 );
 
-const deepDistances = {
-  bieber: weightedDistance(deepRaspy, bieber),
-  leps: weightedDistance(deepRaspy, leps),
-  kipelov: weightedDistance(deepRaspy, kipelov),
-};
-check(deepDistances.leps < deepDistances.bieber, "deep/raspy ranks Leps ahead of Bieber");
-check(deepDistances.kipelov < deepDistances.bieber, "deep/raspy ranks Kipelov ahead of Bieber");
+const fixture: CelebrityProfile[] = [
+  {
+    id: "exact",
+    name: "Exact",
+    gender: "male",
+    vocalFach: "tenor",
+    genre: "Rock",
+    region: "western",
+    decade: "1990s",
+    timbreWeight: 80,
+    airiness: 100,
+    raspiness: 80,
+    tessituraSpan: 10,
+  },
+  {
+    id: "fallback",
+    name: "Fallback",
+    gender: "male",
+    vocalFach: "tenor",
+    genre: "Rock",
+    region: "western",
+    decade: "2020s",
+    timbreWeight: 50,
+    airiness: 0,
+    raspiness: 80,
+    tessituraSpan: 90,
+  },
+  {
+    id: "wrong-fach",
+    name: "Wrong Fach",
+    gender: "male",
+    vocalFach: "bass_baritone",
+    genre: "Rock",
+    region: "western",
+    decade: "2020s",
+    timbreWeight: 80,
+    airiness: 0,
+    raspiness: 80,
+    tessituraSpan: 90,
+  },
+  {
+    id: "wrong-gender",
+    name: "Wrong Gender",
+    gender: "female",
+    vocalFach: "mezzo_soprano",
+    genre: "Rock",
+    region: "western",
+    decade: "2020s",
+    timbreWeight: 80,
+    airiness: 0,
+    raspiness: 80,
+    tessituraSpan: 90,
+  },
+];
 
-// DB semantic audit: larger timbreWeight is brighter/lighter, matching centroid.
-check(bieber.timbreWeight > leps.timbreWeight, "DB brightness direction Bieber > Leps");
-check(kipelov.timbreWeight > leps.timbreWeight, "DB bright ringing tenor > dark Leps");
+const selected = selectArchetypeRepresentatives(
+  {
+    gender: "male",
+    fach: "tenor",
+    brightness: "high",
+    rasp: "high",
+    region: "western",
+    genre: "Rock",
+    limit: 5,
+  },
+  fixture
+);
+check(selected.map((star) => star.id).join(",") === "exact,fallback", "exact categorical priority and fallback");
+check(
+  selected.every(
+    (star) => star.gender === "male" && star.vocalFach === "tenor"
+  ),
+  "representatives enforce exact gender and Fach"
+);
+check(
+  selected.every(
+    (star) =>
+      !("percent" in star) &&
+      !("score" in star) &&
+      !("similarity" in star) &&
+      !("distance" in star)
+  ),
+  "representative result contains no similarity data"
+);
 
-for (const [label, vector, fach] of [
-  ["light", bieberLike, "tenor"],
-  ["deep", deepRaspy, "bass_baritone"],
-] as const) {
-  const matches = matchCelebrities("male", vector, { userFach: fach });
-  check(matches.length > 0, `${label}: eligible cohort exists`);
-  check(
-    matches.every((m) => m.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD),
-    `${label}: garbage rejected before UX calibration`
-  );
-  check(
-    matches.every((m) => m.percent >= MIN_DISPLAY_PERCENT && m.percent <= 100),
-    `${label}: displayed percent bounds`
-  );
-  check(
-    (matches[0]?.percent ?? 0) >= RECALIBRATION_BEST_MIN_PERCENT &&
-      (matches[0]?.percent ?? 101) <= RECALIBRATION_BEST_MAX_PERCENT,
-    `${label}: best in 85-95`
-  );
-  check(
-    matches.slice(1, 5).every(
-      (m) =>
-        m.percent >= RECALIBRATION_OTHERS_MIN_PERCENT &&
-        m.percent <= RECALIBRATION_OTHERS_MAX_PERCENT
-    ),
-    `${label}: remaining top-5 in 60-94`
-  );
-  check(
-    matches.every((m, i) => i === 0 || matches[i - 1]!.distance <= m.distance),
-    `${label}: distance ordering preserved`
-  );
-  check(
-    matches.every(
-      (m, i) => i === 0 || matches[i - 1]!.percent >= m.percent
-    ),
-    `${label}: calibrated score monotonicity`
-  );
-  check(
-    matches.every((m) => m.celebrity.vocalFach === fach),
-    `${label}: no cross-Fach padding`
-  );
-
-  const grouped = groupMatchesByDecadeAndGenre(matches, 5);
-  for (const eras of Object.values(grouped)) {
-    for (const bucket of Object.values(eras ?? {})) {
-      check((bucket?.length ?? 0) <= 5, `${label}: bucket is up to five`);
-      check(
-        (bucket ?? []).every((m) => m.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD),
-        `${label}: no garbage bucket padding`
-      );
-    }
+for (const gender of ["male", "female"] as const) {
+  for (const fach of gender === "male"
+    ? (["bass_baritone", "tenor"] as const)
+    : (["contralto", "mezzo_soprano"] as const)) {
+    const pool = CELEBRITIES_DB.filter(
+      (star) => star.gender === gender && star.vocalFach === fach
+    );
+    check(pool.length > 0, `${gender}/${fach} reference pool exists`);
   }
 }
 
-console.log("Bieber-like distances:", lightDistances);
-console.log("Deep/raspy distances:", deepDistances);
+const componentSource = readFileSync(
+  new URL("../components/ai/TimbreMatcher.tsx", import.meta.url),
+  "utf8"
+);
+check(!componentSource.includes(".percent"), "UI does not render match percentages");
+check(!componentSource.includes("Ближайший двойник"), "UI makes no celebrity-match claim");
 
 if (failed > 0) process.exit(1);
-console.log("OK: DSP normalization, hard Fach barrier, 3-D ranking, UX calibration, DB semantics");
+console.log(
+  "OK: normalization, Fach, bins, archetype names and reference filtering"
+);

@@ -1,11 +1,11 @@
 /**
- * Voice measurement primitives for the 3-D Voice Celebrity Match
+ * Voice measurement primitives for the offline Vocal Archetype
  * (client-safe, pure — no DOM/AudioContext dependencies, so it is
  * directly unit-testable with synthetic signals).
  *
  * The live frame-by-frame extraction runs inside
  * `components/ai/TimbreMatcher.tsx` (it needs a live AudioContext/stream):
- * Meyda computes `spectralCentroid` + `spectralFlatness` + `zcr` + `rms` per
+ * Meyda computes `spectralCentroid` + `spectralFlatness` + `rms` per
  * frame, while `pitchfinder`'s YIN detector computes F0 from RAW PCM tapped
  * via a parallel `AnalyserNode` on the same source — deliberately NOT Meyda's
  * own `buffer` feature, which is the Hanning-WINDOWED signal and destroys
@@ -14,11 +14,10 @@
  *
  * This module owns the pure part: gating out near-silent frames, accumulating
  * the per-frame series, reducing them to medians, and converting raw Meyda
- * values onto the same 0-100 axes the stars are authored on.
+ * values onto stable 0-100 axes.
  *
  * Axes (all 0-100, FIXED linear calibration — never per-take min/max):
  *   timbreWeight ← median spectral centroid, 150..2000 Hz
- *   airiness     ← median zero-crossing rate, 0..0.2 crossings/sample
  *   raspiness    ← median spectral flatness, 0..0.1
  *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
  *
@@ -83,9 +82,6 @@ export const FLATNESS_RASP_MAX = 0.1;
 /**
  * Calibration range for zero-crossing RATE → `airiness` (0-100).
  */
-export const ZCR_AIR_MIN = 0;
-export const ZCR_AIR_MAX = 0.2;
-
 /**
  * Meyda's `spectralCentroid` is `mu(1, ampSpectrum)` — the amplitude-weighted
  * mean BIN INDEX of the amplitude spectrum, NOT a frequency in Hz. Bin `k` of
@@ -133,24 +129,6 @@ export function centroidHzToWeight(centroidHz: number): number {
 /** Meyda spectralFlatness (0–1) → 0-100 raspiness. */
 export function flatnessToRaspiness(flatness: number): number {
   return Math.round(clampAndMap(flatness, FLATNESS_RASP_MIN, FLATNESS_RASP_MAX));
-}
-
-/**
- * Meyda 5.6.3's `zcr` extractor returns a zero-crossing COUNT per analysis
- * frame (verified against the installed package), not a unitless rate.
- * Divide by the exact frame length to obtain crossings/sample in [0,1].
- */
-export function zcrCountToRate(zcrCount: number, frameLength: number): number {
-  if (!Number.isFinite(zcrCount) || zcrCount < 0 || frameLength <= 0) return 0;
-  return clamp01(zcrCount / frameLength);
-}
-
-/** @deprecated Use the unit-explicit `zcrCountToRate`. */
-export const zcrToRate = zcrCountToRate;
-
-/** Zero-crossing rate (crossings/sample) → strict 0-100 airiness. */
-export function zcrRateToAiriness(zcrRate: number): number {
-  return Math.round(clampAndMap(zcrRate, ZCR_AIR_MIN, ZCR_AIR_MAX));
 }
 
 /**
@@ -220,16 +198,8 @@ export type VoiceMeasurement = {
   /** Median Meyda spectralFlatness (0–1) across non-silent frames. */
   medianFlatness: number;
   p75Flatness: number;
-  /** Median zero-crossing rate (0–1) across non-silent frames. */
-  medianZcrRate: number;
-  /** Median raw Meyda 5.6.3 zero-crossing COUNT per analysis frame. */
-  medianZcrCount: number;
-  /** Analysis-frame sample count used to normalize `medianZcrCount`. */
-  zcrFrameLength: number;
   /** Median centroid → 0-100, same scale as the stars' `timbreWeight`. */
   userWeight: number;
-  /** Median ZCR rate → 0-100, same scale as the stars' `airiness`. */
-  userAiriness: number;
   /** Median flatness → 0-100, same scale as the stars' `raspiness`. */
   userRaspiness: number;
   /** Pitch IQR mapped 0–100, same scale as the stars' `tessituraSpan`. */
@@ -256,14 +226,12 @@ function median(values: number[]): number {
  * Accumulates the per-frame series captured live during the take, gating out
  * near-silent frames via `RMS_NOISE_FLOOR`.
  *
- * Decoupling: centroid / flatness / zcr come from RMS-voiced frames; F0
+ * Decoupling: centroid / flatness come from RMS-voiced frames; F0
  * comes only from YIN-success frames.
  */
 export class VoiceMeasurementAccumulator {
   private centroidBins: number[] = [];
   private flatness: number[] = [];
-  private zcrCounts: number[] = [];
-  private zcrRates: number[] = [];
   private pitchHz: number[] = [];
   private voicedRms: number[] = [];
   private frames = 0;
@@ -277,8 +245,8 @@ export class VoiceMeasurementAccumulator {
   ) {}
 
   /**
-   * Feed one analysis frame. `centroidBin`, `rms`, `spectralFlatness` and
-   * `zcr` come from Meyda; `f0Hz` comes from running YIN over raw PCM for
+   * Feed one analysis frame. `centroidBin`, `rms` and `spectralFlatness`
+   * come from Meyda; `f0Hz` comes from running YIN over raw PCM for
    * roughly the same window (null when YIN found no usable pitch — such a
    * frame STILL contributes its timbre features, see `MIN_PITCHED_FRAMES`).
    * Malformed values are ignored.
@@ -287,8 +255,7 @@ export class VoiceMeasurementAccumulator {
     centroidBin: number | undefined,
     rms: number | undefined,
     f0Hz?: number | null,
-    spectralFlatness?: number,
-    zcr?: number
+    spectralFlatness?: number
   ): void {
     this.totalFrames += 1;
     if (typeof rms !== "number" || !Number.isFinite(rms) || rms < this.noiseGateRms) return;
@@ -308,10 +275,6 @@ export class VoiceMeasurementAccumulator {
     if (typeof spectralFlatness === "number" && Number.isFinite(spectralFlatness) && spectralFlatness >= 0) {
       this.flatness.push(spectralFlatness);
     }
-    if (typeof zcr === "number" && Number.isFinite(zcr) && zcr >= 0) {
-      this.zcrCounts.push(zcr);
-      this.zcrRates.push(zcrCountToRate(zcr, this.bufferSize));
-    }
     this.pitchHz.push(f0Hz as number);
   }
 
@@ -329,8 +292,6 @@ export class VoiceMeasurementAccumulator {
     if (this.pitchHz.length < MIN_PITCHED_FRAMES) return null;
     if (this.centroidBins.length === 0) return null;
     if (this.flatness.length === 0) return null;
-    if (this.zcrRates.length === 0) return null;
-
     const medianCentroidHz = centroidBinToHz(
       median(this.centroidBins),
       this.sampleRate,
@@ -343,11 +304,8 @@ export class VoiceMeasurementAccumulator {
     );
     const medianFlatness = median(this.flatness);
     const p75Flatness = percentile(this.flatness, 0.75);
-    const medianZcrCount = median(this.zcrCounts);
-    const medianZcrRate = median(this.zcrRates);
     const p25Hz = percentile(this.pitchHz, 0.25);
     const p75Hz = percentile(this.pitchHz, 0.75);
-    const userAiriness = zcrRateToAiriness(medianZcrRate);
     const userWeight = centroidHzToWeight(medianCentroidHz);
     const userRaspiness = flatnessToRaspiness(medianFlatness);
 
@@ -359,11 +317,7 @@ export class VoiceMeasurementAccumulator {
       p75CentroidHz,
       medianFlatness,
       p75Flatness,
-      medianZcrCount,
-      medianZcrRate,
-      zcrFrameLength: this.bufferSize,
       userWeight: Math.max(0, Math.min(100, userWeight)),
-      userAiriness: Math.max(0, Math.min(100, userAiriness)),
       userRaspiness: Math.max(0, Math.min(100, userRaspiness)),
       tessituraSpan: pitchIqrToSpan(p25Hz, p75Hz),
       frameCount: this.frames,

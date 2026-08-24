@@ -34,7 +34,7 @@ const TABS: Array<{
 }> = [
   { id: "tuner", label: "Нейроанализатор нот", icon: Mic },
   { id: "remover", label: "Удаление вокала", icon: WandSparkles },
-  { id: "timbre", label: "Звёздный двойник", icon: Stars },
+  { id: "timbre", label: "Вокальный архетип", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
 ];
@@ -91,7 +91,7 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="Нейросети Premium"
-      subtitle="Анализ нот, тональность, минусовка, Звёздный двойник и сведение"
+      subtitle="Анализ нот, тональность, минусовка, вокальный архетип и сведение"
       bottomInset
     >
       <StudentNav />

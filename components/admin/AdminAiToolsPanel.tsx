@@ -23,7 +23,7 @@ const SUB_TABS: Array<{
   { id: "access", label: "Доступ", icon: Shield },
   { id: "tuner", label: "Нейроанализатор нот", icon: Mic },
   { id: "remover", label: "Удаление вокала", icon: WandSparkles },
-  { id: "timbre", label: "Звёздный двойник", icon: Stars },
+  { id: "timbre", label: "Вокальный архетип", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
 ];

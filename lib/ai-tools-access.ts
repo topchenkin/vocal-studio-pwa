@@ -30,7 +30,7 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
 > = {
   tuner: { min_tier: "none", enabled: true, title: "Нейроанализатор нот" },
   remover: { min_tier: "premium", enabled: true, title: "Удаление вокала" },
-  timbre: { min_tier: "premium", enabled: true, title: "Звёздный двойник" },
+  timbre: { min_tier: "premium", enabled: true, title: "Вокальный архетип" },
   mixer: { min_tier: "standard", enabled: true, title: "Сведение дорожек" },
   pitchshift: {
     min_tier: "standard",

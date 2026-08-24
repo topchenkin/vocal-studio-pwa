@@ -1,29 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Square, Stars } from "lucide-react";
+import { Mic, ShieldCheck, Sparkles, Square } from "lucide-react";
 import Button from "@/components/ui/Button";
 import {
-  CELEBRITY_DECADES,
   CELEBRITY_GENRES,
   CELEBRITY_REGIONS,
   DECADE_LABEL_RU,
-  FEMALE_FACH_SPLIT_HZ,
   GENRE_LABEL_RU,
-  MALE_FACH_SPLIT_HZ,
-  MIN_DISPLAY_PERCENT,
-  RAW_DISTANCE_GARBAGE_THRESHOLD,
-  RECALIBRATION_BEST_MAX_PERCENT,
-  RECALIBRATION_BEST_MIN_PERCENT,
   REGION_LABEL_RU,
   VOCAL_FACH_LABEL_RU,
-  classifyVocalFach,
-  groupMatchesByDecadeAndGenre,
-  matchCelebrities,
-  type CelebrityMatch,
+  type CelebrityProfile,
   type CelebrityRegion,
   type Genre,
 } from "@/lib/celebritiesDB";
+import {
+  COLOUR_LABEL_RU,
+  PITCH_HEIGHT_LABEL_RU,
+  RASP_LABEL_RU,
+  deriveVocalArchetype,
+  selectArchetypeRepresentatives,
+} from "@/lib/vocal-archetype";
 import {
   type TimbreGender,
   type VoiceMeasurement,
@@ -38,13 +35,12 @@ import { getSingingMicStream } from "@/lib/mic-audio";
 import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
+const REPRESENTATIVES_PER_GENRE = 5;
 
-type Stage = "idle" | "recording" | "extracting" | "matching" | "done";
-
+type Stage = "idle" | "recording" | "extracting" | "done";
 type Props = { locked?: boolean };
 
 const GENDERS: TimbreGender[] = ["male", "female"];
-
 const GENDER_LABEL_RU: Record<TimbreGender, string> = {
   male: "Мужской",
   female: "Женский",
@@ -55,13 +51,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [measurement, setMeasurement] = useState<VoiceMeasurement | null>(null);
-  /**
-   * MANDATORY, explicitly chosen BEFORE recording — never auto-detected.
-   * Filters the celebrity pool to this gender only.
-   */
   const [gender, setGender] = useState<TimbreGender | null>(null);
-  /** Results tab: Russian vs Western — never mixed in one list. */
-  const [regionTab, setRegionTab] = useState<CelebrityRegion>("russian");
+  const [regionTab, setRegionTab] =
+    useState<CelebrityRegion>("russian");
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -78,16 +70,16 @@ export default function TimbreMatcher({ locked = false }: Props) {
     try {
       pcmSessionRef.current?.abort();
     } catch {
-      /* already aborted */
+      // Capture may already be stopped.
     }
     pcmSessionRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
     releaseIosCapture(streamRef.current);
     streamRef.current = null;
-    const ctx = audioContextRef.current;
+    const context = audioContextRef.current;
     audioContextRef.current = null;
-    if (ctx && ctx.state !== "closed") {
-      void ctx.close().catch(() => undefined);
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => undefined);
     }
   };
 
@@ -101,7 +93,6 @@ export default function TimbreMatcher({ locked = false }: Props) {
         throw new Error("Запись слишком короткая — спойте ещё раз");
       }
 
-      // Extreme silence / knocks only — quiet normal singing must pass.
       const presence = assessVocalPresence(audioBuffer);
       if (!presence.ok) {
         throw new Error(presence.reason || "Голос не обнаружен");
@@ -109,93 +100,59 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
 
       setStage("extracting");
-      // Careful offline pass over the full PCM (meyda + YIN), with UI yields.
       const result = await analyzeVoiceBuffer(audioBuffer);
       if (isStale(analysisId)) return;
-
       if (!result) {
         throw new Error(
-          "Слишком мало голосового сигнала — спойте пару фраз обычным голосом ближе к микрофону (кричать не нужно)."
+          "Слишком мало устойчивого голосового сигнала. Спойте пару фраз ближе к микрофону обычным голосом."
         );
       }
 
-      if (!gender) throw new Error("Сначала выберите пол");
-      const detectedFach = classifyVocalFach(gender, result.medianHz);
-      const initialMatches = matchCelebrities(
-        gender,
-        {
-          timbreWeight: result.userWeight,
-          airiness: result.userAiriness,
-          raspiness: result.userRaspiness,
-        },
-        { userFach: detectedFach }
-      );
-      const initialBest = initialMatches[0] ?? null;
       console.info("[DSP_DEBUG]", {
-        сырые_медианы: {
-          spectralCentroidHz: result.medianCentroidHz,
-          spectralFlatness: result.medianFlatness,
-          zcrCount: result.medianZcrCount,
-          zcrRate: result.medianZcrRate,
-          frameSize: result.zcrFrameLength,
+        centroidHz: result.medianCentroidHz,
+        spectralFlatness: result.medianFlatness,
+        normalized: {
+          brightness: result.userWeight,
+          rasp: result.userRaspiness,
         },
-        шумовой_гейт_RMS: {
-          noiseFloor: result.noiseFloorRms,
-          threshold: result.noiseGateRms,
-          voicedMedian: result.medianVoicedRms,
-        },
-        нормализация_0_100: {
-          userWeight: result.userWeight,
-          airiness: result.userAiriness,
-          raspiness: result.userRaspiness,
-        },
-        F0_Hz: {
+        f0Hz: {
           median: result.medianHz,
           p25: result.p25Hz,
           p75: result.p75Hz,
         },
-        выбранный_пол: gender,
-        определённый_fach: detectedFach,
-        кадры: {
+        rmsGate: {
+          noiseFloor: result.noiseFloorRms,
+          threshold: result.noiseGateRms,
+          voicedMedian: result.medianVoicedRms,
+        },
+        frames: {
           valid: result.frameCount,
           pitched: result.pitchedFrameCount,
           total: result.totalFrameCount,
         },
-        лучший_результат: {
-          rawDistance: initialBest?.distance ?? null,
-          rawSimilarity: initialBest?.rawPercent ?? null,
-          calibratedScore: initialBest?.percent ?? null,
-        },
       });
-
-      setStage("matching");
-      // Let the matching stage paint before the sync rank.
-      await new Promise((r) => setTimeout(r, 40));
-      if (isStale(analysisId)) return;
 
       setMeasurement(result);
       setStage("done");
-    } catch (err) {
+    } catch (caught) {
       if (isStale(analysisId)) return;
       setMeasurement(null);
       setError(
-        err instanceof Error ? err.message : "Не удалось проанализировать запись"
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось проанализировать запись"
       );
       setStage("idle");
     } finally {
-      if (!isStale(analysisId)) {
-        busyRef.current = false;
-      }
+      if (!isStale(analysisId)) busyRef.current = false;
     }
   };
 
   const start = async () => {
     if (busyRef.current || stage === "recording" || !gender) return;
     busyRef.current = true;
-
     const analysisId = analysisIdRef.current + 1;
     analysisIdRef.current = analysisId;
-
     setError("");
     setMeasurement(null);
     setProgress(0);
@@ -204,7 +161,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       cleanupAudio();
       const stream = await getSingingMicStream();
       if (isStale(analysisId)) {
-        stream.getTracks().forEach((t) => t.stop());
+        stream.getTracks().forEach((track) => track.stop());
         releaseIosCapture(stream);
         busyRef.current = false;
         return;
@@ -215,13 +172,16 @@ export default function TimbreMatcher({ locked = false }: Props) {
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
-      const ctx = new AudioCtx();
-      if (ctx.state === "suspended") await ctx.resume();
-      audioContextRef.current = ctx;
+      const context = new AudioCtx();
+      if (context.state === "suspended") await context.resume();
+      audioContextRef.current = context;
 
-      const pcmSession = startContextPcmCapture(ctx, stream, ctx.currentTime);
+      const pcmSession = startContextPcmCapture(
+        context,
+        stream,
+        context.currentTime
+      );
       pcmSessionRef.current = pcmSession;
-
       finishingRef.current = false;
       setStage("recording");
 
@@ -235,18 +195,19 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
         try {
           const audioBuffer = await pcmSession.stop();
-          stream.getTracks().forEach((t) => t.stop());
+          stream.getTracks().forEach((track) => track.stop());
           if (streamRef.current === stream) streamRef.current = null;
           pcmSessionRef.current = null;
-          if (audioContextRef.current === ctx) audioContextRef.current = null;
-          await ctx.close().catch(() => undefined);
-
+          if (audioContextRef.current === context) audioContextRef.current = null;
+          await context.close().catch(() => undefined);
           await finalize(audioBuffer, analysisId);
-        } catch (err) {
+        } catch (caught) {
           if (isStale(analysisId)) return;
           cleanupAudio();
           setError(
-            err instanceof Error ? err.message : "Не удалось обработать запись"
+            caught instanceof Error
+              ? caught.message
+              : "Не удалось обработать запись"
           );
           setStage("idle");
           busyRef.current = false;
@@ -255,8 +216,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       const started = performance.now();
       const progressTimer = window.setInterval(() => {
-        const pct = Math.min(100, ((performance.now() - started) / RECORD_MS) * 100);
-        setProgress(pct);
+        setProgress(
+          Math.min(100, ((performance.now() - started) / RECORD_MS) * 100)
+        );
       }, 100);
       const finishTimer = window.setTimeout(() => {
         void endCapture();
@@ -271,70 +233,46 @@ export default function TimbreMatcher({ locked = false }: Props) {
     }
   };
 
-  const stopEarly = () => {
-    void endCaptureRef.current?.();
-  };
-
-  /** Gender switch reclassifies Fach from stored F0; no rerecording required. */
-  const fach = useMemo(
-    () => (measurement && gender ? classifyVocalFach(gender, measurement.medianHz) : null),
-    [measurement, gender]
-  );
-
-  const matches: CelebrityMatch[] = useMemo(() => {
-    if (!measurement || !gender || !fach) return [];
-    return matchCelebrities(
-      gender,
-      {
-        timbreWeight: measurement.userWeight,
-        airiness: measurement.userAiriness,
-        raspiness: measurement.userRaspiness,
-        tessituraSpan: measurement.tessituraSpan,
-      },
-      { userFach: fach }
-    );
-  }, [measurement, gender, fach]);
-
-  const regionMatches = useMemo(
-    () => matches.filter((m) => m.celebrity.region === regionTab),
-    [matches, regionTab]
-  );
-
-  const groupedByDecade = useMemo(
-    () => groupMatchesByDecadeAndGenre(regionMatches, 5, MIN_DISPLAY_PERCENT),
-    [regionMatches]
-  );
-
-  const visibleDecades = useMemo(
+  const archetype = useMemo(
     () =>
-      CELEBRITY_DECADES.filter((decade) => {
-        const genres = groupedByDecade[decade];
-        if (!genres) return false;
-        return CELEBRITY_GENRES.some((genre) => (genres[genre]?.length ?? 0) > 0);
-      }),
-    [groupedByDecade]
+      measurement && gender
+        ? deriveVocalArchetype(
+            gender,
+            measurement.medianHz,
+            measurement.userWeight,
+            measurement.userRaspiness
+          )
+        : null,
+    [gender, measurement]
   );
 
-  const regionCounts = useMemo(() => {
-    const counts: Record<CelebrityRegion, number> = { russian: 0, western: 0 };
-    for (const m of matches) {
-      if (m.percent >= MIN_DISPLAY_PERCENT) counts[m.celebrity.region] += 1;
+  const representatives = useMemo(() => {
+    if (!gender || !archetype) {
+      return {} as Partial<Record<Genre, CelebrityProfile[]>>;
     }
-    return counts;
-  }, [matches]);
+    return Object.fromEntries(
+      CELEBRITY_GENRES.map((genre) => [
+        genre,
+        selectArchetypeRepresentatives({
+          gender,
+          fach: archetype.fach,
+          brightness: archetype.brightness,
+          rasp: archetype.rasp,
+          region: regionTab,
+          genre,
+          limit: REPRESENTATIVES_PER_GENRE,
+        }),
+      ])
+    ) as Partial<Record<Genre, CelebrityProfile[]>>;
+  }, [archetype, gender, regionTab]);
 
-  const topMatch = matches[0] ?? null;
-  const bestRawPercent = matches.reduce(
-    (m, x) => Math.max(m, x.rawPercent),
-    0
-  );
-  const isBusy = stage === "recording" || stage === "extracting" || stage === "matching";
+  const isBusy = stage === "recording" || stage === "extracting";
 
   if (locked) {
     return (
       <LockedCard
-        title="Звёздный двойник"
-        text="Спойте десять секунд — Звёздный двойник найдёт, чей голос звучит как ваш. Тип голоса, совпадения с исполнителями и момент, после которого хочется петь ещё. Доступно на Premium."
+        title="Вокальный архетип"
+        text="Спойте десять секунд — инструмент локально определит ориентировочный тип, окрас и текстуру голоса. Доступно на Premium."
       />
     );
   }
@@ -343,16 +281,15 @@ export default function TimbreMatcher({ locked = false }: Props) {
     <section className="rounded-3xl bg-studio-surface p-4 ring-1 ring-studio-border sm:p-6">
       <div className="flex items-start gap-3">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pink-500/10">
-          <Stars className="h-5 w-5 text-pink-300" />
+          <Sparkles className="h-5 w-5 text-pink-300" />
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            Звёздный двойник
+            Вокальный архетип
           </h2>
-          <p className="mt-1 text-sm text-studio-muted">
-            Выберите пол, спойте десять секунд обычным голосом — после записи
-            мы разберём тембр и покажем ближайших исполнителей по эпохам и
-            жанрам. Кричать не нужно.
+          <p className="mt-1 text-sm leading-relaxed text-studio-muted">
+            Выберите пол и спойте десять секунд обычным голосом. Анализ
+            выполняется на устройстве после записи; аудио никуда не отправляется.
           </p>
         </div>
       </div>
@@ -360,53 +297,42 @@ export default function TimbreMatcher({ locked = false }: Props) {
       <div className="mt-5 rounded-2xl bg-studio-bg/80 p-3 ring-1 ring-studio-border">
         <p className="mb-2 text-sm font-medium text-studio-text">Ваш пол:</p>
         <div className="flex gap-1 rounded-xl bg-studio-card p-1">
-          {GENDERS.map((g) => (
+          {GENDERS.map((item) => (
             <button
-              key={g}
+              key={item}
               type="button"
               disabled={isBusy}
-              onClick={() => setGender(g)}
-              aria-pressed={gender === g}
+              onClick={() => setGender(item)}
+              aria-pressed={gender === item}
               className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                gender === g
+                gender === item
                   ? "bg-studio-accent/20 text-studio-accent-light ring-1 ring-studio-accent/40"
                   : "text-studio-muted hover:text-studio-text"
               }`}
             >
-              {GENDER_LABEL_RU[g]}
+              {GENDER_LABEL_RU[item]}
             </button>
           ))}
         </div>
-        {!gender && (
-          <p className="mt-2 text-xs text-amber-300">
-            Выберите пол — база сразу сузится только до вашего пола.
-          </p>
-        )}
         <p className="mt-2 text-xs leading-relaxed text-studio-muted">
-          Хотите увидеть, на кого из исполнителей другого пола похож ваш голос?
-          Выберите противоположный пол — после записи совпадения пересчитаются
-          сразу, петь заново не нужно.
+          Пол нужен только для выбора диапазонов. После анализа его можно
+          переключить — результат пересчитается без новой записи.
         </p>
       </div>
 
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+      <div className="mt-4">
         {stage === "recording" ? (
-          <Button fullWidth size="lg" variant="danger" onClick={stopEarly}>
+          <Button fullWidth size="lg" variant="danger" onClick={() => void endCaptureRef.current?.()}>
             <Square className="h-4 w-4 fill-current" />
             Стоп · {Math.round(progress)}%
           </Button>
-        ) : stage === "extracting" || stage === "matching" ? (
+        ) : stage === "extracting" ? (
           <Button fullWidth size="lg" disabled>
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
-            Анализируем…
+            Анализируем на устройстве…
           </Button>
         ) : (
-          <Button
-            fullWidth
-            size="lg"
-            disabled={!gender}
-            onClick={() => void start()}
-          >
+          <Button fullWidth size="lg" disabled={!gender} onClick={() => void start()}>
             <Mic className="h-5 w-5" />
             Спеть 10 секунд
           </Button>
@@ -422,72 +348,51 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
       )}
 
-      {(stage === "extracting" || stage === "matching") && (
-        <div className="mt-5 flex flex-col items-center gap-3 rounded-2xl bg-studio-bg/80 px-4 py-8 text-center ring-1 ring-studio-border">
-          <span
-            className="h-12 w-12 animate-spin rounded-full border-[3px] border-pink-400/30 border-t-pink-400"
-            aria-hidden
-          />
-          <p className="font-medium text-studio-text">
-            {stage === "extracting"
-              ? "Считаем параметры голоса…"
-              : "Подбираем исполнителей…"}
-          </p>
-          <p className="max-w-xs text-sm text-studio-muted">
-            Анализ идёт после записи — это займёт несколько секунд, не
-            закрывайте страницу.
+      {stage === "extracting" && (
+        <div className="mt-5 rounded-2xl bg-studio-bg/80 px-4 py-7 text-center ring-1 ring-studio-border">
+          <p className="font-medium text-studio-text">Считаем параметры голоса…</p>
+          <p className="mt-1 text-sm text-studio-muted">
+            Pitchfinder/YIN и Meyda обрабатывают сохранённый в памяти PCM локально.
           </p>
         </div>
       )}
 
-      {stage === "done" && measurement && fach && gender && (
-        <div className="mt-6 space-y-6">
-          <div className="rounded-2xl bg-studio-bg/80 px-4 py-4 text-center ring-1 ring-studio-border">
-            <p className="text-lg leading-snug text-studio-text">
-              Анализ завершён. Ваш тип голоса:{" "}
-              <span className="font-semibold text-pink-300">
-                {VOCAL_FACH_LABEL_RU[fach]}
-              </span>
-              . Медианная частота:{" "}
-              <span className="font-semibold text-studio-accent-light tabular-nums">
-                {Math.round(measurement.medianHz)} Hz
-              </span>
-              .
+      {stage === "done" && measurement && archetype && gender && (
+        <div className="mt-6 space-y-5">
+          <div className="rounded-2xl bg-gradient-to-br from-pink-500/10 to-studio-accent/10 p-5 ring-1 ring-pink-400/25">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-pink-300">
+              Ваш вокальный архетип:
             </p>
+            <h3 className="mt-2 font-display text-2xl font-semibold text-studio-text sm:text-3xl">
+              {archetype.name}
+            </h3>
             <p className="mt-2 text-sm text-studio-muted">
-              Тембр {measurement.userWeight}/100 · Воздух{" "}
-              {measurement.userAiriness}/100 · Расщепление{" "}
-              {measurement.userRaspiness}/100 · Ширина тесситуры{" "}
-              {measurement.tessituraSpan}/100
+              Ориентировочная интерпретация по этой записи
             </p>
-            {topMatch && (
-              <p className="mt-3 text-base text-studio-text">
-                Ближайший двойник:{" "}
-                <span className="font-semibold text-pink-300">
-                  {topMatch.celebrity.name}
-                </span>{" "}
-                (
-                <span className="font-semibold text-pink-300 tabular-nums">
-                  {topMatch.percent}%
-                </span>
-                )
-                <span className="text-studio-muted">
-                  {" "}
-                  · {REGION_LABEL_RU[topMatch.celebrity.region]},{" "}
-                  {DECADE_LABEL_RU[topMatch.celebrity.decade]},{" "}
-                  {GENRE_LABEL_RU[topMatch.celebrity.genre]}
-                </span>
-              </p>
-            )}
           </div>
 
-          <DebugParamsPanel
-            measurement={measurement}
-            fach={fach}
-            gender={gender}
-            topMatch={topMatch}
-            bestRawPercent={bestRawPercent}
-          />
+          <div className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
+            <h3 className="font-display text-lg font-semibold text-studio-text">
+              Характеристики вашего тембра
+            </h3>
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Metric label="Высота" value={PITCH_HEIGHT_LABEL_RU[archetype.pitch]} />
+              <Metric label="Окрас" value={COLOUR_LABEL_RU[archetype.brightness]} />
+              <Metric label="Текстура" value={RASP_LABEL_RU[archetype.rasp]} />
+              <Metric label="Ориентировочный тип" value={VOCAL_FACH_LABEL_RU[archetype.fach]} />
+              <Metric label="Медианная высота" value={`${Math.round(measurement.medianHz)} Гц`} />
+            </dl>
+          </div>
+
+          <div>
+            <h3 className="font-display text-xl font-semibold text-studio-text">
+              Представители этого архетипа
+            </h3>
+            <p className="mt-1 text-sm text-studio-muted">
+              Справочные примеры того же пола и типа голоса, не результаты
+              идентификации или сравнения личности.
+            </p>
+          </div>
 
           <div className="flex gap-1 rounded-xl bg-studio-card p-1 ring-1 ring-studio-border">
             {CELEBRITY_REGIONS.map((region) => (
@@ -503,60 +408,28 @@ export default function TimbreMatcher({ locked = false }: Props) {
                 }`}
               >
                 {REGION_LABEL_RU[region]}
-                {regionCounts[region] > 0 ? (
-                  <span className="ml-1.5 tabular-nums text-xs opacity-70">
-                    ({Math.min(regionCounts[region], 99)})
-                  </span>
-                ) : null}
               </button>
             ))}
           </div>
 
-          {visibleDecades.length === 0 ? (
-            <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
-              В разделе «{REGION_LABEL_RU[regionTab]}» пока мало совпадений —
-              переключите вкладку или пол выше. База не пустая: попробуйте
-              другой регион.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {visibleDecades.map((decade) => {
-                const genreGroups = groupedByDecade[decade] ?? {};
-                const visibleGenres = CELEBRITY_GENRES.filter(
-                  (genre) => (genreGroups[genre]?.length ?? 0) > 0
-                );
-                if (visibleGenres.length === 0) return null;
-                return (
-                  <div
-                    key={decade}
-                    className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4"
-                  >
-                    <h3 className="mb-3 font-display text-lg font-semibold text-studio-text">
-                      {DECADE_LABEL_RU[decade]}
-                    </h3>
-                    <div
-                      className={`grid gap-5 ${
-                        visibleGenres.length > 1 ? "sm:grid-cols-2" : ""
-                      }`}
-                    >
-                      {visibleGenres.map((genre) => (
-                        <EraGenreList
-                          key={genre}
-                          genre={genre}
-                          matches={genreGroups[genre] ?? []}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {CELEBRITY_GENRES.map((genre) => (
+              <RepresentativeList
+                key={genre}
+                genre={genre}
+                representatives={representatives[genre] ?? []}
+              />
+            ))}
+          </div>
 
-          <p className="text-center text-xs text-studio-muted">
-            Ошиблись с полом? Переключите его выше — результат пересчитается
-            мгновенно, перезаписывать голос не нужно.
-          </p>
+          <div className="flex gap-2 rounded-2xl bg-studio-bg/80 p-3 text-xs leading-relaxed text-studio-muted ring-1 ring-studio-border">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+            <p>
+              Образовательная интерпретация одной 10-секундной записи. Это не
+              биометрическая идентификация, медицинская диагностика или строгая
+              классификация классического Fach. Аудио остаётся на устройстве.
+            </p>
+          </div>
         </div>
       )}
 
@@ -565,119 +438,42 @@ export default function TimbreMatcher({ locked = false }: Props) {
   );
 }
 
-function DebugParamsPanel({
-  measurement,
-  fach,
-  gender,
-  topMatch,
-  bestRawPercent,
-}: {
-  measurement: VoiceMeasurement;
-  fach: NonNullable<ReturnType<typeof classifyVocalFach>>;
-  gender: TimbreGender;
-  topMatch: CelebrityMatch | null;
-  bestRawPercent: number;
-}) {
-  const rows: Array<[string, string]> = [
-    ["Тембр / яркость (timbreWeight)", `${measurement.userWeight}/100`],
-    ["Воздух (airiness)", `${measurement.userAiriness}/100`],
-    ["Расщепление / rasp", `${measurement.userRaspiness}/100`],
-    ["Centroid median", `${measurement.medianCentroidHz.toFixed(1)} Hz`],
-    ["Flatness median", measurement.medianFlatness.toFixed(5)],
-    [
-      "ZCR median: count / rate",
-      `${measurement.medianZcrCount.toFixed(1)} / ${measurement.medianZcrRate.toFixed(5)} crossings/sample (${measurement.zcrFrameLength} samples)`,
-    ],
-    ["Ширина тесситуры", `${measurement.tessituraSpan}/100`],
-    ["Определённый fach", VOCAL_FACH_LABEL_RU[fach]],
-    ["Выбранный пол", GENDER_LABEL_RU[gender]],
-    [
-      "Порог Fach",
-      gender === "male"
-        ? `< ${MALE_FACH_SPLIT_HZ} Hz — Бас-баритон; ≥ ${MALE_FACH_SPLIT_HZ} Hz — Тенор`
-        : `< ${FEMALE_FACH_SPLIT_HZ} Hz — Контральто; ≥ ${FEMALE_FACH_SPLIT_HZ} Hz — Меццо-сопрано`,
-    ],
-    [
-      "Средний F0 / p25 / p75",
-      `${Math.round(measurement.medianHz)} / ${Math.round(measurement.p25Hz)} / ${Math.round(measurement.p75Hz)} Hz`,
-    ],
-    [
-      "Кадры: valid / pitched / total",
-      `${measurement.frameCount} / ${measurement.pitchedFrameCount} / ${measurement.totalFrameCount}`,
-    ],
-    [
-      "RMS: noise floor / gate / voiced",
-      `${measurement.noiseFloorRms.toFixed(5)} / ${measurement.noiseGateRms.toFixed(5)} / ${measurement.medianVoicedRms.toFixed(5)}`,
-    ],
-    [
-      "Presence / quality",
-      measurement.frameCount >= 16 && measurement.pitchedFrameCount >= 12
-        ? "ok (достаточно кадров)"
-        : "слабо (мало кадров)",
-    ],
-    [
-      "Distance / raw % → после",
-      topMatch
-        ? `${topMatch.distance.toFixed(1)} / ${topMatch.rawPercent}% → ${topMatch.percent}%`
-        : "—",
-    ],
-    [
-      "Пул: лучший raw %",
-      `${bestRawPercent}% → лучший ${RECALIBRATION_BEST_MIN_PERCENT}–${RECALIBRATION_BEST_MAX_PERCENT}%; отсев d>${RAW_DISTANCE_GARBAGE_THRESHOLD}`,
-    ],
-  ];
-
+function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <details className="rounded-2xl bg-amber-500/5 px-3 py-3 ring-1 ring-amber-500/30 open:pb-3">
-      <summary className="cursor-pointer select-none text-sm font-semibold text-amber-200/90">
-        Отладка параметров (временно)
-      </summary>
-      <dl className="mt-3 space-y-1.5 text-xs text-studio-muted">
-        {rows.map(([label, value]) => (
-          <div
-            key={label}
-            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b border-studio-border/40 pb-1.5 last:border-0"
-          >
-            <dt>{label}</dt>
-            <dd className="font-mono tabular-nums text-studio-text">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </details>
+    <div className="rounded-xl bg-studio-bg/70 px-3 py-3">
+      <dt className="text-xs text-studio-muted">{label}</dt>
+      <dd className="mt-1 font-medium text-studio-text">{value}</dd>
+    </div>
   );
 }
 
-function EraGenreList({
+function RepresentativeList({
   genre,
-  matches,
+  representatives,
 }: {
   genre: Genre;
-  matches: CelebrityMatch[];
+  representatives: CelebrityProfile[];
 }) {
   return (
-    <div>
-      <h4 className="mb-2.5 text-sm font-semibold text-studio-muted">
-        {GENRE_LABEL_RU[genre]}
-      </h4>
-      <ul className="space-y-3">
-        {matches.map((m, i) => (
-          <li
-            key={m.celebrity.id}
-            className="flex items-baseline justify-between gap-3 text-sm"
-          >
-            <span className="min-w-0 text-studio-text">
-              <span className="mr-1.5 tabular-nums text-studio-muted">
-                {i + 1}.
+    <section className="rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border">
+      <h4 className="font-semibold text-studio-text">{GENRE_LABEL_RU[genre]}</h4>
+      {representatives.length === 0 ? (
+        <p className="mt-3 text-sm text-studio-muted">
+          В базе пока нет представителей этой категории.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2.5">
+          {representatives.map((star) => (
+            <li key={star.id} className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-studio-text">{star.name}</span>
+              <span className="shrink-0 text-xs text-studio-muted">
+                {DECADE_LABEL_RU[star.decade]}
               </span>
-              {m.celebrity.name}
-            </span>
-            <span className="shrink-0 font-semibold tabular-nums text-pink-300">
-              {m.percent}%
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

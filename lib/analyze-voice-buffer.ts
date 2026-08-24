@@ -1,10 +1,10 @@
 /**
- * Offline (post-recording) voice feature extraction for «Звёздный двойник».
+ * Offline (post-recording) voice feature extraction for «Вокальный архетип».
  *
  * Deliberately runs AFTER the take ends so we can spend analysis time on the
  * full PCM buffer (overlapping frames, YIN on 4096 windows, Meyda spectra)
  * instead of racing live callbacks. Libraries used honestly:
- *   - meyda: rms, spectralCentroid, spectralFlatness, zcr
+ *   - meyda: rms, spectralCentroid, spectralFlatness
  *   - pitchfinder (YIN via lib/pitch): F0
  * No fabricated axes — every displayed parameter maps to a measured feature.
  */
@@ -24,7 +24,6 @@ const HOP = 1024;
 const FEATURES = [
   "spectralCentroid",
   "spectralFlatness",
-  "zcr",
   "rms",
 ] as const;
 
@@ -127,8 +126,7 @@ export async function analyzeVoiceBuffer(
       features.spectralCentroid,
       features.rms,
       f0,
-      features.spectralFlatness,
-      features.zcr
+      features.spectralFlatness
     );
 
     framesSeen += 1;
