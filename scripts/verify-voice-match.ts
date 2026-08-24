@@ -4,13 +4,16 @@
  */
 import {
   CELEBRITIES_DB,
-  FACH_MISMATCH_PENALTY,
+  FEMALE_FACH_SPLIT_HZ,
+  MALE_FACH_SPLIT_HZ,
   MIN_DISPLAY_PERCENT,
   RAW_DISTANCE_GARBAGE_THRESHOLD,
   RECALIBRATION_BEST_MAX_PERCENT,
   RECALIBRATION_BEST_MIN_PERCENT,
   RECALIBRATION_OTHERS_MAX_PERCENT,
   RECALIBRATION_OTHERS_MIN_PERCENT,
+  classifyVocalFach,
+  filterCelebrities,
   distanceToPercent,
   groupMatchesByDecadeAndGenre,
   matchCelebrities,
@@ -21,6 +24,7 @@ import {
 } from "../lib/celebritiesDB";
 import {
   clampAndMap,
+  clamp,
   centroidHzToWeight,
   flatnessToRaspiness,
   zcrCountToRate,
@@ -41,12 +45,14 @@ function close(actual: number, expected: number, message: string): void {
 }
 
 // Fixed linear normalization and strict clamping.
-close(clampAndMap(150, 150, 1500), 0, "centroid lower boundary");
-close(clampAndMap(825, 150, 1500), 50, "centroid midpoint");
-close(clampAndMap(1500, 150, 1500), 100, "centroid upper boundary");
+close(clampAndMap(150, 150, 2000), 0, "centroid lower boundary");
+close(clampAndMap(1075, 150, 2000), 50, "centroid midpoint");
+close(clampAndMap(2000, 150, 2000), 100, "centroid upper boundary");
 close(clampAndMap(-999, 0, 0.1), 0, "strict low clamp");
 close(clampAndMap(999, 0, 0.1), 100, "strict high clamp");
-check(centroidHzToWeight(150) === 0 && centroidHzToWeight(1500) === 100, "centroid map");
+close(clamp(-5, 0, 100), 0, "clamp lower bound");
+close(clamp(105, 0, 100), 100, "clamp upper bound");
+check(centroidHzToWeight(150) === 0 && centroidHzToWeight(2000) === 100, "centroid map");
 check(flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100, "flatness map");
 
 // Meyda 5.6.3 returns crossing count/frame. 80 / 2048 is the actual rate.
@@ -74,29 +80,33 @@ close(
   "60% timbre coefficient"
 );
 
-const mockBase: CelebrityProfile = {
-  id: "same",
-  name: "Same",
-  gender: "male",
-  vocalFach: "tenor",
-  genre: "Pop",
-  region: "western",
-  decade: "2010s",
+check(
+  classifyVocalFach("male", MALE_FACH_SPLIT_HZ - 0.01) === "bass_baritone" &&
+    classifyVocalFach("male", MALE_FACH_SPLIT_HZ) === "tenor",
+  "male hard Fach threshold"
+);
+check(
+  classifyVocalFach("female", FEMALE_FACH_SPLIT_HZ - 0.01) === "contralto" &&
+    classifyVocalFach("female", FEMALE_FACH_SPLIT_HZ) === "mezzo_soprano",
+  "female hard Fach threshold"
+);
+const hardFachPool = filterCelebrities("male", "tenor");
+check(
+  hardFachPool.length > 0 &&
+    hardFachPool.every(
+      (star) => star.gender === "male" && star.vocalFach === "tenor"
+    ),
+  "hard gender and exact-Fach pool"
+);
+const fachRank = rankCelebrities(hardFachPool, {
   timbreWeight: 50,
   airiness: 50,
   raspiness: 50,
-  tessituraSpan: 50,
-};
-const fachRank = rankCelebrities(
-  [
-    mockBase,
-    { ...mockBase, id: "cross", name: "Cross", vocalFach: "bass_baritone" },
-  ],
-  { timbreWeight: 50, airiness: 50, raspiness: 50 },
-  { userFach: "tenor" }
+});
+check(
+  fachRank.every((match) => match.celebrity.vocalFach === "tenor"),
+  "ranking cannot include cross-Fach candidates"
 );
-close(fachRank[0]?.distance ?? -1, 0, "same fach distance");
-close(fachRank[1]?.distance ?? -1, FACH_MISMATCH_PENALTY, "soft fach prior");
 
 check(distanceToPercent(5) > distanceToPercent(15), "raw similarity monotonicity");
 check(distanceToPercent(15) > distanceToPercent(30), "raw similarity monotonicity 2");
@@ -164,7 +174,7 @@ for (const [label, vector, fach] of [
   check(
     (matches[0]?.percent ?? 0) >= RECALIBRATION_BEST_MIN_PERCENT &&
       (matches[0]?.percent ?? 101) <= RECALIBRATION_BEST_MAX_PERCENT,
-    `${label}: best in 85-96`
+    `${label}: best in 85-95`
   );
   check(
     matches.slice(1, 5).every(
@@ -172,11 +182,21 @@ for (const [label, vector, fach] of [
         m.percent >= RECALIBRATION_OTHERS_MIN_PERCENT &&
         m.percent <= RECALIBRATION_OTHERS_MAX_PERCENT
     ),
-    `${label}: remaining top-5 in 70-85`
+    `${label}: remaining top-5 in 60-94`
   );
   check(
     matches.every((m, i) => i === 0 || matches[i - 1]!.distance <= m.distance),
     `${label}: distance ordering preserved`
+  );
+  check(
+    matches.every(
+      (m, i) => i === 0 || matches[i - 1]!.percent >= m.percent
+    ),
+    `${label}: calibrated score monotonicity`
+  );
+  check(
+    matches.every((m) => m.celebrity.vocalFach === fach),
+    `${label}: no cross-Fach padding`
   );
 
   const grouped = groupMatchesByDecadeAndGenre(matches, 5);
@@ -195,4 +215,4 @@ console.log("Bieber-like distances:", lightDistances);
 console.log("Deep/raspy distances:", deepDistances);
 
 if (failed > 0) process.exit(1);
-console.log("OK: DSP normalization, 3-D ranking, fach prior, UX calibration, DB semantics");
+console.log("OK: DSP normalization, hard Fach barrier, 3-D ranking, UX calibration, DB semantics");

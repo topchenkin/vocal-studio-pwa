@@ -8,8 +8,9 @@ import {
   CELEBRITY_GENRES,
   CELEBRITY_REGIONS,
   DECADE_LABEL_RU,
-  FACH_MISMATCH_PENALTY,
+  FEMALE_FACH_SPLIT_HZ,
   GENRE_LABEL_RU,
+  MALE_FACH_SPLIT_HZ,
   MIN_DISPLAY_PERCENT,
   RAW_DISTANCE_GARBAGE_THRESHOLD,
   RECALIBRATION_BEST_MAX_PERCENT,
@@ -120,23 +121,51 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       if (!gender) throw new Error("Сначала выберите пол");
       const detectedFach = classifyVocalFach(gender, result.medianHz);
-      console.info("[DSP_DEBUG]", {
-        rawMedians: {
-          spectralCentroidHz: result.medianCentroidHz,
-          spectralFlatness: result.medianFlatness,
-          zcr: {
-            rawCountPerFrame: result.medianZcrCount,
-            frameLengthSamples: result.zcrFrameLength,
-            normalizedRateCrossingsPerSample: result.medianZcrRate,
-          },
-        },
-        normalized0To100: {
-          timbreBrightness: result.userWeight,
+      const initialMatches = matchCelebrities(
+        gender,
+        {
+          timbreWeight: result.userWeight,
           airiness: result.userAiriness,
           raspiness: result.userRaspiness,
         },
-        gender,
-        fach: detectedFach,
+        { userFach: detectedFach }
+      );
+      const initialBest = initialMatches[0] ?? null;
+      console.info("[DSP_DEBUG]", {
+        сырые_медианы: {
+          spectralCentroidHz: result.medianCentroidHz,
+          spectralFlatness: result.medianFlatness,
+          zcrCount: result.medianZcrCount,
+          zcrRate: result.medianZcrRate,
+          frameSize: result.zcrFrameLength,
+        },
+        шумовой_гейт_RMS: {
+          noiseFloor: result.noiseFloorRms,
+          threshold: result.noiseGateRms,
+          voicedMedian: result.medianVoicedRms,
+        },
+        нормализация_0_100: {
+          userWeight: result.userWeight,
+          airiness: result.userAiriness,
+          raspiness: result.userRaspiness,
+        },
+        F0_Hz: {
+          median: result.medianHz,
+          p25: result.p25Hz,
+          p75: result.p75Hz,
+        },
+        выбранный_пол: gender,
+        определённый_fach: detectedFach,
+        кадры: {
+          valid: result.frameCount,
+          pitched: result.pitchedFrameCount,
+          total: result.totalFrameCount,
+        },
+        лучший_результат: {
+          rawDistance: initialBest?.distance ?? null,
+          rawSimilarity: initialBest?.rawPercent ?? null,
+          calibratedScore: initialBest?.percent ?? null,
+        },
       });
 
       setStage("matching");
@@ -246,17 +275,14 @@ export default function TimbreMatcher({ locked = false }: Props) {
     void endCaptureRef.current?.();
   };
 
-  /**
-   * Fach is informational + soft prior in ranking — NOT a hard DB filter.
-   * Flipping gender after the take re-matches the full gender pool instantly.
-   */
+  /** Gender switch reclassifies Fach from stored F0; no rerecording required. */
   const fach = useMemo(
     () => (measurement && gender ? classifyVocalFach(gender, measurement.medianHz) : null),
     [measurement, gender]
   );
 
   const matches: CelebrityMatch[] = useMemo(() => {
-    if (!measurement || !gender) return [];
+    if (!measurement || !gender || !fach) return [];
     return matchCelebrities(
       gender,
       {
@@ -414,7 +440,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
       )}
 
-      {stage === "done" && measurement && fach && (
+      {stage === "done" && measurement && fach && gender && (
         <div className="mt-6 space-y-6">
           <div className="rounded-2xl bg-studio-bg/80 px-4 py-4 text-center ring-1 ring-studio-border">
             <p className="text-lg leading-snug text-studio-text">
@@ -458,6 +484,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
           <DebugParamsPanel
             measurement={measurement}
             fach={fach}
+            gender={gender}
             topMatch={topMatch}
             bestRawPercent={bestRawPercent}
           />
@@ -541,11 +568,13 @@ export default function TimbreMatcher({ locked = false }: Props) {
 function DebugParamsPanel({
   measurement,
   fach,
+  gender,
   topMatch,
   bestRawPercent,
 }: {
   measurement: VoiceMeasurement;
   fach: NonNullable<ReturnType<typeof classifyVocalFach>>;
+  gender: TimbreGender;
   topMatch: CelebrityMatch | null;
   bestRawPercent: number;
 }) {
@@ -561,13 +590,24 @@ function DebugParamsPanel({
     ],
     ["Ширина тесситуры", `${measurement.tessituraSpan}/100`],
     ["Определённый fach", VOCAL_FACH_LABEL_RU[fach]],
+    ["Выбранный пол", GENDER_LABEL_RU[gender]],
+    [
+      "Порог Fach",
+      gender === "male"
+        ? `< ${MALE_FACH_SPLIT_HZ} Hz — Бас-баритон; ≥ ${MALE_FACH_SPLIT_HZ} Hz — Тенор`
+        : `< ${FEMALE_FACH_SPLIT_HZ} Hz — Контральто; ≥ ${FEMALE_FACH_SPLIT_HZ} Hz — Меццо-сопрано`,
+    ],
     [
       "Средний F0 / p25 / p75",
       `${Math.round(measurement.medianHz)} / ${Math.round(measurement.p25Hz)} / ${Math.round(measurement.p75Hz)} Hz`,
     ],
     [
-      "Кадры: voiced / pitched",
-      `${measurement.frameCount} / ${measurement.pitchedFrameCount}`,
+      "Кадры: valid / pitched / total",
+      `${measurement.frameCount} / ${measurement.pitchedFrameCount} / ${measurement.totalFrameCount}`,
+    ],
+    [
+      "RMS: noise floor / gate / voiced",
+      `${measurement.noiseFloorRms.toFixed(5)} / ${measurement.noiseGateRms.toFixed(5)} / ${measurement.medianVoicedRms.toFixed(5)}`,
     ],
     [
       "Presence / quality",
@@ -578,11 +618,7 @@ function DebugParamsPanel({
     [
       "Distance / raw % → после",
       topMatch
-        ? `${topMatch.distance.toFixed(1)} / ${topMatch.rawPercent}% → ${topMatch.percent}%${
-            topMatch.fachMismatch
-              ? ` (fach +${FACH_MISMATCH_PENALTY})`
-              : ""
-          }`
+        ? `${topMatch.distance.toFixed(1)} / ${topMatch.rawPercent}% → ${topMatch.percent}%`
         : "—",
     ],
     [

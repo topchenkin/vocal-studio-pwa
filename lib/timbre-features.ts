@@ -17,7 +17,7 @@
  * values onto the same 0-100 axes the stars are authored on.
  *
  * Axes (all 0-100, FIXED linear calibration — never per-take min/max):
- *   timbreWeight ← median spectral centroid, 150..1500 Hz
+ *   timbreWeight ← median spectral centroid, 150..2000 Hz
  *   airiness     ← median zero-crossing rate, 0..0.2 crossings/sample
  *   raspiness    ← median spectral flatness, 0..0.1
  *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
@@ -37,7 +37,7 @@ export type TimbreGender = "female" | "male";
  * The previous 0.012 floor forced students to shout before any frames passed.
  * Keep in sync with `assessVocalPresence` (~0.0035 active threshold).
  */
-export const RMS_NOISE_FLOOR = 0.004;
+export const RMS_NOISE_FLOOR = 0.0025;
 
 /**
  * Minimum number of above-noise-floor frames required before we trust the
@@ -65,11 +65,11 @@ export const MIN_PITCHED_FRAMES = 12;
  * up spanning the full 0-100 scale) and could not be compared against the
  * hand-authored star weights at all.
  *
- * 150 Hz maps to 0, 825 Hz to 50 and 1500 Hz to 100. Values outside the
+ * 150 Hz maps to 0, 1075 Hz to 50 and 2000 Hz to 100. Values outside the
  * interval are strictly clamped.
  */
 export const CENTROID_WEIGHT_MIN_HZ = 150;
-export const CENTROID_WEIGHT_MAX_HZ = 1500;
+export const CENTROID_WEIGHT_MAX_HZ = 2000;
 
 /**
  * Calibration range for Meyda `spectralFlatness` → `raspiness` (0-100).
@@ -101,8 +101,17 @@ export function centroidBinToHz(
   return (binIndex * sampleRate) / bufferSize;
 }
 
+/** Clamp a finite value to a closed interval. Non-finite input becomes min. */
+export function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) {
+    throw new RangeError("clamp requires finite max >= min");
+  }
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
 function clamp01(x: number): number {
-  return Math.max(0, Math.min(1, x));
+  return clamp(x, 0, 1);
 }
 
 /** Map a fixed input interval linearly to strict [0,100], clamping both ends. */
@@ -111,7 +120,7 @@ export function clampAndMap(value: number, min: number, max: number): number {
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
     throw new RangeError("clampAndMap requires finite max > min");
   }
-  return Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  return clamp(((value - min) / (max - min)) * 100, 0, 100);
 }
 
 /** Spectral centroid in Hz → 0-100 timbre weight. See the calibration note above. */
@@ -156,6 +165,32 @@ export function percentile(values: number[], p: number): number {
   const a = sorted[lo] ?? 0;
   const b = sorted[hi] ?? a;
   return a + (b - a) * (idx - lo);
+}
+
+/**
+ * Per-take adaptive gate. The low decile estimates room noise; the median cap
+ * prevents a take that starts singing immediately from setting its own voice
+ * as the noise floor. The absolute floor remains quiet-singing friendly.
+ */
+export function deriveAdaptiveNoiseGate(rmsValues: number[]): {
+  noiseFloorRms: number;
+  thresholdRms: number;
+  medianRms: number;
+} {
+  const valid = rmsValues.filter((x) => Number.isFinite(x) && x >= 0);
+  const noiseFloorRms = percentile(valid, 0.1);
+  const medianRms = percentile(valid, 0.5);
+  const adaptive = noiseFloorRms * 1.8;
+  const voiceFriendlyCap = medianRms > 0 ? medianRms * 0.55 : RMS_NOISE_FLOOR;
+  return {
+    noiseFloorRms,
+    medianRms,
+    thresholdRms: clamp(
+      Math.min(adaptive, voiceFriendlyCap),
+      RMS_NOISE_FLOOR,
+      0.012
+    ),
+  };
 }
 
 function hzToMidi(hz: number): number {
@@ -203,6 +238,14 @@ export type VoiceMeasurement = {
   frameCount: number;
   /** Subset of those where YIN also found an F0. */
   pitchedFrameCount: number;
+  /** All analysis frames considered before the adaptive gate. */
+  totalFrameCount: number;
+  /** Low-percentile RMS estimate of the recording's room-noise floor. */
+  noiseFloorRms: number;
+  /** Adaptive RMS threshold actually used for this take. */
+  noiseGateRms: number;
+  /** Median RMS of frames accepted as voiced/pitched. */
+  medianVoicedRms: number;
 };
 
 function median(values: number[]): number {
@@ -222,11 +265,15 @@ export class VoiceMeasurementAccumulator {
   private zcrCounts: number[] = [];
   private zcrRates: number[] = [];
   private pitchHz: number[] = [];
+  private voicedRms: number[] = [];
   private frames = 0;
+  private totalFrames = 0;
 
   constructor(
     private readonly sampleRate: number,
-    private readonly bufferSize: number
+    private readonly bufferSize: number,
+    private readonly noiseGateRms = RMS_NOISE_FLOOR,
+    private readonly noiseFloorRms = 0
   ) {}
 
   /**
@@ -243,10 +290,17 @@ export class VoiceMeasurementAccumulator {
     spectralFlatness?: number,
     zcr?: number
   ): void {
-    if (typeof rms !== "number" || !Number.isFinite(rms) || rms < RMS_NOISE_FLOOR) {
-      return; // silence gate
-    }
+    this.totalFrames += 1;
+    if (typeof rms !== "number" || !Number.isFinite(rms) || rms < this.noiseGateRms) return;
+
+    // A measured F0 is required for Fach anyway. Restricting all three timbre
+    // axes to these frames also keeps room hiss and unpitched knocks out.
+    const pitched =
+      typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0;
+    if (!pitched) return;
+
     this.frames += 1;
+    this.voicedRms.push(rms);
 
     if (typeof centroidBin === "number" && Number.isFinite(centroidBin) && centroidBin > 0) {
       this.centroidBins.push(centroidBin);
@@ -258,11 +312,7 @@ export class VoiceMeasurementAccumulator {
       this.zcrCounts.push(zcr);
       this.zcrRates.push(zcrCountToRate(zcr, this.bufferSize));
     }
-    const pitched =
-      typeof f0Hz === "number" && Number.isFinite(f0Hz) && f0Hz > 0;
-    if (pitched) {
-      this.pitchHz.push(f0Hz as number);
-    }
+    this.pitchHz.push(f0Hz as number);
   }
 
   get frameCount(): number {
@@ -318,6 +368,10 @@ export class VoiceMeasurementAccumulator {
       tessituraSpan: pitchIqrToSpan(p25Hz, p75Hz),
       frameCount: this.frames,
       pitchedFrameCount: this.pitchHz.length,
+      totalFrameCount: this.totalFrames,
+      noiseFloorRms: this.noiseFloorRms,
+      noiseGateRms: this.noiseGateRms,
+      medianVoicedRms: median(this.voicedRms),
     };
   }
 }

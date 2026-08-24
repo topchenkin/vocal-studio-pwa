@@ -12,9 +12,9 @@
 import type { MeydaFeaturesObject } from "meyda";
 import { createYinDetector } from "@/lib/pitch";
 import {
+  deriveAdaptiveNoiseGate,
   VoiceMeasurementAccumulator,
   type VoiceMeasurement,
-  RMS_NOISE_FLOOR,
 } from "@/lib/timbre-features";
 
 const SPECTRAL_BUFFER = 2048;
@@ -65,6 +65,19 @@ function yieldToUi(): Promise<void> {
   });
 }
 
+function frameRms(
+  signal: Float32Array,
+  start: number,
+  frameSize: number
+): number {
+  let energy = 0;
+  for (let i = start; i < start + frameSize; i += 1) {
+    const sample = signal[i] ?? 0;
+    energy += sample * sample;
+  }
+  return Math.sqrt(energy / frameSize);
+}
+
 /**
  * Full-buffer analysis. Returns null only when there is too little usable
  * voiced/pitched content (same gates as VoiceMeasurementAccumulator.finalize).
@@ -81,7 +94,17 @@ export async function analyzeVoiceBuffer(
   Meyda.sampleRate = sampleRate;
 
   const yin = createYinDetector(sampleRate);
-  const accumulator = new VoiceMeasurementAccumulator(sampleRate, SPECTRAL_BUFFER);
+  const rmsValues: number[] = [];
+  for (let start = 0; start + SPECTRAL_BUFFER <= channel.length; start += HOP) {
+    rmsValues.push(frameRms(channel, start, SPECTRAL_BUFFER));
+  }
+  const gate = deriveAdaptiveNoiseGate(rmsValues);
+  const accumulator = new VoiceMeasurementAccumulator(
+    sampleRate,
+    SPECTRAL_BUFFER,
+    gate.thresholdRms,
+    gate.noiseFloorRms
+  );
 
   const spectralFrame = new Float32Array(SPECTRAL_BUFFER);
   const pitchFrame = new Float32Array(PITCH_WINDOW);
@@ -100,22 +123,11 @@ export async function analyzeVoiceBuffer(
       f0 = yin(pitchFrame);
     }
 
-    // Rasp from broadband mic hiss without a voice fundamental is not rasp —
-    // only feed flatness when the frame is clearly voiced (RMS) OR pitched.
-    const rms = features.rms;
-    const voicedEnough =
-      typeof rms === "number" &&
-      Number.isFinite(rms) &&
-      rms >= RMS_NOISE_FLOOR * 1.25;
-    const pitched = typeof f0 === "number" && f0 > 0;
-    const flatness =
-      voicedEnough || pitched ? features.spectralFlatness : undefined;
-
     accumulator.addFrame(
       features.spectralCentroid,
       features.rms,
       f0,
-      flatness,
+      features.spectralFlatness,
       features.zcr
     );
 

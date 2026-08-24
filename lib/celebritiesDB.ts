@@ -6,13 +6,13 @@
  *   1. Student picks gender → pool = that gender only (opposite excluded).
  *   2. Record → offline feature extract (meyda + YIN) after the take.
  *   3. Measure axes on the same 0–100 scale the stars are authored on.
- *   4. Required 60/20/20 weighted 3-D distance + soft fach distance prior.
+ *   4. Hard gender + exact Fach barrier, then 60/20/20 weighted 3-D distance.
  *   5. Reject raw garbage, then globally recalibrate the eligible cohort.
  *   6. UI: region tabs (Российские / Зарубежные) → decade × genre top-5.
  *      Opposite gender never appears; empty DB never shown.
  *
  * Axes:
- *   1. `vocalFach`      — display / soft prior from median F0 (not a hard filter).
+ *   1. `vocalFach`      — hard eligibility barrier from median F0.
  *   2. `timbreWeight`   — 0 dark/heavy … 100 bright/ringing (spectral centroid).
  *   3. `airiness`       — 0 dense … 100 airy (zero-crossing rate).
  *   4. `raspiness`      — 0 clean … 100 rasp/split (spectral flatness).
@@ -132,14 +132,6 @@ export const AXIS_WEIGHTS = {
   airiness: 0.2,
   raspiness: 0.2,
 } as const;
-
-/**
- * Separate soft fach prior in distance points. The current enum has only two
- * fach values per gender, so there is one mismatch severity (no honest
- * adjacent/extreme distinction is representable). It is noticeable but never
- * a hard block.
- */
-export const FACH_MISMATCH_PENALTY = 12;
 
 /** Theoretical max of sqrt(.6*dT² + .2*dA² + .2*dR²). */
 export const MAX_WEIGHTED_DISTANCE = 100;
@@ -943,14 +935,12 @@ export function classifyVocalFach(
 
 export type CelebrityMatch = {
   celebrity: CelebrityProfile;
-  /** Final distance: required 3-D distance plus separate soft fach prior. */
+  /** Required 3-D distance within an exact-gender, exact-Fach pool. */
   distance: number;
-  /** UX-calibrated score; eligible candidates are always in [70,96]. */
+  /** UX-calibrated score; eligible candidates are always in [60,95]. */
   percent: number;
   /** Monotonic raw distance similarity, before UX recalibration. */
   rawPercent: number;
-  /** True when the separate soft fach distance prior was applied. */
-  fachMismatch?: boolean;
 };
 
 /**
@@ -970,11 +960,6 @@ export function euclideanDistance3D(user: TimbreVector, star: TimbreVector): num
   return Math.sqrt(dw * dw + da * da + dr * dr);
 }
 
-export type DistanceOptions = {
-  /** Optional fach used only by the separate soft prior, never as a 4th axis. */
-  userFach?: VocalFach | null;
-};
-
 /**
  * Required 3-D weighted Euclidean distance on consistent 0–100 axes:
  *
@@ -985,8 +970,7 @@ export type DistanceOptions = {
  */
 export function weightedDistance(
   user: TimbreVector,
-  star: CelebrityProfile,
-  _options?: DistanceOptions
+  star: CelebrityProfile
 ): number {
   const dt = user.timbreWeight - star.timbreWeight;
   const da = user.airiness - star.airiness;
@@ -1020,15 +1004,17 @@ export function distanceToPercent(distance: number): number {
  * prevents sparse era/genre cells from promoting unrelated voices.
  */
 export const RAW_DISTANCE_GARBAGE_THRESHOLD = 32;
+/** Absolute fallback ceiling used only to avoid an empty exact-Fach result. */
+export const RAW_DISTANCE_FALLBACK_MAX = 55;
 export const RECALIBRATION_BEST_MIN_PERCENT = 85;
-export const RECALIBRATION_BEST_MAX_PERCENT = 96;
-export const RECALIBRATION_OTHERS_MIN_PERCENT = 70;
-export const RECALIBRATION_OTHERS_MAX_PERCENT = 85;
+export const RECALIBRATION_BEST_MAX_PERCENT = 95;
+export const RECALIBRATION_OTHERS_MIN_PERCENT = 60;
+export const RECALIBRATION_OTHERS_MAX_PERCENT = 94;
 
 /**
- * Global eligible-cohort recalibration. The best maps to 85–96 according to
+ * Global eligible-cohort recalibration. The best maps to 85–95 according to
  * its raw similarity; every remaining eligible candidate maps monotonically
- * to 70–85 relative to best and the garbage boundary. No bucket is calibrated
+ * to 60..(best-1) relative to best and the cohort boundary. No bucket is calibrated
  * independently, so sparse cells cannot manufacture an 85% result.
  */
 export function recalibrateEligiblePercents(
@@ -1042,9 +1028,17 @@ export function recalibrateEligiblePercents(
       (RECALIBRATION_BEST_MAX_PERCENT - RECALIBRATION_BEST_MIN_PERCENT) *
         (bestRaw / 100)
   );
+  const cohortBoundary = Math.max(
+    RAW_DISTANCE_GARBAGE_THRESHOLD,
+    matches[matches.length - 1]?.distance ?? RAW_DISTANCE_GARBAGE_THRESHOLD
+  );
   const denominator = Math.max(
     Number.EPSILON,
-    RAW_DISTANCE_GARBAGE_THRESHOLD - bestDistance
+    cohortBoundary - bestDistance
+  );
+  const othersMax = Math.min(
+    RECALIBRATION_OTHERS_MAX_PERCENT,
+    bestPercent - 1
   );
 
   return matches.map((match, index) => {
@@ -1053,14 +1047,14 @@ export function recalibrateEligiblePercents(
       0,
       Math.min(
         1,
-        (RAW_DISTANCE_GARBAGE_THRESHOLD - match.distance) / denominator
+        (cohortBoundary - match.distance) / denominator
       )
     );
     return {
       ...match,
       percent: Math.round(
         RECALIBRATION_OTHERS_MIN_PERCENT +
-          (RECALIBRATION_OTHERS_MAX_PERCENT -
+          (othersMax -
             RECALIBRATION_OTHERS_MIN_PERCENT) *
             relative
       ),
@@ -1075,10 +1069,7 @@ export function filterCelebritiesByGender(
   return CELEBRITIES_DB.filter((c) => c.gender === gender);
 }
 
-/**
- * @deprecated Hard fach filter — kept for older callers/tests. Prefer
- * `filterCelebritiesByGender` + soft fach via `matchCelebrities`.
- */
+/** Hard eligibility barrier: selected gender AND exact measured Fach. */
 export function filterCelebrities(
   gender: CelebrityGender,
   fach: VocalFach
@@ -1092,20 +1083,14 @@ export function filterCelebrities(
  */
 export function rankCelebrities(
   pool: CelebrityProfile[],
-  user: TimbreVector,
-  options?: DistanceOptions
+  user: TimbreVector
 ): CelebrityMatch[] {
   return pool
     .map((celebrity) => {
-      const baseDistance = weightedDistance(user, celebrity, options);
-      const fachMismatch = Boolean(
-        options?.userFach && celebrity.vocalFach !== options.userFach
-      );
-      const distance =
-        baseDistance + (fachMismatch ? FACH_MISMATCH_PENALTY : 0);
+      const distance = weightedDistance(user, celebrity);
       const rawPercent = distanceToPercent(distance);
       const percent = rawPercent;
-      return { celebrity, distance, percent, rawPercent, fachMismatch };
+      return { celebrity, distance, percent, rawPercent };
     })
     .sort((a, b) =>
       a.distance === b.distance
@@ -1114,23 +1099,36 @@ export function rankCelebrities(
     );
 }
 
-export type MatchCelebritiesOptions = DistanceOptions;
+export type MatchCelebritiesOptions = {
+  /** Mandatory hard barrier; cross-Fach candidates are never ranked or padded. */
+  userFach: VocalFach;
+};
 
 /**
- * Commercial matcher: gender-only pool → 3-D distance + fach prior → raw
- * garbage rejection → one global eligible-cohort UX recalibration.
+ * Matcher: exact gender+Fach pool → 3-D distance → raw garbage rejection →
+ * one global eligible-cohort UX recalibration. If the strict 32-point cohort
+ * is empty, retain only near-best exact-Fach candidates up to the absolute
+ * 55-point ceiling; cross-Fach padding is never allowed.
  */
 export function matchCelebrities(
   gender: CelebrityGender,
   user: TimbreVector,
-  options?: MatchCelebritiesOptions
+  options: MatchCelebritiesOptions
 ): CelebrityMatch[] {
-  const ranked = rankCelebrities(filterCelebritiesByGender(gender), user, {
-    userFach: options?.userFach,
-  });
-  const eligible = ranked.filter(
+  const ranked = rankCelebrities(
+    filterCelebrities(gender, options.userFach),
+    user
+  );
+  let eligible = ranked.filter(
     (match) => match.distance <= RAW_DISTANCE_GARBAGE_THRESHOLD
   );
+  if (eligible.length === 0 && (ranked[0]?.distance ?? Infinity) <= RAW_DISTANCE_FALLBACK_MAX) {
+    const fallbackLimit = Math.min(
+      RAW_DISTANCE_FALLBACK_MAX,
+      (ranked[0]?.distance ?? RAW_DISTANCE_FALLBACK_MAX) + 6
+    );
+    eligible = ranked.filter((match) => match.distance <= fallbackLimit);
+  }
   return recalibrateEligiblePercents(eligible);
 }
 
