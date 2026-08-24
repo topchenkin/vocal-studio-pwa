@@ -10,6 +10,7 @@ import {
   GENRE_LABEL_RU,
   REGION_LABEL_RU,
   VOCAL_FACH_LABEL_RU,
+  classifyVocalFach,
   type CelebrityProfile,
   type CelebrityRegion,
   type Genre,
@@ -19,9 +20,11 @@ import {
   PITCH_HEIGHT_LABEL_RU,
   RASP_LABEL_RU,
   deriveVocalArchetype,
+  rankCelebrityCandidates,
   selectArchetypeRepresentatives,
 } from "@/lib/vocal-archetype";
 import {
+  mapFlatnessToRasp,
   type TimbreGender,
   type VoiceMeasurement,
 } from "@/lib/timbre-features";
@@ -78,9 +81,11 @@ export default function TimbreMatcher({ locked = false }: Props) {
   const finishingRef = useRef(false);
   const endCaptureRef = useRef<(() => Promise<void>) | null>(null);
 
-  const cleanupAudio = () => {
+  const cleanupAudio = async () => {
     timersRef.current.forEach((id) => window.clearInterval(id));
     timersRef.current = [];
+    endCaptureRef.current = null;
+    finishingRef.current = false;
     try {
       pcmSessionRef.current?.abort();
     } catch {
@@ -93,11 +98,17 @@ export default function TimbreMatcher({ locked = false }: Props) {
     const context = audioContextRef.current;
     audioContextRef.current = null;
     if (context && context.state !== "closed") {
-      void context.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
     }
   };
 
-  useEffect(() => () => cleanupAudio(), []);
+  useEffect(
+    () => () => {
+      analysisIdRef.current = ++nextAnalysisId;
+      void cleanupAudio();
+    },
+    []
+  );
 
   const isStale = (id: number) => id !== analysisIdRef.current;
 
@@ -153,6 +164,32 @@ export default function TimbreMatcher({ locked = false }: Props) {
         },
       });
 
+      const rasp = mapFlatnessToRasp(result.medianFlatness);
+      const fach = classifyVocalFach(gender!, result.medianHz);
+      const sortedForLog = rankCelebrityCandidates({
+        gender: gender!,
+        fach,
+        userWeight: result.userWeight,
+        userRaspiness: result.userRaspiness,
+      })
+        .slice(0, 20)
+        .map(({ star, distance }) => ({
+          name: star.name,
+          timbreWeight: star.timbreWeight,
+          raspiness: star.raspiness,
+          distance,
+          region: star.region,
+          decade: star.decade,
+          genre: star.genre,
+        }));
+      console.log(
+        "[DSP] Median Flatness:",
+        result.medianFlatness,
+        "-> Расщепление:",
+        rasp.label
+      );
+      console.log("[DSP] Sorted Stars Distance:", sortedForLog);
+
       setMeasurement(result);
       setStage("done");
     } catch (caught) {
@@ -180,7 +217,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
     setProgress(0);
 
     try {
-      cleanupAudio();
+      await cleanupAudio();
+      if (isStale(analysisId)) return;
       const stream = await getSingingMicStream();
       if (isStale(analysisId)) {
         stream.getTracks().forEach((track) => track.stop());
@@ -201,7 +239,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
       const pcmSession = startContextPcmCapture(
         context,
         stream,
-        context.currentTime
+        context.currentTime,
+        () => !isStale(analysisId)
       );
       pcmSessionRef.current = pcmSession;
       finishingRef.current = false;
@@ -238,18 +277,21 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       const started = performance.now();
       const progressTimer = window.setInterval(() => {
+        if (isStale(analysisId)) return;
         setProgress(
           Math.min(100, ((performance.now() - started) / RECORD_MS) * 100)
         );
       }, 100);
       const finishTimer = window.setTimeout(() => {
+        if (isStale(analysisId)) return;
         void endCapture();
       }, RECORD_MS);
       timersRef.current = [progressTimer, finishTimer];
       endCaptureRef.current = endCapture;
     } catch {
+      if (isStale(analysisId)) return;
       setError("Не удалось включить микрофон");
-      cleanupAudio();
+      await cleanupAudio();
       busyRef.current = false;
       setStage("idle");
     }
@@ -278,15 +320,15 @@ export default function TimbreMatcher({ locked = false }: Props) {
         selectArchetypeRepresentatives({
           gender,
           fach: archetype.fach,
-          brightness: archetype.brightness,
-          rasp: archetype.rasp,
+          userWeight: measurement!.userWeight,
+          userRaspiness: measurement!.userRaspiness,
           region: regionTab,
           genre,
           limit: REPRESENTATIVES_PER_GENRE,
         }),
       ])
     ) as Partial<Record<Genre, CelebrityProfile[]>>;
-  }, [archetype, gender, regionTab]);
+  }, [archetype, gender, measurement, regionTab]);
 
   const isBusy = stage === "recording" || stage === "extracting";
 

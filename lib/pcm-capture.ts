@@ -20,7 +20,8 @@ type TimedChunk = { startTime: number; data: Float32Array };
 export function startContextPcmCapture(
   ctx: AudioContext,
   stream: MediaStream,
-  timelineStart: number
+  timelineStart: number,
+  isSessionActive: () => boolean = () => true
 ): PcmCaptureSession {
   const source = ctx.createMediaStreamSource(stream);
   const processor = ctx.createScriptProcessor(1024, 1, 1);
@@ -32,7 +33,7 @@ export function startContextPcmCapture(
   let bufferResult: AudioBuffer | null = null;
 
   processor.onaudioprocess = (event) => {
-    if (ended) return;
+    if (ended || !isSessionActive()) return;
     const input = event.inputBuffer.getChannelData(0);
     // Buffer covers roughly [currentTime - duration, currentTime]
     const startTime = ctx.currentTime - event.inputBuffer.duration;

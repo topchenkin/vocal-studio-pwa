@@ -18,7 +18,7 @@
  *
  * Axes (all 0-100, FIXED linear calibration — never per-take min/max):
  *   timbreWeight ← median spectral centroid, 150..2000 Hz
- *   raspiness    ← median spectral flatness, 0..0.1
+ *   raspiness    ← median spectral flatness, piecewise voice calibration
  *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
  *
  * NOTE: `TimbreGender` is also imported by `app/api/ai/match-voice/route.ts`,
@@ -70,14 +70,15 @@ export const MIN_PITCHED_FRAMES = 12;
 export const CENTROID_WEIGHT_MIN_HZ = 150;
 export const CENTROID_WEIGHT_MAX_HZ = 2000;
 
-/**
- * Calibration range for Meyda `spectralFlatness` → `raspiness` (0-100).
- *
- * Meyda flatness is geometricMean / arithmeticMean of magnitude spectrum:
- * 0 maps to 0, 0.05 to 50 and 0.1 to 100, with strict clamping.
- */
-export const FLATNESS_RASP_MIN = 0;
-export const FLATNESS_RASP_MAX = 0.1;
+/** Voiced-frame median boundaries calibrated for raw Meyda flatness (0..1). */
+export const FLATNESS_CLEAN_MAX = 0.012;
+export const FLATNESS_LIGHT_RASP_MAX = 0.04;
+export const FLATNESS_STRONG_MAX = 0.1;
+
+export type RaspLabel =
+  | "Чистый"
+  | "С лёгкой хрипотцой"
+  | "Выраженная хрипотца";
 
 /**
  * Calibration range for zero-crossing RATE → `airiness` (0-100).
@@ -126,9 +127,58 @@ export function centroidHzToWeight(centroidHz: number): number {
   );
 }
 
-/** Meyda spectralFlatness (0–1) → 0-100 raspiness. */
+/**
+ * Raw Meyda spectral flatness → a strict 0..100 axis and display category.
+ *
+ * The old 0..0.1 linear map put ordinary phone-mic harmonic vocals into the
+ * raspy middle. This piecewise calibration reserves 0..30 for clean voiced
+ * medians (<= .012), 34..66 for light noise (.012..04), and 67..100 for
+ * strong noise (>.04). Input is the median after RMS + valid-pitch gating.
+ */
+export function mapFlatnessToRasp(medianFlatness: number): {
+  raspiness: number;
+  label: RaspLabel;
+} {
+  const flatness = clamp(medianFlatness, 0, 1);
+  if (flatness <= FLATNESS_CLEAN_MAX) {
+    return {
+      raspiness: Math.round(
+        clampAndMap(flatness, 0, FLATNESS_CLEAN_MAX) * 0.3
+      ),
+      label: "Чистый",
+    };
+  }
+  if (flatness <= FLATNESS_LIGHT_RASP_MAX) {
+    return {
+      raspiness: Math.round(
+        34 +
+          clampAndMap(
+            flatness,
+            FLATNESS_CLEAN_MAX,
+            FLATNESS_LIGHT_RASP_MAX
+          ) *
+            0.32
+      ),
+      label: "С лёгкой хрипотцой",
+    };
+  }
+  return {
+    raspiness: Math.round(
+      67 +
+        clampAndMap(
+          Math.min(flatness, FLATNESS_STRONG_MAX),
+          FLATNESS_LIGHT_RASP_MAX,
+          FLATNESS_STRONG_MAX
+        ) *
+          0.33
+    ),
+    label: "Выраженная хрипотца",
+  };
+}
+
+/** Backward-compatible numeric projection. */
 export function flatnessToRaspiness(flatness: number): number {
-  return Math.round(clampAndMap(flatness, FLATNESS_RASP_MIN, FLATNESS_RASP_MAX));
+  return mapFlatnessToRasp(flatness).raspiness;
 }
 
 /**
@@ -243,6 +293,16 @@ export class VoiceMeasurementAccumulator {
     private readonly noiseGateRms = RMS_NOISE_FLOOR,
     private readonly noiseFloorRms = 0
   ) {}
+
+  /** Explicitly clear every per-take DSP array/counter before reuse. */
+  reset(): void {
+    this.centroidBins = [];
+    this.flatness = [];
+    this.pitchHz = [];
+    this.voicedRms = [];
+    this.frames = 0;
+    this.totalFrames = 0;
+  }
 
   /**
    * Feed one analysis frame. `centroidBin`, `rms` and `spectralFlatness`

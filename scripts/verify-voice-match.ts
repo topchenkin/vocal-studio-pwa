@@ -17,6 +17,7 @@ import {
   deriveVocalArchetype,
   featureBin,
   pitchHeight,
+  rankCelebrityCandidates,
   selectArchetypeRepresentatives,
 } from "../lib/vocal-archetype";
 import {
@@ -24,6 +25,7 @@ import {
   clampAndMap,
   centroidHzToWeight,
   flatnessToRaspiness,
+  mapFlatnessToRasp,
 } from "../lib/timbre-features";
 
 let failed = 0;
@@ -44,6 +46,19 @@ check(
 check(
   flatnessToRaspiness(0) === 0 && flatnessToRaspiness(0.1) === 100,
   "flatness normalization"
+);
+check(
+  mapFlatnessToRasp(0.012).label === "Чистый" &&
+    mapFlatnessToRasp(0.01201).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.04).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.04001).label === "Выраженная хрипотца",
+  "flatness category boundaries"
+);
+check(
+  mapFlatnessToRasp(0.006).label === "Чистый" &&
+    mapFlatnessToRasp(0.025).label === "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(0.07).label === "Выраженная хрипотца",
+  "clean, moderate and strong flatness calibration"
 );
 
 // Stable feature thirds: 0–33 / 34–66 / 67–100.
@@ -119,8 +134,8 @@ const syntheticRepresentatives = Object.fromEntries(
     selectArchetypeRepresentatives({
       gender: "male",
       fach: take.fach,
-      brightness: take.brightness,
-      rasp: take.rasp,
+      userWeight: key === "A" ? 90 : key === "B" ? 10 : 50,
+      userRaspiness: key === "A" ? 10 : key === "B" ? 90 : 50,
       region: "western",
       genre: "Pop",
       limit: 5,
@@ -155,18 +170,36 @@ const firstSequentialTake = measuredTake(1_800, 0.09);
 const secondSequentialTake = measuredTake(300, 0.005);
 check(
   firstSequentialTake?.userWeight === 89 &&
-    firstSequentialTake.userRaspiness === 90,
+    firstSequentialTake.userRaspiness === 95,
   "first sequential accumulator records bright/raspy data"
 );
 check(
   secondSequentialTake?.userWeight === 8 &&
-    secondSequentialTake.userRaspiness === 5,
+    secondSequentialTake.userRaspiness === 13,
   "second sequential accumulator contains only fresh dark/clean data"
 );
 check(
   firstSequentialTake?.frameCount === 20 &&
     secondSequentialTake?.frameCount === 20,
   "per-take feature frame arrays reset instead of accumulating"
+);
+
+const reusedAccumulator = new VoiceMeasurementAccumulator(48_000, 2_048);
+const addTakeFrames = (centroidHz: number, flatness: number) => {
+  const centroidBin = (centroidHz * 2_048) / 48_000;
+  for (let frame = 0; frame < 20; frame += 1) {
+    reusedAccumulator.addFrame(centroidBin, 0.02, 190, flatness);
+  }
+};
+addTakeFrames(1_800, 0.09);
+reusedAccumulator.reset();
+addTakeFrames(300, 0.005);
+const explicitlyResetTake = reusedAccumulator.finalize();
+check(
+  explicitlyResetTake?.frameCount === 20 &&
+    explicitlyResetTake.userWeight === 8 &&
+    explicitlyResetTake.userRaspiness === 13,
+  "explicit reset clears hz, centroid, flatness, RMS and counters"
 );
 
 const fixture: CelebrityProfile[] = [
@@ -228,15 +261,15 @@ const selected = selectArchetypeRepresentatives(
   {
     gender: "male",
     fach: "tenor",
-    brightness: "high",
-    rasp: "high",
+    userWeight: 80,
+    userRaspiness: 80,
     region: "western",
     genre: "Rock",
     limit: 5,
   },
   fixture
 );
-check(selected.map((star) => star.id).join(",") === "exact,fallback", "exact categorical priority and fallback");
+check(selected.map((star) => star.id).join(",") === "exact,fallback", "numeric distance sorting");
 check(
   selected.every(
     (star) => star.gender === "male" && star.vocalFach === "tenor"
@@ -253,6 +286,97 @@ check(
   ),
   "representative result contains no similarity data"
 );
+
+const russianPopTenors = CELEBRITIES_DB.filter(
+  (star) =>
+    star.gender === "male" &&
+    star.vocalFach === "tenor" &&
+    star.region === "russian" &&
+    star.genre === "Pop"
+);
+const cleanTenor = rankCelebrityCandidates(
+  {
+    gender: "male",
+    fach: "tenor",
+    userWeight: 76,
+    userRaspiness: 2,
+    region: "russian",
+    genre: "Pop",
+  },
+  russianPopTenors
+);
+const raspyTenor = rankCelebrityCandidates(
+  {
+    gender: "male",
+    fach: "tenor",
+    userWeight: 82,
+    userRaspiness: 42,
+    region: "russian",
+    genre: "Pop",
+  },
+  russianPopTenors
+);
+check(
+  cleanTenor.findIndex(({ star }) => star.name === "Николай Басков") <
+    cleanTenor.findIndex(({ star }) => star.name === "Shaman"),
+  "clean academic tenor ranks Baskov ahead of Shaman"
+);
+check(
+  raspyTenor[0]?.star.name === "Shaman" &&
+    raspyTenor.findIndex(({ star }) => star.name === "Shaman") <
+      raspyTenor.findIndex(({ star }) => star.name === "Николай Басков"),
+  "raspy tenor reverses preference toward Shaman"
+);
+
+const weightFixture = fixture.slice(0, 2).map((star, index) => ({
+  ...star,
+  id: `weight-${index}`,
+  name: index === 0 ? "Dark" : "Bright",
+  timbreWeight: index === 0 ? 20 : 80,
+  raspiness: 30,
+}));
+const darkOrder = rankCelebrityCandidates(
+  {
+    gender: "male",
+    fach: "tenor",
+    userWeight: 20,
+    userRaspiness: 30,
+    region: "western",
+    genre: "Rock",
+  },
+  weightFixture
+);
+const brightOrder = rankCelebrityCandidates(
+  {
+    gender: "male",
+    fach: "tenor",
+    userWeight: 80,
+    userRaspiness: 30,
+    region: "western",
+    genre: "Rock",
+  },
+  weightFixture
+);
+check(
+  darkOrder[0]?.star.name === "Dark" &&
+    brightOrder[0]?.star.name === "Bright",
+  "changing userWeight changes numeric order"
+);
+
+const reverseSource = [...weightFixture].reverse();
+const topOne = selectArchetypeRepresentatives(
+  {
+    gender: "male",
+    fach: "tenor",
+    userWeight: 20,
+    userRaspiness: 30,
+    region: "western",
+    genre: "Rock",
+    limit: 1,
+  },
+  reverseSource
+);
+check(topOne[0]?.name === "Dark", "distance sort happens before top-N slicing");
 
 for (const gender of ["male", "female"] as const) {
   for (const fach of gender === "male"
@@ -309,5 +433,11 @@ console.log(
     .join(", ")}`
 );
 console.log(
-  "OK: A/B/C archetypes, categorical representatives and sequential-take isolation"
+  `Clean tenor: ${cleanTenor.slice(0, 5).map(({ star }) => star.name).join(", ")}`
+);
+console.log(
+  `Raspy tenor: ${raspyTenor.slice(0, 5).map(({ star }) => star.name).join(", ")}`
+);
+console.log(
+  "OK: calibrated rasp, numeric representatives and sequential-take isolation"
 );

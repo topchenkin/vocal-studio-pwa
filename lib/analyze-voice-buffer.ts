@@ -104,6 +104,9 @@ export async function analyzeVoiceBuffer(
     gate.thresholdRms,
     gate.noiseFloorRms
   );
+  // Explicit hard reset documents and enforces fresh hz/centroid/flatness
+  // arrays even if the collector implementation is later pooled.
+  accumulator.reset();
 
   const spectralFrame = new Float32Array(SPECTRAL_BUFFER);
   const pitchFrame = new Float32Array(PITCH_WINDOW);

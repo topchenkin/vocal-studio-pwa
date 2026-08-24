@@ -128,68 +128,82 @@ export function deriveVocalArchetype(
   };
 }
 
-const BIN_INDEX: Record<FeatureBin, number> = { low: 0, mid: 1, high: 2 };
-const BIN_CENTRE: Record<FeatureBin, number> = {
-  low: 16.5,
-  mid: 50,
-  high: 83.5,
-};
-const DECADE_INDEX: Record<CelebrityProfile["decade"], number> = {
-  "1990s": 0,
-  "2000s": 1,
-  "2010s": 2,
-  "2020s": 3,
-};
-
 export type RepresentativeOptions = {
   gender: CelebrityGender;
   fach: VocalFach;
-  brightness: FeatureBin;
-  rasp: FeatureBin;
+  userWeight: number;
+  userRaspiness: number;
   region: CelebrityRegion;
   genre: Genre;
   limit?: number;
 };
 
 /**
- * Curated references only. Eligibility is exact gender + Fach + region +
- * genre. Exact categorical colour/texture comes first; sparse groups fall
- * back only inside that eligible pool. Ties are recent-first then stable ID.
+ * Weighted Euclidean distance on normalized timbre/rasp axes. Timbre is 60%
+ * and rasp 40%; both therefore materially affect ordering.
+ */
+export function timbreDistance(
+  userWeight: number,
+  userRaspiness: number,
+  star: Pick<CelebrityProfile, "timbreWeight" | "raspiness">
+): number {
+  const weightDelta =
+    (clampFeature(userWeight) - clampFeature(star.timbreWeight)) / 100;
+  const raspDelta =
+    (clampFeature(userRaspiness) - clampFeature(star.raspiness)) / 100;
+  return Math.sqrt(0.6 * weightDelta ** 2 + 0.4 * raspDelta ** 2);
+}
+
+function clampFeature(value: number): number {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+}
+
+export type RankedCelebrity = {
+  star: CelebrityProfile;
+  distance: number;
+};
+
+export function rankCelebrityCandidates(
+  options: Omit<RepresentativeOptions, "limit" | "region" | "genre"> & {
+    region?: CelebrityRegion;
+    genre?: Genre;
+  },
+  database: CelebrityProfile[] = CELEBRITIES_DB
+): RankedCelebrity[] {
+  return database
+    .filter(
+      (star) =>
+        star.gender === options.gender &&
+        star.vocalFach === options.fach &&
+        (!options.region || star.region === options.region) &&
+        (!options.genre || star.genre === options.genre)
+    )
+    .map((star) => ({
+      star,
+      distance: timbreDistance(
+        options.userWeight,
+        options.userRaspiness,
+        star
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        a.distance - b.distance ||
+        a.star.name.localeCompare(b.star.name, "ru")
+    );
+}
+
+/**
+ * Eligibility is exact gender + Fach + region + genre. Numeric 2D distance is
+ * always sorted before top-N slicing; source order and categorical bins never
+ * participate in the active ranking path.
  */
 export function selectArchetypeRepresentatives(
   options: RepresentativeOptions,
   database: CelebrityProfile[] = CELEBRITIES_DB
 ): CelebrityProfile[] {
   const limit = Math.max(0, Math.floor(options.limit ?? 5));
-  return database
-    .filter(
-      (star) =>
-        star.gender === options.gender &&
-        star.vocalFach === options.fach &&
-        star.region === options.region &&
-        star.genre === options.genre
-    )
-    .map((star) => {
-      const brightness = featureBin(star.timbreWeight);
-      const rasp = featureBin(star.raspiness);
-      const categoryDistance =
-        Math.abs(BIN_INDEX[brightness] - BIN_INDEX[options.brightness]) +
-        Math.abs(BIN_INDEX[rasp] - BIN_INDEX[options.rasp]);
-      // Sparse catalogue cells can give every eligible singer the same
-      // categorical distance. Use the hand-authored values only as a stable
-      // tie-break inside that nearest category, never as a similarity score.
-      const manualValueDistance =
-        Math.abs(star.timbreWeight - BIN_CENTRE[options.brightness]) +
-        Math.abs(star.raspiness - BIN_CENTRE[options.rasp]);
-      return { star, categoryDistance, manualValueDistance };
-    })
-    .sort(
-      (a, b) =>
-        a.categoryDistance - b.categoryDistance ||
-        a.manualValueDistance - b.manualValueDistance ||
-        DECADE_INDEX[b.star.decade] - DECADE_INDEX[a.star.decade] ||
-        a.star.id.localeCompare(b.star.id)
-    )
+  return rankCelebrityCandidates(options, database)
     .slice(0, limit)
     .map(({ star }) => star);
 }
