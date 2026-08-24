@@ -84,6 +84,7 @@ export const CENTROID_WEIGHT_MAX_HZ = 2000;
 export const FLATNESS_CLEAN_MAX = 0.004;
 export const FLATNESS_LIGHT_RASP_MAX = 0.05;
 export const FLATNESS_STRONG_MAX = 0.16;
+export const FEMALE_FLATNESS_LIGHT_RASP_MAX = 0.06;
 export const RASP_PERCENTILE = 0.35;
 export const MAX_VOICED_ZCR = 0.12;
 export const MIN_PERIODICITY = 0.35;
@@ -188,6 +189,68 @@ export function mapFlatnessToRasp(robustRaspEvidence: number): {
   };
 }
 
+export type RaspCalibration = {
+  rawEvidence: number;
+  compensatedEvidence: number;
+  compensationFactor: number;
+  thresholdSet: "male-legacy-v1" | "female-phone-f0-v1";
+  cleanMax: number;
+  lightMax: number;
+};
+
+/**
+ * Converts the female phone-capture evidence bands onto the legacy male axis.
+ *
+ * The male axis is intentionally identity. Female thresholds reflect the
+ * measured clean floor from sparse, formant-shaped spectra; the small F0 term
+ * follows the observed clean p35 envelope after fractional-lag periodicity.
+ */
+export function calibrateRaspEvidence(
+  rawEvidence: number,
+  gender: TimbreGender | undefined,
+  medianF0Hz: number
+): RaspCalibration {
+  const raw = clamp(rawEvidence, 0, 1);
+  if (gender !== "female") {
+    return {
+      rawEvidence: raw,
+      compensatedEvidence: raw,
+      compensationFactor: 1,
+      thresholdSet: "male-legacy-v1",
+      cleanMax: FLATNESS_CLEAN_MAX,
+      lightMax: FLATNESS_LIGHT_RASP_MAX,
+    };
+  }
+
+  const f0 = clamp(medianF0Hz, 200, 600);
+  const cleanMax = clamp(0.021 - (f0 - 200) * 0.000005, 0.019, 0.021);
+  let compensatedEvidence: number;
+  if (raw <= cleanMax) {
+    compensatedEvidence = (raw / cleanMax) * FLATNESS_CLEAN_MAX;
+  } else if (raw <= FEMALE_FLATNESS_LIGHT_RASP_MAX) {
+    compensatedEvidence =
+      FLATNESS_CLEAN_MAX +
+      ((raw - cleanMax) /
+        (FEMALE_FLATNESS_LIGHT_RASP_MAX - cleanMax)) *
+        (FLATNESS_LIGHT_RASP_MAX - FLATNESS_CLEAN_MAX);
+  } else {
+    compensatedEvidence =
+      FLATNESS_LIGHT_RASP_MAX +
+      ((raw - FEMALE_FLATNESS_LIGHT_RASP_MAX) /
+        (FLATNESS_STRONG_MAX - FEMALE_FLATNESS_LIGHT_RASP_MAX)) *
+        (FLATNESS_STRONG_MAX - FLATNESS_LIGHT_RASP_MAX);
+  }
+  compensatedEvidence = clamp(compensatedEvidence, 0, 1);
+  return {
+    rawEvidence: raw,
+    compensatedEvidence,
+    compensationFactor: raw > 0 ? compensatedEvidence / raw : 1,
+    thresholdSet: "female-phone-f0-v1",
+    cleanMax,
+    lightMax: FEMALE_FLATNESS_LIGHT_RASP_MAX,
+  };
+}
+
 /** Backward-compatible numeric projection. */
 export function flatnessToRaspiness(flatness: number): number {
   return mapFlatnessToRasp(flatness).raspiness;
@@ -217,14 +280,24 @@ export function normalizedPeriodicity(
   pitchHz: number | null
 ): number {
   if (!pitchHz || !Number.isFinite(pitchHz) || pitchHz <= 0) return 0;
-  const lag = Math.round(sampleRate / pitchHz);
-  if (lag < 2 || lag >= frame.length / 2) return 0;
+  const exactLag = sampleRate / pitchHz;
+  if (exactLag < 2 || exactLag >= frame.length / 2) return 0;
+
+  // Integer rounding creates up to half a sample of phase error. At soprano
+  // F0 (short periods, sparse high harmonics) that error is a materially
+  // larger fraction of a cycle than it is for male F0. Interpolate at the
+  // fractional lag instead of snapping the autocorrelation to an integer.
+  const whole = Math.floor(exactLag);
+  const fraction = exactLag - whole;
   let xy = 0;
   let xx = 0;
   let yy = 0;
-  for (let index = 0; index + lag < frame.length; index += 1) {
+  const limit = frame.length - whole - 1;
+  for (let index = 0; index < limit; index += 1) {
     const x = frame[index] ?? 0;
-    const y = frame[index + lag] ?? 0;
+    const y0 = frame[index + whole] ?? 0;
+    const y1 = frame[index + whole + 1] ?? y0;
+    const y = y0 + (y1 - y0) * fraction;
     xy += x * y;
     xx += x * x;
     yy += y * y;
@@ -290,8 +363,14 @@ export type VoiceMeasurement = {
   p75Flatness: number;
   /** p35 raw flatness, logged independently from the final combined evidence. */
   robustFlatness: number;
-  /** p35 of flatness * sqrt(periodicity loss), used for rasp mapping. */
+  /** Raw p35 of flatness * sqrt(periodicity loss), before gender/F0 calibration. */
+  rawRobustRaspEvidence: number;
+  /** Gender/F0-calibrated evidence on the legacy male mapping axis. */
   robustRaspEvidence: number;
+  raspCompensationFactor: number;
+  raspThresholdSet: RaspCalibration["thresholdSet"];
+  raspCleanThreshold: number;
+  raspLightThreshold: number;
   p25Periodicity: number;
   medianPeriodicity: number;
   /** Median centroid → 0-100, same scale as the stars' `timbreWeight`. */
@@ -308,6 +387,14 @@ export type VoiceMeasurement = {
   reliableRaspFrameCount: number;
   /** Above-RMS frames rejected by one of the reliability gates. */
   rejectedRaspFrameCount: number;
+  rejectedRaspReasons: {
+    belowNoise: number;
+    missingPitch: number;
+    pitchRange: number;
+    transient: number;
+    zcr: number;
+    periodicity: number;
+  };
   /** All analysis frames considered before the adaptive gate. */
   totalFrameCount: number;
   /** Low-percentile RMS estimate of the recording's room-noise floor. */
@@ -339,6 +426,14 @@ export class VoiceMeasurementAccumulator {
   private frames = 0;
   private rejectedRaspFrames = 0;
   private totalFrames = 0;
+  private rejectedReasons = {
+    belowNoise: 0,
+    missingPitch: 0,
+    pitchRange: 0,
+    transient: 0,
+    zcr: 0,
+    periodicity: 0,
+  };
 
   constructor(
     private readonly sampleRate: number,
@@ -359,6 +454,14 @@ export class VoiceMeasurementAccumulator {
     this.frames = 0;
     this.rejectedRaspFrames = 0;
     this.totalFrames = 0;
+    this.rejectedReasons = {
+      belowNoise: 0,
+      missingPitch: 0,
+      pitchRange: 0,
+      transient: 0,
+      zcr: 0,
+      periodicity: 0,
+    };
   }
 
   /**
@@ -378,12 +481,16 @@ export class VoiceMeasurementAccumulator {
     transient = false
   ): void {
     this.totalFrames += 1;
-    if (typeof rms !== "number" || !Number.isFinite(rms) || rms < this.noiseGateRms) return;
+    if (typeof rms !== "number" || !Number.isFinite(rms) || rms < this.noiseGateRms) {
+      this.rejectedReasons.belowNoise += 1;
+      return;
+    }
 
     // A measured F0 is required for Fach anyway. Restricting all three timbre
     // axes to these frames also keeps room hiss and unpitched knocks out.
     if (typeof f0Hz !== "number" || !Number.isFinite(f0Hz) || f0Hz <= 0) {
       this.rejectedRaspFrames += 1;
+      this.rejectedReasons.missingPitch += 1;
       return;
     }
     const pitchValue = f0Hz;
@@ -393,16 +500,28 @@ export class VoiceMeasurementAccumulator {
         : this.gender === "male"
           ? [70, 520]
           : [70, 1100];
+    if (pitchValue < minPitch || pitchValue > maxPitch) {
+      this.rejectedRaspFrames += 1;
+      this.rejectedReasons.pitchRange += 1;
+      return;
+    }
+    if (transient) {
+      this.rejectedRaspFrames += 1;
+      this.rejectedReasons.transient += 1;
+      return;
+    }
+    if (typeof zcr === "number" && Number.isFinite(zcr) && zcr > MAX_VOICED_ZCR) {
+      this.rejectedRaspFrames += 1;
+      this.rejectedReasons.zcr += 1;
+      return;
+    }
     if (
-      pitchValue < minPitch ||
-      pitchValue > maxPitch ||
-      transient ||
-      (typeof zcr === "number" && Number.isFinite(zcr) && zcr > MAX_VOICED_ZCR) ||
-      (typeof periodicity === "number" &&
-        Number.isFinite(periodicity) &&
-        periodicity < MIN_PERIODICITY)
+      typeof periodicity === "number" &&
+      Number.isFinite(periodicity) &&
+      periodicity < MIN_PERIODICITY
     ) {
       this.rejectedRaspFrames += 1;
+      this.rejectedReasons.periodicity += 1;
       return;
     }
 
@@ -456,14 +575,21 @@ export class VoiceMeasurementAccumulator {
     const medianFlatness = median(this.flatness);
     const p75Flatness = percentile(this.flatness, 0.75);
     const robustFlatness = percentile(this.flatness, RASP_PERCENTILE);
-    const robustRaspEvidence = percentile(this.raspEvidence, RASP_PERCENTILE);
+    const rawRobustRaspEvidence = percentile(this.raspEvidence, RASP_PERCENTILE);
     const p25Hz = percentile(this.pitchHz, 0.25);
     const p75Hz = percentile(this.pitchHz, 0.75);
+    const medianHz = median(this.pitchHz);
+    const raspCalibration = calibrateRaspEvidence(
+      rawRobustRaspEvidence,
+      this.gender,
+      medianHz
+    );
+    const robustRaspEvidence = raspCalibration.compensatedEvidence;
     const userWeight = centroidHzToWeight(medianCentroidHz);
     const userRaspiness = flatnessToRaspiness(robustRaspEvidence);
 
     return {
-      medianHz: median(this.pitchHz),
+      medianHz,
       p25Hz,
       p75Hz,
       medianCentroidHz,
@@ -473,7 +599,12 @@ export class VoiceMeasurementAccumulator {
       medianFlatness,
       p75Flatness,
       robustFlatness,
+      rawRobustRaspEvidence,
       robustRaspEvidence,
+      raspCompensationFactor: raspCalibration.compensationFactor,
+      raspThresholdSet: raspCalibration.thresholdSet,
+      raspCleanThreshold: raspCalibration.cleanMax,
+      raspLightThreshold: raspCalibration.lightMax,
       p25Periodicity: percentile(this.periodicity, 0.25),
       medianPeriodicity: median(this.periodicity),
       userWeight: Math.max(0, Math.min(100, userWeight)),
@@ -483,6 +614,7 @@ export class VoiceMeasurementAccumulator {
       pitchedFrameCount: this.pitchHz.length,
       reliableRaspFrameCount: this.raspEvidence.length,
       rejectedRaspFrameCount: this.rejectedRaspFrames,
+      rejectedRaspReasons: { ...this.rejectedReasons },
       totalFrameCount: this.totalFrames,
       noiseFloorRms: this.noiseFloorRms,
       noiseGateRms: this.noiseGateRms,

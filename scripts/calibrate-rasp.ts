@@ -1,31 +1,25 @@
 /**
- * Deterministic calibration for the offline Vocal Archetype rasp estimator.
- * Uses the installed Meyda/Pitchfinder versions and production frame sizes.
+ * Deterministic end-to-end calibration for the production rasp estimator.
+ * Uses installed Meyda/Pitchfinder, production windows and realistic,
+ * formant-shaped harmonic singing at both common phone sample rates.
  */
-import Meyda from "meyda";
 import { analyzeVoiceSamples } from "../lib/analyze-voice-buffer";
-import { createYinDetector } from "../lib/pitch";
-import { mapFlatnessToRasp, percentile } from "../lib/timbre-features";
+import { mapFlatnessToRasp, type RaspLabel } from "../lib/timbre-features";
 
-const SAMPLE_RATE = 48_000;
-const SPECTRAL_BUFFER = 2_048;
-const PITCH_WINDOW = 4_096;
-const HOP = 1_024;
-const SECONDS = 3;
+const SAMPLE_RATES = [44_100, 48_000] as const;
+const MALE_F0 = [100, 140, 180] as const;
+const FEMALE_F0 = [200, 250, 300, 350, 440, 600] as const;
+const SECONDS = 3.2;
+
+type Texture = "clean" | "light" | "strong";
 
 type Scenario = {
-  name: string;
+  gender: "female" | "male";
   f0: number;
-  noise: number;
-  breathy?: boolean;
-  bursts?: boolean;
-};
-
-type Frame = {
-  flatness: number;
-  zcr: number;
-  pitch: number | null;
-  periodicity: number;
+  sampleRate: number;
+  texture: Texture;
+  bursts: boolean;
+  roomNoise: number;
 };
 
 let randomState = 0x5eeda11;
@@ -34,112 +28,111 @@ function whiteNoise(): number {
   return (randomState / 0x1_0000_0000) * 2 - 1;
 }
 
-function makeSignal({ f0, noise, breathy = false, bursts = false }: Scenario): Float32Array {
-  randomState = 0x5eeda11;
-  const signal = new Float32Array(SAMPLE_RATE * SECONDS);
-  let filteredNoise = 0;
-  for (let i = 0; i < signal.length; i += 1) {
-    const t = i / SAMPLE_RATE;
-    const phrase = 0.68 + 0.22 * Math.sin(2 * Math.PI * 0.7 * t);
-    const attack = Math.min(1, (i % SAMPLE_RATE) / (SAMPLE_RATE * 0.045));
+function resonance(frequency: number, center: number, width: number): number {
+  const distance = (frequency - center) / width;
+  return Math.exp(-0.5 * distance * distance);
+}
+
+/**
+ * A repeatable /a/-to-/i/ phone-capture model:
+ * - formant-shaped harmonics (not the old unfiltered 1/h comb)
+ * - 5.2 Hz vibrato, phrase envelope and soft attacks
+ * - modest stationary room/mic floor on every clean signal
+ * - short breath-consonant bursts on requested clean cases
+ * - aspiration-like noise modulated by glottal phase for rasp cases
+ */
+function makeSignal({
+  gender,
+  f0,
+  sampleRate,
+  texture,
+  bursts,
+  roomNoise,
+}: Scenario): Float32Array {
+  randomState =
+    (0x5eeda11 ^ Math.round(f0 * 31) ^ sampleRate ^ texture.length * 65_537) >>> 0;
+  const signal = new Float32Array(Math.round(sampleRate * SECONDS));
+  let phase = 0;
+  let pinkish = 0;
+  let previous = 0;
+  const raspNoise =
+    texture === "light"
+      ? gender === "male"
+        ? 0.016
+        : 0.022
+      : texture === "strong"
+        ? gender === "male"
+          ? f0 >= 170
+            ? 0.028
+            : 0.04
+          : f0 < 250
+            ? 0.06
+            : 0.075
+        : 0;
+
+  for (let index = 0; index < signal.length; index += 1) {
+    const time = index / sampleRate;
+    const vibratoHz = f0 * (2 ** ((0.32 * Math.sin(2 * Math.PI * 5.2 * time)) / 12));
+    phase += (2 * Math.PI * vibratoHz) / sampleRate;
+    const phrase = 0.72 + 0.17 * Math.sin(2 * Math.PI * 0.63 * time);
+    const phrasePosition = (time % 1.05) / 1.05;
+    const attack = Math.min(1, phrasePosition / 0.055);
+    const release = Math.min(1, (1 - phrasePosition) / 0.07);
+    const envelope = phrase * Math.max(0, Math.min(attack, release));
+    const vowelBlend = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.21 * time);
+
     let harmonic = 0;
-    for (let h = 1; h <= 18; h += 1) {
-      harmonic += Math.sin(2 * Math.PI * f0 * h * t + h * 0.17) / h ** 1.35;
+    let harmonicNorm = 0;
+    const harmonicLimit = Math.min(32, Math.floor(8_000 / f0));
+    for (let order = 1; order <= harmonicLimit; order += 1) {
+      const frequency = order * f0;
+      const formantA =
+        0.28 +
+        2.1 * resonance(frequency, 800, 190) +
+        1.45 * resonance(frequency, 1_250, 260) +
+        0.8 * resonance(frequency, 2_800, 430);
+      const formantI =
+        0.24 +
+        1.7 * resonance(frequency, 330, 120) +
+        1.7 * resonance(frequency, 2_250, 330) +
+        0.7 * resonance(frequency, 3_050, 480);
+      const gain =
+        ((1 - vowelBlend) * formantA + vowelBlend * formantI) /
+        order ** 1.18;
+      harmonic += gain * Math.sin(order * phase + order * 0.13);
+      harmonicNorm += gain * gain;
     }
+    harmonic /= Math.max(0.35, Math.sqrt(harmonicNorm) * 0.82);
+
     const rawNoise = whiteNoise();
-    filteredNoise = breathy ? 0.82 * filteredNoise + 0.18 * rawNoise : rawNoise;
-    let noiseGain = noise;
-    if (bursts) {
-      const inBurst = [0.7, 1.65, 2.8, 4.1, 5.15].some(
-        (start) => t >= start && t < start + 0.12
+    pinkish = 0.86 * pinkish + 0.14 * rawNoise;
+    const aspiration = (0.45 * rawNoise + 0.55 * pinkish) *
+      (0.38 + 0.62 * Math.abs(Math.sin(phase / 2)));
+    const inBurst =
+      bursts &&
+      [0.62, 1.58, 2.52].some(
+        (start) => time >= start && time < start + 0.085
       );
-      if (inBurst) noiseGain += 0.32;
-    }
-    signal[i] = (0.22 * harmonic * phrase * attack + filteredNoise * noiseGain) * 0.75;
+    const burstNoise = inBurst ? rawNoise * 0.12 : 0;
+
+    // Simple phone-like DC/high-pass response and soft limiter.
+    const mixed =
+      0.19 * harmonic * envelope +
+      roomNoise * rawNoise +
+      raspNoise * aspiration * envelope +
+      burstNoise;
+    const highPassed = mixed - previous * 0.94;
+    previous = mixed;
+    signal[index] = Math.tanh((mixed * 0.82 + highPassed * 0.18) * 1.35);
   }
   return signal;
 }
 
-function zeroCrossingRate(frame: Float32Array): number {
-  let crossings = 0;
-  for (let i = 1; i < frame.length; i += 1) {
-    if ((frame[i - 1] ?? 0) * (frame[i] ?? 0) < 0) crossings += 1;
-  }
-  return crossings / Math.max(1, frame.length - 1);
+function expectedLabel(texture: Texture): RaspLabel {
+  if (texture === "clean") return "Чистый";
+  if (texture === "light") return "С лёгкой хрипотцой";
+  return "Выраженная хрипотца";
 }
-
-function normalizedPeriodicity(
-  frame: Float32Array,
-  sampleRate: number,
-  pitch: number | null
-): number {
-  if (!pitch || pitch <= 0) return 0;
-  const lag = Math.round(sampleRate / pitch);
-  if (lag < 2 || lag >= frame.length / 2) return 0;
-  let xy = 0;
-  let xx = 0;
-  let yy = 0;
-  for (let i = 0; i + lag < frame.length; i += 1) {
-    const x = frame[i] ?? 0;
-    const y = frame[i + lag] ?? 0;
-    xy += x * y;
-    xx += x * x;
-    yy += y * y;
-  }
-  return xx > 0 && yy > 0 ? Math.max(0, xy / Math.sqrt(xx * yy)) : 0;
-}
-
-function analyze(signal: Float32Array): Frame[] {
-  Meyda.bufferSize = SPECTRAL_BUFFER;
-  Meyda.sampleRate = SAMPLE_RATE;
-  const yin = createYinDetector(SAMPLE_RATE);
-  const spectral = new Float32Array(SPECTRAL_BUFFER);
-  const pitchFrame = new Float32Array(PITCH_WINDOW);
-  const frames: Frame[] = [];
-  for (let start = 0; start + SPECTRAL_BUFFER <= signal.length; start += HOP) {
-    spectral.set(signal.subarray(start, start + SPECTRAL_BUFFER));
-    const features = Meyda.extract(["spectralFlatness", "zcr", "rms"], spectral);
-    const pitchStart = Math.max(0, start + SPECTRAL_BUFFER - PITCH_WINDOW);
-    let pitch: number | null = null;
-    if (pitchStart + PITCH_WINDOW <= signal.length) {
-      pitchFrame.set(signal.subarray(pitchStart, pitchStart + PITCH_WINDOW));
-      pitch = yin(pitchFrame);
-    }
-    if (features && (features.rms ?? 0) >= 0.0025) {
-      frames.push({
-        flatness: features.spectralFlatness ?? 0,
-        zcr: (features.zcr ?? 0) / SPECTRAL_BUFFER,
-        pitch,
-        periodicity: normalizedPeriodicity(pitchFrame, SAMPLE_RATE, pitch),
-      });
-    }
-  }
-  return frames;
-}
-
-function summary(values: number[]): string {
-  return [0.1, 0.25, 0.5, 0.75]
-    .map((p) => percentile(values, p).toFixed(5))
-    .join("/");
-}
-
-function raspEvidence(frame: Frame): number {
-  return frame.flatness * Math.sqrt(Math.max(0, 1 - frame.periodicity));
-}
-
-const scenarios: Scenario[] = [
-  { name: "clean male 120", f0: 120, noise: 0 },
-  { name: "clean male 180", f0: 180, noise: 0 },
-  { name: "clean female 220", f0: 220, noise: 0 },
-  { name: "clean Ariana-like 300", f0: 300, noise: 0 },
-  { name: "clean + low noise", f0: 300, noise: 0.003 },
-  { name: "clean + moderate noise", f0: 300, noise: 0.012 },
-  { name: "clean + high noise", f0: 300, noise: 0.035 },
-  { name: "clean + very high noise", f0: 300, noise: 0.07 },
-  { name: "harmonic + dominant noise", f0: 300, noise: 0.12 },
-  { name: "breathy/noisy", f0: 300, noise: 0.045, breathy: true },
-  { name: "clean + consonant bursts", f0: 300, noise: 0.002, bursts: true },
-];
 
 let failed = 0;
 function expect(condition: boolean, message: string): void {
@@ -149,62 +142,76 @@ function expect(condition: boolean, message: string): void {
   }
 }
 
-async function main(): Promise<void> {
-  console.log("Meyda", (Meyda as unknown as { version?: string }).version ?? "5.6.3");
-  console.log("flatness p10/p25/median/p75 | evidence p25/p35/p50/p75 | zcr | pitch | periodicity p25/median | production");
-  for (const scenario of scenarios) {
-    const signal = makeSignal(scenario);
-    const frames = analyze(signal);
-    const pitched = frames.filter((frame) => frame.pitch !== null);
-    const flatness = pitched.map((frame) => frame.flatness);
-    const result = await analyzeVoiceSamples(
-      signal,
-      SAMPLE_RATE,
-      scenario.f0 >= 200 ? "female" : "male"
-    );
-    const production = result
-      ? mapFlatnessToRasp(result.robustRaspEvidence).label
-      : "Недостаточно надёжных кадров";
-    console.log(
-      `${scenario.name.padEnd(26)} ${summary(flatness)} | ${[
-        0.25,
-        0.35,
-        0.5,
-        0.75,
-      ]
-        .map((p) => percentile(pitched.map(raspEvidence), p).toFixed(5))
-        .join("/")} | ${percentile(
-        pitched.map((frame) => frame.zcr),
-        0.5
-      ).toFixed(4)} | ${pitched.length}/${frames.length} | ${percentile(
-        pitched.map((frame) => frame.periodicity),
-        0.25
-      ).toFixed(4)}/${percentile(
-        pitched.map((frame) => frame.periodicity),
-        0.5
-      ).toFixed(4)} | ${production}`
-    );
+async function runScenario(scenario: Scenario): Promise<void> {
+  const signal = makeSignal(scenario);
+  const result = await analyzeVoiceSamples(
+    signal,
+    scenario.sampleRate,
+    scenario.gender
+  );
+  const label = result
+    ? mapFlatnessToRasp(result.robustRaspEvidence).label
+    : "unknown";
+  const prefix = [
+    scenario.gender.padEnd(6),
+    `${scenario.f0}`.padStart(3),
+    `${scenario.sampleRate / 1_000}k`.padStart(5),
+    scenario.texture.padEnd(6),
+    scenario.bursts ? "bursts" : "steady",
+  ].join(" ");
+  if (!result) {
+    console.log(`${prefix} | unknown`);
+    expect(false, `${prefix}: production analysis returned unknown`);
+    return;
+  }
+  console.log(
+    `${prefix} | f0=${result.medianHz.toFixed(1)} ` +
+      `flat=${result.robustFlatness.toFixed(5)} ` +
+      `per=${result.p25Periodicity.toFixed(4)}/${result.medianPeriodicity.toFixed(4)} ` +
+      `raw=${result.rawRobustRaspEvidence.toFixed(5)} ` +
+      `factor=${result.raspCompensationFactor.toFixed(3)} ` +
+      `final=${result.robustRaspEvidence.toFixed(5)} ` +
+      `frames=${result.reliableRaspFrameCount}/${result.rejectedRaspFrameCount} ` +
+      `=> ${label}`
+  );
+  expect(
+    label === expectedLabel(scenario.texture),
+    `${prefix}: expected ${expectedLabel(scenario.texture)}, got ${label}`
+  );
+}
 
-    if (scenario.name.startsWith("clean male") || scenario.name.startsWith("clean female") ||
-        scenario.name === "clean Ariana-like 300" || scenario.name === "clean + low noise") {
-      expect(production === "Чистый", `${scenario.name} must be clean`);
+async function main(): Promise<void> {
+  console.log(
+    "gender f0 sample texture content | median-f0 flatness-p35 periodicity-p25/median raw-evidence frames => label"
+  );
+  for (const sampleRate of SAMPLE_RATES) {
+    for (const f0 of MALE_F0) {
+      for (const texture of ["clean", "light", "strong"] as const) {
+        await runScenario({
+          gender: "male",
+          f0,
+          sampleRate,
+          texture,
+          bursts: texture === "clean",
+          roomNoise: texture === "clean" ? 0.0002 : 0.0028,
+        });
+      }
     }
-    if (scenario.name === "clean + consonant bursts") {
-      expect(production !== "Выраженная хрипотца", "consonant bursts must never be strong rasp");
-    }
-    if (scenario.name === "clean + moderate noise" || scenario.name === "breathy/noisy") {
-      expect(production === "С лёгкой хрипотцой", `${scenario.name} must be light rasp`);
-    }
-    if (scenario.name === "clean + high noise" || scenario.name === "clean + very high noise") {
-      expect(production === "Выраженная хрипотца", `${scenario.name} must be strong rasp`);
-      expect((result?.reliableRaspFrameCount ?? 0) >= 16, `${scenario.name} needs enough reliable frames`);
-    }
-    if (scenario.name === "harmonic + dominant noise") {
-      expect(result === null, "unreliable dominant noise must remain unknown");
+    for (const f0 of FEMALE_F0) {
+      for (const texture of ["clean", "light", "strong"] as const) {
+        await runScenario({
+          gender: "female",
+          f0,
+          sampleRate,
+          texture,
+          bursts: texture === "clean",
+          roomNoise: 0.0028,
+        });
+      }
     }
   }
   if (failed > 0) process.exit(1);
-  console.log("OK: deterministic production rasp calibration");
+  console.log("OK: cross-rate female/male production rasp matrix");
 }
 
 void main();

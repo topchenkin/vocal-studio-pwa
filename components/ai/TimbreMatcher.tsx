@@ -135,6 +135,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
       console.info("[DSP_DEBUG]", {
         analysisId,
+        selectedGender: gender,
         pcm: {
           fingerprint: pcmFingerprint(audioBuffer),
           sampleRate: audioBuffer.sampleRate,
@@ -148,7 +149,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
           median: result.medianFlatness,
           p75: result.p75Flatness,
           robustP35: result.robustFlatness,
-          harmonicNoiseEvidenceP35: result.robustRaspEvidence,
+          rawHarmonicNoiseEvidenceP35: result.rawRobustRaspEvidence,
         },
         periodicity: {
           p25: result.p25Periodicity,
@@ -174,8 +175,18 @@ export default function TimbreMatcher({ locked = false }: Props) {
           reliableRasp: result.reliableRaspFrameCount,
           rejectedRasp: result.rejectedRaspFrameCount,
           total: result.totalFrameCount,
+          rejectedReasons: result.rejectedRaspReasons,
         },
         finalRasp: {
+          medianF0Hz: result.medianHz,
+          rawAdjustedRasp: result.rawRobustRaspEvidence,
+          compensationFactor: result.raspCompensationFactor,
+          thresholdSet: result.raspThresholdSet,
+          thresholds: {
+            cleanMax: result.raspCleanThreshold,
+            lightMax: result.raspLightThreshold,
+          },
+          finalMetric: result.robustRaspEvidence,
           numeric: result.userRaspiness,
           label: mapFlatnessToRasp(result.robustRaspEvidence).label,
         },

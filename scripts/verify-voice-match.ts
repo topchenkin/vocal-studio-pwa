@@ -22,6 +22,7 @@ import {
 } from "../lib/vocal-archetype";
 import {
   VoiceMeasurementAccumulator,
+  calibrateRaspEvidence,
   clampAndMap,
   centroidHzToWeight,
   flatnessToRaspiness,
@@ -59,6 +60,23 @@ check(
     mapFlatnessToRasp(0.016).label === "С лёгкой хрипотцой" &&
     mapFlatnessToRasp(0.08).label === "Выраженная хрипотца",
   "clean, moderate and strong harmonic-noise calibration"
+);
+const femaleCleanCalibration = calibrateRaspEvidence(0.015, "female", 440);
+const femaleLightCalibration = calibrateRaspEvidence(0.04, "female", 440);
+const femaleStrongCalibration = calibrateRaspEvidence(0.09, "female", 440);
+check(
+  mapFlatnessToRasp(femaleCleanCalibration.compensatedEvidence).label ===
+    "Чистый" &&
+    mapFlatnessToRasp(femaleLightCalibration.compensatedEvidence).label ===
+      "С лёгкой хрипотцой" &&
+    mapFlatnessToRasp(femaleStrongCalibration.compensatedEvidence).label ===
+      "Выраженная хрипотца",
+  "female F0-aware clean/light/strong calibration"
+);
+check(
+  calibrateRaspEvidence(0.015, "male", 140).compensatedEvidence === 0.015 &&
+    calibrateRaspEvidence(0.09, "male", 140).compensatedEvidence === 0.09,
+  "male rasp calibration remains identity"
 );
 
 // Stable feature thirds: 0–33 / 34–66 / 67–100.
