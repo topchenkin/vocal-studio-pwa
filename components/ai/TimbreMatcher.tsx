@@ -7,11 +7,14 @@ import Button from "@/components/ui/Button";
 import VoiceRadarChart from "@/components/ai/VoiceRadarChart";
 import {
   CELEBRITY_GENRES,
+  CELEBRITY_REGIONS,
+  REGION_LABEL_RU,
   VOCAL_FACH_LABEL_RU,
   classifyVocalFach,
-  groupMatchesByGenre,
+  groupMatchesByRegionAndGenre,
   matchCelebrities,
   type CelebrityMatch,
+  type CelebrityRegion,
   type Genre,
 } from "@/lib/celebritiesDB";
 import {
@@ -124,6 +127,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * mislabel low male voices and match them against tenors.
    */
   const [gender, setGender] = useState<TimbreGender | null>(null);
+  const [activeRegion, setActiveRegion] = useState<CelebrityRegion>("russian");
   const [activeGenre, setActiveGenre] = useState<Genre>("Pop");
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -210,6 +214,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
 
       setMeasurement(result);
+      setActiveRegion("russian");
       setActiveGenre("Pop");
       setStage("done");
     } catch (err) {
@@ -235,6 +240,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
     setError("");
     setMeasurement(null);
+    setActiveRegion("russian");
     setActiveGenre("Pop");
     setProgress(0);
 
@@ -411,8 +417,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
    * STRICT (gender × vocalFach) filter lives entirely inside
    * `matchCelebrities` (lib/celebritiesDB.ts) — it only ever scores candidates
    * whose gender AND fach both equal the arguments passed here, with no
-   * fallback pool, so a bass can never surface a tenor. Ranking is 3-D
-   * Euclidean distance on [timbreWeight, airiness, raspiness].
+   * fallback pool, so a bass can never surface a tenor. Ranking is weighted
+   * distance on [timbreWeight, airiness, raspiness, tessituraSpan].
    */
   const matches: CelebrityMatch[] = useMemo(() => {
     if (!measurement || !gender || !fach) return [];
@@ -420,14 +426,34 @@ export default function TimbreMatcher({ locked = false }: Props) {
       timbreWeight: measurement.userWeight,
       airiness: measurement.userAiriness,
       raspiness: measurement.userRaspiness,
+      tessituraSpan: measurement.tessituraSpan,
     });
   }, [measurement, gender, fach]);
 
-  const grouped = useMemo(() => groupMatchesByGenre(matches, 5), [matches]);
+  const groupedByRegion = useMemo(
+    () => groupMatchesByRegionAndGenre(matches, 5),
+    [matches]
+  );
+
+  const visibleRegions = useMemo(
+    () =>
+      CELEBRITY_REGIONS.filter((region) => {
+        const genres = groupedByRegion[region];
+        if (!genres) return false;
+        return CELEBRITY_GENRES.some((genre) => (genres[genre]?.length ?? 0) > 0);
+      }),
+    [groupedByRegion]
+  );
+
+  const shownRegion: CelebrityRegion = visibleRegions.includes(activeRegion)
+    ? activeRegion
+    : (visibleRegions[0] ?? "russian");
+
+  const regionGroups = groupedByRegion[shownRegion] ?? {};
 
   const visibleGenres = useMemo(
-    () => CELEBRITY_GENRES.filter((genre) => (grouped[genre]?.length ?? 0) > 0),
-    [grouped]
+    () => CELEBRITY_GENRES.filter((genre) => (regionGroups[genre]?.length ?? 0) > 0),
+    [regionGroups]
   );
 
   const shownGenre: Genre =
@@ -440,7 +466,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
     return (
       <LockedCard
         title="Звёздный двойник"
-        text="Спойте десять секунд — Звёздный двойник найдёт, чей голос звучит как ваш. Тип голоса, совпадения с сотней исполнителей и момент, после которого хочется петь ещё. Доступно на Premium."
+        text="Спойте десять секунд — Звёздный двойник найдёт, чей голос звучит как ваш. Тип голоса, совпадения с исполнителями и момент, после которого хочется петь ещё. Доступно на Premium."
       />
     );
   }
@@ -560,7 +586,8 @@ export default function TimbreMatcher({ locked = false }: Props) {
             <p className="mt-2 text-sm text-studio-muted">
               Тембр {measurement.userWeight}/100 · Воздух{" "}
               {measurement.userAiriness}/100 · Расщепление{" "}
-              {measurement.userRaspiness}/100
+              {measurement.userRaspiness}/100 · Ширина тесситуры{" "}
+              {measurement.tessituraSpan}/100
             </p>
             {topMatch && (
               <p className="mt-3 text-base text-studio-text">
@@ -595,15 +622,35 @@ export default function TimbreMatcher({ locked = false }: Props) {
             }
           />
 
-          {visibleGenres.length === 0 ? (
+          {visibleRegions.length === 0 ? (
             <p className="rounded-2xl bg-studio-card px-4 py-6 text-center text-sm text-studio-muted ring-1 ring-studio-border">
               Нет исполнителей с типом голоса «{VOCAL_FACH_LABEL_RU[fach]}».
             </p>
           ) : (
             <div>
+              <div className="mb-2 flex gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
+                {visibleRegions.map((region) => (
+                  <button
+                    key={region}
+                    type="button"
+                    onClick={() => {
+                      setActiveRegion(region);
+                      setActiveGenre("Pop");
+                    }}
+                    className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                      shownRegion === region
+                        ? "bg-studio-accent/20 text-studio-accent-light"
+                        : "text-studio-muted hover:text-studio-text"
+                    }`}
+                  >
+                    {REGION_LABEL_RU[region]}
+                  </button>
+                ))}
+              </div>
+
               <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-studio-bg/60 p-1 ring-1 ring-studio-border">
                 {visibleGenres.map((genre) => {
-                  const count = grouped[genre]?.length ?? 0;
+                  const count = regionGroups[genre]?.length ?? 0;
                   return (
                     <button
                       key={genre}
@@ -626,10 +673,11 @@ export default function TimbreMatcher({ locked = false }: Props) {
 
               <div className="rounded-2xl bg-studio-card p-3.5 ring-1 ring-studio-border sm:p-4">
                 <h3 className="mb-3 text-sm font-semibold text-studio-text">
-                  Топ совпадений — {GENRE_LABEL_RU[shownGenre]}
+                  Топ совпадений — {REGION_LABEL_RU[shownRegion]},{" "}
+                  {GENRE_LABEL_RU[shownGenre]}
                 </h3>
                 <ul className="space-y-4">
-                  {(grouped[shownGenre] ?? []).map((m, i) => (
+                  {(regionGroups[shownGenre] ?? []).map((m, i) => (
                     <li key={m.celebrity.id}>
                       <div className="mb-1.5 flex items-center justify-between gap-2">
                         <p className="text-[13px] leading-snug text-studio-text sm:text-sm">

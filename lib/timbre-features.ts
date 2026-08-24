@@ -17,9 +17,15 @@
  * values onto the same 0-100 axes the stars are authored on.
  *
  * Axes (all 0-100, FIXED calibration — never per-take min/max):
- *   timbreWeight ← spectral centroid (Hz, log map)
+ *   timbreWeight ← spectral centroid (Hz, log map), blended median + p75
  *   airiness     ← high-frequency energy ratio (4–12 kHz), not ZCR
- *   raspiness    ← spectral flatness
+ *   raspiness    ← spectral flatness, blended median + p75 so grit *moments*
+ *                  (rock rasp, belt distortion) actually move the vector
+ *   tessituraSpan← IQR of pitched F0 in semitones, mapped 0–100
+ *
+ * Using the median ALONE collapsed every 10-second take onto the same
+ * “average vowel” point, so the nearest stars never changed. Style lives
+ * in the upper tail of flatness/centroid and in how wide the melody is.
  *
  * Air used to be mapped from zero-crossing rate. That is almost always 0 for
  * sung vowels: a 150 Hz chest tone at 44.1 kHz has ZCR ≈ 0.007, below the
@@ -224,24 +230,69 @@ export function hfRatioToAiriness(ratio: number): number {
   return Math.round(linMap(ratio, HF_AIR_MIN, HF_AIR_MAX) * 100);
 }
 
-/** Robust (median-based) summary of a single take. */
+/**
+ * Linear interpolation percentile. `p` is 0..1.
+ */
+export function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(1, p)) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const a = sorted[lo] ?? 0;
+  const b = sorted[hi] ?? a;
+  return a + (b - a) * (idx - lo);
+}
+
+function hzToMidi(hz: number): number {
+  if (!Number.isFinite(hz) || hz <= 0) return 0;
+  return 69 + 12 * Math.log2(hz / 440);
+}
+
+/**
+ * Pitch IQR (semitones) → 0–100 tessitura width.
+ * ~2 st of a narrow pop hook → ~22; an octave of melody → ~78.
+ */
+export function pitchIqrToSpan(p25Hz: number, p75Hz: number): number {
+  const iqr = Math.max(0, hzToMidi(p75Hz) - hzToMidi(p25Hz));
+  return Math.round(clamp01(1 - Math.exp(-iqr / 8)) * 100);
+}
+
+/**
+ * Matching axes blend median (stable colour) with p75 (style peaks).
+ * Grit/brightness of rock vs breathy pop lives in the upper tail — a pure
+ * median of 10 s of vowels always looked like the same clean pop take.
+ */
+export const WEIGHT_MEDIAN_MIX = 0.45;
+export const WEIGHT_P75_MIX = 0.55;
+export const RASP_MEDIAN_MIX = 0.3;
+export const RASP_P75_MIX = 0.7;
+
+/** Robust summary of a single take — medians plus style-sensitive tails. */
 export type VoiceMeasurement = {
   /** Median fundamental frequency in Hz across pitched frames — drives the Vocal Fach. */
   medianHz: number;
+  /** 25th / 75th percentile F0 — tessitura width, not just the centre. */
+  p25Hz: number;
+  p75Hz: number;
   /** Median spectral centroid in Hz across non-silent frames. */
   medianCentroidHz: number;
+  p75CentroidHz: number;
   /** Median Meyda spectralFlatness (0–1) across non-silent frames. */
   medianFlatness: number;
+  p75Flatness: number;
   /** Median zero-crossing rate (0–1) across non-silent frames. */
   medianZcrRate: number;
   /** Median high-frequency energy ratio (0–1) when a spectrum was supplied. */
   medianHfRatio: number;
-  /** `medianCentroidHz` mapped onto the same 0-100 scale as the stars' `timbreWeight`. */
+  /** Blended centroid → 0-100, same scale as the stars' `timbreWeight`. */
   userWeight: number;
-  /** ZCR mapped onto the same 0-100 scale as the stars' `airiness`. */
+  /** HF-ratio (or ZCR fallback) → 0-100, same scale as the stars' `airiness`. */
   userAiriness: number;
-  /** Flatness mapped onto the same 0-100 scale as the stars' `raspiness`. */
+  /** Blended flatness → 0-100, same scale as the stars' `raspiness`. */
   userRaspiness: number;
+  /** Pitch IQR mapped 0–100, same scale as the stars' `tessituraSpan`. */
+  tessituraSpan: number;
   /** Frames that passed the noise-floor gate. */
   frameCount: number;
   /** Subset of those where YIN also found an F0. */
@@ -249,19 +300,16 @@ export type VoiceMeasurement = {
 };
 
 function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0
-    ? (sorted[mid] ?? 0)
-    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  return percentile(values, 0.5);
 }
 
 /**
  * Accumulates the per-frame series captured live during the take, gating out
- * near-silent frames via `RMS_NOISE_FLOOR`, and reduces them to medians.
- * Median rather than mean so a couple of momentarily louder/brighter
- * syllables can't drag the whole result around.
+ * near-silent frames via `RMS_NOISE_FLOOR`.
+ *
+ * Ranking uses a *blend* of median (stable timbre colour) and the 75th
+ * percentile (style peaks: grit, belt brightness, wider melody). A pure
+ * median washed rock rasp and pop belt back into the same “average vowel”.
  *
  * Decoupling: centroid / flatness / zcr come from RMS-voiced frames; F0
  * comes only from YIN-success frames.
@@ -329,7 +377,7 @@ export class VoiceMeasurementAccumulator {
     return this.pitchHz.length;
   }
 
-  /** Medians + derived 3-D vector, or null when the take carried too little usable signal. */
+  /** Medians + style tails + derived matching vector, or null if too little signal. */
   finalize(): VoiceMeasurement | null {
     if (this.frames < MIN_VOICED_FRAMES) return null;
     if (this.pitchHz.length < MIN_PITCHED_FRAMES) return null;
@@ -342,23 +390,45 @@ export class VoiceMeasurementAccumulator {
       this.sampleRate,
       this.bufferSize
     );
+    const p75CentroidHz = centroidBinToHz(
+      percentile(this.centroidBins, 0.75),
+      this.sampleRate,
+      this.bufferSize
+    );
     const medianFlatness = median(this.flatness);
+    const p75Flatness = percentile(this.flatness, 0.75);
     const medianZcrRate = median(this.zcrRates);
     const medianHfRatio = median(this.hfRatios);
+    const p25Hz = percentile(this.pitchHz, 0.25);
+    const p75Hz = percentile(this.pitchHz, 0.75);
     const userAiriness =
       this.hfRatios.length > 0
         ? hfRatioToAiriness(medianHfRatio)
         : zcrRateToAiriness(medianZcrRate);
 
+    const userWeight = Math.round(
+      WEIGHT_MEDIAN_MIX * centroidHzToWeight(medianCentroidHz) +
+        WEIGHT_P75_MIX * centroidHzToWeight(p75CentroidHz)
+    );
+    const userRaspiness = Math.round(
+      RASP_MEDIAN_MIX * flatnessToRaspiness(medianFlatness) +
+        RASP_P75_MIX * flatnessToRaspiness(p75Flatness)
+    );
+
     return {
       medianHz: median(this.pitchHz),
+      p25Hz,
+      p75Hz,
       medianCentroidHz,
+      p75CentroidHz,
       medianFlatness,
+      p75Flatness,
       medianZcrRate,
       medianHfRatio,
-      userWeight: centroidHzToWeight(medianCentroidHz),
+      userWeight: Math.max(0, Math.min(100, userWeight)),
       userAiriness,
-      userRaspiness: flatnessToRaspiness(medianFlatness),
+      userRaspiness: Math.max(0, Math.min(100, userRaspiness)),
+      tessituraSpan: pitchIqrToSpan(p25Hz, p75Hz),
       frameCount: this.frames,
       pitchedFrameCount: this.pitchHz.length,
     };

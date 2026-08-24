@@ -8,7 +8,7 @@ type Props = {
 };
 
 const AXES: Array<{
-  key: keyof TimbreVector;
+  key: "timbreWeight" | "airiness" | "raspiness";
   label: string;
   low: string;
   high: string;
