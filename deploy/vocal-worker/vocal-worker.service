@@ -1,0 +1,22 @@
+[Unit]
+Description=UniqueVocal exercise scoring worker
+After=network-online.target ai-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/uniquevocal/vocal-worker.env
+WorkingDirectory=/opt/vocal-worker
+ExecStart=/opt/vocal-worker/.venv/bin/python /opt/vocal-worker/worker.py
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target

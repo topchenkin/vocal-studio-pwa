@@ -9,10 +9,11 @@ import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import ExerciseAudioPlayer from "@/components/exercises/ExerciseAudioPlayer";
+import VocalExercisePractice from "@/components/exercises/VocalExercisePractice";
 import SbpPaymentSheet, {
   type PaymentPurpose,
 } from "@/components/payment/SbpPaymentSheet";
-import type { AppSubscriptionTier, Exercise } from "@/types";
+import type { AppSubscriptionTier, Exercise, ExercisePhrase } from "@/types";
 
 const tierRank: Record<AppSubscriptionTier, number> = {
   none: 0,
@@ -94,6 +95,7 @@ const demoExercises: Exercise[] = [
 export default function ExerciseLibrary() {
   const { tier } = useAuth();
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [loading, setLoading] = useState(true);
   const [lockedTier, setLockedTier] = useState<AppSubscriptionTier | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
@@ -102,15 +104,22 @@ export default function ExerciseLibrary() {
     let mounted = true;
 
     const loadExercises = async () => {
-      const { data, error } = await supabase
-        .from("exercises")
-        .select("*")
-        .order("title");
+      const [exerciseResult, phraseResult] = await Promise.all([
+        supabase.from("exercises").select("*").order("title"),
+        supabase.from("exercise_phrases").select("*").order("sort_order"),
+      ]);
 
       if (!mounted) return;
-      if (error) console.error("Unable to load exercises:", error.message);
+      if (exerciseResult.error) {
+        console.error("Unable to load exercises:", exerciseResult.error.message);
+      }
+      if (phraseResult.error) {
+        console.warn("Interactive phrases are unavailable:", phraseResult.error.message);
+      } else {
+        setPhrases(phraseResult.data ?? []);
+      }
       const resolvedExercises = await Promise.all(
-        (data ?? []).map(async (exercise) => {
+        (exerciseResult.data ?? []).map(async (exercise) => {
           if (!exercise.storage_path) return exercise;
           const { data: signed } = await supabase.storage
             .from("exercise-media")
@@ -197,6 +206,12 @@ export default function ExerciseLibrary() {
                 src={exercise.media_url}
                 title={exercise.title}
               />
+              {phrases.some((phrase) => phrase.exercise_id === exercise.id) && (
+                <VocalExercisePractice
+                  exercise={exercise}
+                  phrases={phrases.filter((phrase) => phrase.exercise_id === exercise.id)}
+                />
+              )}
             </div>
           ))}
         </div>

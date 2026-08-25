@@ -9,12 +9,28 @@ from pathlib import Path
 
 import paramiko
 
-HOST = os.environ.get("UVS_SSH_HOST", "5.42.123.142")
-PASSWORD = os.environ.get("UVS_SSH_PASS", "")
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "out"
 CADDYFILE = ROOT / "deploy" / "sb-proxy" / "Caddyfile"
 REMOTE_SITE = "/var/www/uniquevocal"
+
+
+def local_env() -> dict[str, str]:
+    values: dict[str, str] = {}
+    path = ROOT / ".env.local"
+    if not path.is_file():
+        return values
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+LOCAL_ENV = local_env()
+HOST = os.environ.get("UVS_SSH_HOST") or LOCAL_ENV.get("UVS_SSH_HOST", "5.42.123.142")
+PASSWORD = os.environ.get("UVS_SSH_PASS") or LOCAL_ENV.get("UVS_SSH_PASS", "")
 
 
 def run(client: paramiko.SSHClient, cmd: str, timeout: int = 120) -> None:

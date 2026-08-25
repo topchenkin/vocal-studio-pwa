@@ -102,6 +102,78 @@ export interface Exercise {
   created_by: string | null;
 }
 
+export type ExerciseAnalysisStatus =
+  | "queued"
+  | "separating"
+  | "awaiting_phrase_review"
+  | "extracting"
+  | "ready"
+  | "failed";
+
+export interface ExerciseAnalysisJob {
+  [key: string]: unknown;
+  id: string;
+  exercise_id: string;
+  source_storage_path: string;
+  source_sha256: string | null;
+  status: ExerciseAnalysisStatus;
+  progress: number;
+  error: string | null;
+  analyzer_version: string;
+  vocal_storage_path: string | null;
+  duration_sec: number | null;
+  attempts: number;
+  locked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExercisePhrase {
+  [key: string]: unknown;
+  id: string;
+  exercise_id: string;
+  sort_order: number;
+  title: string;
+  start_sec: number;
+  end_sec: number;
+  feature_status: "pending" | "ready" | "failed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VocalExerciseAttempt {
+  [key: string]: unknown;
+  id: string;
+  phrase_id: string;
+  student_id: string;
+  storage_path: string | null;
+  media_mime: string;
+  duration_sec: number;
+  status:
+    | "queued"
+    | "evaluating"
+    | "evaluated"
+    | "rejected"
+    | "failed"
+    | "shared"
+    | "discarded";
+  overall_score: number | null;
+  intonation_score: number | null;
+  rhythm_score: number | null;
+  completeness_score: number | null;
+  global_shift_semitones: number | null;
+  confidence: Record<string, unknown>;
+  feedback: string | null;
+  error: string | null;
+  analyzer_version: string;
+  share_requested: boolean;
+  chat_message_id: string | null;
+  expires_at: string;
+  locked_at: string | null;
+  created_at: string;
+  evaluated_at: string | null;
+}
+
 export interface AppNotification {
   [key: string]: unknown;
   id: string;
@@ -340,6 +412,58 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Omit<Exercise, "id">>;
+        Relationships: [];
+      };
+      exercise_analysis_jobs: {
+        Row: ExerciseAnalysisJob;
+        Insert: {
+          id?: string;
+          exercise_id: string;
+          source_storage_path: string;
+          status?: ExerciseAnalysisStatus;
+          progress?: number;
+          error?: string | null;
+          analyzer_version?: string;
+          vocal_storage_path?: string | null;
+          duration_sec?: number | null;
+          source_sha256?: string | null;
+          attempts?: number;
+          locked_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<ExerciseAnalysisJob>;
+        Relationships: [];
+      };
+      exercise_phrases: {
+        Row: ExercisePhrase;
+        Insert: {
+          id?: string;
+          exercise_id: string;
+          sort_order: number;
+          title?: string;
+          start_sec: number;
+          end_sec: number;
+          feature_status?: ExercisePhrase["feature_status"];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<ExercisePhrase>;
+        Relationships: [];
+      };
+      vocal_exercise_attempts: {
+        Row: VocalExerciseAttempt;
+        Insert: {
+          id?: string;
+          phrase_id: string;
+          student_id: string;
+          storage_path: string;
+          media_mime: string;
+          duration_sec: number;
+          status?: VocalExerciseAttempt["status"];
+          expires_at?: string;
+        };
+        Update: Partial<VocalExerciseAttempt>;
         Relationships: [];
       };
       notifications: {
@@ -751,6 +875,22 @@ export interface Database {
           target_lesson_id?: string | null;
         };
         Returns: string;
+      };
+      admin_retry_exercise_analysis: {
+        Args: { p_exercise_id: string };
+        Returns: undefined;
+      };
+      admin_extract_exercise_phrases: {
+        Args: { p_exercise_id: string };
+        Returns: undefined;
+      };
+      request_vocal_attempt_share: {
+        Args: { p_attempt_id: string };
+        Returns: undefined;
+      };
+      discard_vocal_attempt: {
+        Args: { p_attempt_id: string };
+        Returns: undefined;
       };
     };
     Enums: { [_ in never]: never };

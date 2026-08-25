@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test:voice-match": "tsx scripts/verify-voice-match.ts",
     "test:rasp-calibration": "tsx scripts/calibrate-rasp.ts",
+    "test:vocal-exercise": "tsx scripts/verify-vocal-exercise.ts && node scripts/run-python-vocal-tests.mjs",
     "start": "next start",
     "lint": "next lint",
     "generate-vapid": "web-push generate-vapid-keys",
