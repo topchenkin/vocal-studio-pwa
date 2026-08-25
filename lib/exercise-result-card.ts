@@ -147,7 +147,7 @@ export async function renderExerciseResultPng(input: {
 
   const gap = 24;
   const cardW = (W - 160 - gap * 2) / 3;
-  fillMetric(ctx, "Интонация", input.payload.intonation, 80, 890, cardW);
+  fillMetric(ctx, "Мелодия", input.payload.intonation, 80, 890, cardW);
   fillMetric(ctx, "Ритм", input.payload.rhythm, 80 + cardW + gap, 890, cardW);
   fillMetric(ctx, "Полнота", input.payload.completeness, 80 + (cardW + gap) * 2, 890, cardW);
 

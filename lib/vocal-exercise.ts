@@ -10,9 +10,9 @@ export const TEACHER_AVATARS: Record<TeacherMood, string> = {
 };
 
 const focusText: Record<ScoreDimension, string> = {
-  intonation: "Сейчас лучше всего поможет внимание к интервалам между нотами.",
-  rhythm: "На следующей попытке поймайте точнее вступления и длительности.",
-  completeness: "Попробуйте допеть фразу на опоре до самого конца.",
+  intonation: "Сейчас лучше всего поможет внимание к нотам мелодии, без гонки за громкостью.",
+  rhythm: "На следующей попытке поймайте точнее вступления певческих нот.",
+  completeness: "Пропойте вокальные куски и помолчите, когда играет фортепиано.",
 };
 
 export function weakestDimension(

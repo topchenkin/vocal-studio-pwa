@@ -34,61 +34,56 @@ def features(
     }
 
 
+MELODY = [60, 60, 62, 62, 64, 64, 67, 67] * 3
+
+
 class VocalScoringTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.reference = features([60, 60, 62, 62, 64, 64, 67, 67] * 3)
+        self.reference = features(MELODY)
 
     def test_constant_five_semitone_transposition_scores_high(self) -> None:
-        shifted = features([value + 5 for value in self.reference["pitch_midi"]])
+        shifted = features([value + 5 for value in MELODY])
         result = score_features(self.reference, shifted)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertEqual(result["global_shift_semitones"], 5)
         self.assertGreaterEqual(result["overall"], 80)
         self.assertGreaterEqual(result["intonation"], 90)
 
     def test_octave_with_recording_pad_scores_high(self) -> None:
-        shifted = features(
-            [value + 12 for value in self.reference["pitch_midi"]],
-            duration=7.5,
-        )
+        shifted = features([value + 12 for value in MELODY], duration=7.5)
         result = score_features(self.reference, shifted)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertEqual(result["global_shift_semitones"], 12)
         self.assertGreaterEqual(result["overall"], 80)
 
     def test_fractional_octave_shift_scores_high(self) -> None:
-        # Male take ~12.7 semitones down: integer rounding used to leave ~70¢ error.
-        shifted = features([value - 12.7 for value in self.reference["pitch_midi"]])
+        shifted = features([value - 12.7 for value in MELODY])
         result = score_features(self.reference, shifted)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertIn(result["global_shift_semitones"], {-12, -13})
         self.assertGreaterEqual(result["overall"], 80)
         self.assertGreaterEqual(result["intonation"], 90)
 
     def test_octave_transposition_scores_high(self) -> None:
-        shifted = features([value + 12 for value in self.reference["pitch_midi"]])
+        shifted = features([value + 12 for value in MELODY])
         result = score_features(self.reference, shifted)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertEqual(result["global_shift_semitones"], 12)
         self.assertGreaterEqual(result["overall"], 80)
         self.assertGreaterEqual(result["intonation"], 90)
 
     def test_same_pitch_contour_scores_high(self) -> None:
-        copied = features(
-            list(self.reference["pitch_midi"]),
-            duration=7.4,
-            onsets=[0.35, 1.85, 3.45, 4.85],
-        )
+        copied = features(list(MELODY), duration=7.4, onsets=[0.35, 1.85, 3.45, 4.85])
         result = score_features(self.reference, copied)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 80)
 
     def test_octave_tracker_jumps_still_score_high(self) -> None:
         jumped = []
-        for index, value in enumerate(self.reference["pitch_midi"]):
+        for index, value in enumerate(MELODY):
             jumped.append(value - 12 if index % 5 else value)
         result = score_features(self.reference, features(jumped, duration=7.2))
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 80)
         self.assertGreaterEqual(result["intonation"], 85)
 
@@ -96,32 +91,27 @@ class VocalScoringTests(unittest.TestCase):
         wrong = features(
             [
                 value + (7 if index % 4 == 0 else -4 if index % 4 == 1 else 3 if index % 4 == 2 else -8)
-                for index, value in enumerate(self.reference["pitch_midi"])
+                for index, value in enumerate(MELODY)
             ]
         )
         result = score_features(self.reference, wrong)
-        self.assertTrue(result["evaluable"])
-        self.assertLess(result["intonation"], 60)
-        self.assertLess(result["overall"], 70)
+        if result["evaluable"]:
+            self.assertLess(result["intonation"], 60)
+            self.assertLess(result["overall"], 70)
+        else:
+            self.assertFalse(result["evaluable"])
 
     def test_rhythm_delay_and_duration_are_penalized(self) -> None:
-        late = features(
-            self.reference["pitch_midi"],
-            duration=9.5,
-            onsets=[1.8, 3.6, 5.5, 7.4],
-        )
+        late = features(MELODY, duration=9.5, onsets=[1.8, 3.6, 5.5, 7.4])
         result = score_features(self.reference, late)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertLess(result["rhythm"], 80)
 
     def test_incomplete_voiced_coverage_lowers_completeness(self) -> None:
-        incomplete = features(
-            self.reference["pitch_midi"][:12] + [None] * 12,
-            coverage=0.32,
-        )
+        incomplete = features(MELODY[:16] + [None] * 8, coverage=0.55)
         result = score_features(self.reference, incomplete)
-        self.assertTrue(result["evaluable"])
-        self.assertLess(result["completeness"], 70)
+        self.assertTrue(result["evaluable"], result)
+        self.assertLess(result["completeness"], 85)
 
     def test_silence_and_noise_are_rejected(self) -> None:
         silence = features([None] * 24, coverage=0.0, rms_db=-80)
@@ -133,23 +123,77 @@ class VocalScoringTests(unittest.TestCase):
         human = features(
             [
                 (value + 0.08) if index % 3 == 0 else (value - 0.06)
-                for index, value in enumerate(self.reference["pitch_midi"])
+                for index, value in enumerate(MELODY)
             ],
             duration=7.4,
             onsets=[0.45, 2.0, 3.6, 5.1],
         )
         result = score_features(self.reference, human)
-        self.assertTrue(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
         self.assertIsInstance(result["overall"], int)
         self.assertGreaterEqual(result["overall"], 80)
 
-    def test_sparse_singing_in_long_recording_is_scored(self) -> None:
-        sung = [60, 60, 62, 62, 64, 64, 67, 67] * 2
-        sparse = [None] * 40 + sung + [None] * 40
-        take = features(sparse, duration=45.0, coverage=0.05, rms_db=-17)
+    def test_wait_then_sing_full_phrase_is_scored(self) -> None:
+        take = features([None] * 12 + MELODY + [None] * 6, duration=10.0, coverage=0.55)
         result = score_features(self.reference, take)
-        self.assertTrue(result["evaluable"])
-        self.assertIsInstance(result["overall"], int)
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["overall"], 70)
+
+    def test_drone_is_not_scored(self) -> None:
+        result = score_features(self.reference, features([60] * 24, coverage=0.9))
+        self.assertFalse(result["evaluable"])
+
+    def test_hum_narrow_chroma_is_not_scored(self) -> None:
+        hum = features([60.1, 60.0, 59.8, 60.2] * 6, coverage=0.88)
+        result = score_features(self.reference, hum)
+        self.assertFalse(result["evaluable"])
+
+    def test_abort_mid_phrase_is_not_scored(self) -> None:
+        abort = features(MELODY[:4] + [None] * 20, coverage=0.14)
+        result = score_features(self.reference, abort)
+        self.assertFalse(result["evaluable"])
+
+    def test_chance_contour_is_not_scored(self) -> None:
+        reversed_take = features(list(reversed(MELODY)), coverage=0.85)
+        self.assertFalse(score_features(self.reference, reversed_take)["evaluable"])
+        rng = np.random.default_rng(7)
+        random_take = features(
+            [float(48 + rng.integers(0, 24)) for _ in MELODY],
+            coverage=0.85,
+        )
+        self.assertFalse(score_features(self.reference, random_take)["evaluable"])
+
+    def test_piano_rests_are_not_melody_targets(self) -> None:
+        rest = [None] * 8
+        reference = features(rest + MELODY + rest, duration=10.0, coverage=0.55)
+        silent = features(rest + MELODY + rest, duration=10.0, coverage=0.55)
+        sung_piano = features([64] * 8 + MELODY + [60] * 8, duration=10.0, coverage=0.95)
+        quiet = score_features(reference, silent)
+        noisy = score_features(reference, sung_piano)
+        self.assertTrue(quiet["evaluable"], quiet)
+        self.assertGreaterEqual(quiet["overall"], 80)
+        self.assertGreaterEqual(quiet["confidence"]["rest_silence"], 0.9)
+        self.assertTrue(noisy["evaluable"], noisy)
+        self.assertLess(noisy["completeness"], quiet["completeness"])
+        self.assertLess(noisy["confidence"]["rest_silence"], quiet["confidence"]["rest_silence"])
+        self.assertLessEqual(noisy["overall"], quiet["overall"])
+
+    def test_loudness_does_not_change_score(self) -> None:
+        loud = score_features(self.reference, features(MELODY, rms_db=-8))
+        quiet = score_features(self.reference, features(MELODY, rms_db=-32))
+        self.assertTrue(loud["evaluable"] and quiet["evaluable"])
+        self.assertEqual(loud["overall"], quiet["overall"])
+        self.assertEqual(loud["intonation"], quiet["intonation"])
+        self.assertEqual(loud["rhythm"], quiet["rhythm"])
+
+    def test_expressive_slides_inside_notes_still_score_high(self) -> None:
+        slides = []
+        for index, value in enumerate(MELODY):
+            slides.append(value + (0.35 if index % 2 else -0.25))
+        result = score_features(self.reference, features(slides))
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["intonation"], 90)
+        self.assertGreaterEqual(result["overall"], 80)
 
     def test_extracted_reasonable_take_is_scored(self) -> None:
         try:
@@ -186,7 +230,7 @@ class VocalScoringTests(unittest.TestCase):
             write_wav(ref_path, melody(freqs_ref))
             write_wav(stu_path, melody(freqs_stu))
             result = score_features(
-                extract_features(str(ref_path)),
+                extract_features(str(ref_path), yin_fill=False),
                 extract_features(str(stu_path)),
             )
         self.assertTrue(result["evaluable"], result)

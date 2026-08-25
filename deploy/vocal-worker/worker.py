@@ -227,6 +227,7 @@ def process_analysis(job: dict[str, Any]) -> None:
                         str(vocal_wav),
                         offset=float(phrase["start_sec"]),
                         duration=float(phrase["end_sec"]) - float(phrase["start_sec"]),
+                        yin_fill=False,
                     )
                     rest(
                         "POST",

@@ -488,7 +488,7 @@ export default function VocalExercisePractice({
           </div>
           <div className="grid grid-cols-3 gap-2">
             {[
-              ["Интонация", attempt.intonation_score, "50%"],
+              ["Мелодия", attempt.intonation_score, "50%"],
               ["Ритм", attempt.rhythm_score, "30%"],
               ["Полнота", attempt.completeness_score, "20%"],
             ].map(([label, value, weight]) => (
