@@ -57,3 +57,20 @@ export function teacherReaction(
     message: `Возьмите один короткий фрагмент и повторите спокойно. ${focusText[weakest]}`,
   };
 }
+
+/** Practical upper bound (upload/size), not a 45s product hard stop. */
+export const EXERCISE_PHRASE_MAX_SEC = 600;
+export const EXERCISE_ATTEMPT_MAX_SEC = 600;
+export const EXERCISE_PHRASE_LIST_LIMIT = 500;
+
+export function nextPhraseSortOrder(phrases: Array<{ sort_order: number }>): number {
+  if (phrases.length === 0) return 0;
+  return Math.max(...phrases.map((phrase) => Number(phrase.sort_order) || 0)) + 1;
+}
+
+export function phrasesForExercise<T extends { exercise_id: string }>(
+  phrases: T[],
+  exerciseId: string
+): T[] {
+  return phrases.filter((phrase) => phrase.exercise_id === exerciseId);
+}

@@ -22,6 +22,7 @@ import {
   rejectedMediaMessage,
 } from "@/lib/file-accept";
 import { supabase } from "@/lib/supabase";
+import { EXERCISE_PHRASE_LIST_LIMIT } from "@/lib/vocal-exercise";
 import { CAT_LEVEL_LABELS, CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
   AppSubscriptionTier,
@@ -183,7 +184,12 @@ export default function ContentManager() {
         supabase.from("exercise_folder_access").select("*"),
         supabase.from("exercise_student_access").select("*"),
         supabase.from("exercise_analysis_jobs").select("*"),
-        supabase.from("exercise_phrases").select("id,exercise_id,title,feature_status").order("sort_order"),
+        supabase
+          .from("exercise_phrases")
+          .select("id,exercise_id,title,feature_status,sort_order,created_at")
+          .order("sort_order")
+          .order("created_at")
+          .limit(EXERCISE_PHRASE_LIST_LIMIT),
       ]);
 
     const queryError =

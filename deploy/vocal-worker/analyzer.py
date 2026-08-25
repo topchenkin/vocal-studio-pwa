@@ -103,21 +103,55 @@ def extract_features(path: str, offset: float = 0, duration: float | None = None
 
     # Loudness normalization is analysis-only and does not change the stored take.
     target_rms = 10 ** (-20 / 20)
-    gain = min(12.0, target_rms / max(rms, 1e-6))
+    gain = min(18.0, target_rms / max(rms, 1e-6))
     normalized = np.clip(audio * gain, -1.0, 1.0)
     hop = 256
+    frame_length = 2048
     f0, voiced_flag, voiced_probability = librosa.pyin(
         normalized,
         fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("C6"),
+        fmax=librosa.note_to_hz("C7"),
         sr=sample_rate,
-        frame_length=2048,
+        frame_length=frame_length,
         hop_length=hop,
         fill_na=np.nan,
     )
     times = librosa.times_like(f0, sr=sample_rate, hop_length=hop)
     probability = np.nan_to_num(voiced_probability, nan=0.0)
-    voiced = np.asarray(voiced_flag, dtype=bool) & np.isfinite(f0) & (probability >= 0.55)
+    voiced = (
+        np.asarray(voiced_flag, dtype=bool)
+        & np.isfinite(f0)
+        & (probability >= 0.32)
+    )
+    frame_rms = librosa.feature.rms(
+        y=normalized, frame_length=frame_length, hop_length=hop
+    )[0]
+    if frame_rms.size < f0.size:
+        frame_rms = np.pad(frame_rms, (0, f0.size - frame_rms.size))
+    elif frame_rms.size > f0.size:
+        frame_rms = frame_rms[: f0.size]
+    frame_db = 20 * np.log10(np.maximum(frame_rms, 1e-8))
+    # Phone karaoke takes often fail pYIN voicing even when a tonal sung
+    # line is present. Fill those frames with YIN only where the frame is loud.
+    if voiced.size == 0 or float(np.mean(voiced)) < 0.08:
+        yin_f0 = librosa.yin(
+            normalized,
+            fmin=librosa.note_to_hz("C2"),
+            fmax=librosa.note_to_hz("C7"),
+            sr=sample_rate,
+            frame_length=frame_length,
+            hop_length=hop,
+        )
+        if yin_f0.size < f0.size:
+            yin_f0 = np.pad(yin_f0, (0, f0.size - yin_f0.size), constant_values=np.nan)
+        elif yin_f0.size > f0.size:
+            yin_f0 = yin_f0[: f0.size]
+        yin_ok = np.isfinite(yin_f0) & (frame_db > -42.0)
+        fill = (~voiced) & yin_ok
+        if np.any(fill):
+            f0 = np.where(fill, yin_f0, f0)
+            probability = np.where(fill, np.maximum(probability, 0.42), probability)
+            voiced = voiced | fill
     midi = np.full_like(f0, np.nan, dtype=float)
     midi[voiced] = librosa.hz_to_midi(f0[voiced])
 
@@ -162,7 +196,7 @@ def _voiced_track(features: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         features.get("pitch_midi", []),
         features.get("confidence", []),
     ):
-        if value is not None and float(confidence) >= 0.5:
+        if value is not None and float(confidence) >= 0.3:
             times.append(float(time))
             pitch.append(float(value))
     return np.asarray(times), np.asarray(pitch)
@@ -224,10 +258,12 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
     rms_db = float(student.get("rms_db", -120))
     clipping = float(student.get("clipping_ratio", 0))
     flatness = float(student.get("spectral_flatness", 0))
+    duration = float(student.get("duration", 0))
+    voiced_seconds = coverage * max(0.0, duration)
     gate_reason: str | None = None
     if rms_db < -48:
         gate_reason = "Сигнал слишком тихий. Поднесите микрофон ближе и спойте ещё раз."
-    elif coverage < 0.12:
+    elif voiced_seconds < 0.35 and coverage < 0.06:
         gate_reason = "Не удалось распознать достаточно пения. Попробуйте в более тихом месте."
     elif clipping > 0.015:
         gate_reason = "Запись перегружена. Отодвиньтесь немного от микрофона."
@@ -239,6 +275,7 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
             "reason": gate_reason,
             "confidence": {
                 "voiced_coverage": coverage,
+                "voiced_seconds": round(voiced_seconds, 3),
                 "rms_db": rms_db,
                 "clipping_ratio": clipping,
                 "spectral_flatness": flatness,
@@ -248,7 +285,8 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
     _, ref_pitch = _voiced_track(reference)
     _, stu_pitch = _voiced_track(student)
     pairs = _dtw_pairs(ref_pitch, stu_pitch)
-    if len(pairs) < 5:
+    min_pairs = 3 if min(len(ref_pitch), len(stu_pitch)) < 8 else 5
+    if len(pairs) < min_pairs:
         return {
             "evaluable": False,
             "reason": "Не удалось уверенно сопоставить мелодию. Повторите короткую фразу.",
@@ -264,15 +302,14 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
     duration_delta = abs(
         float(student.get("duration", 0)) - float(reference.get("duration", 0))
     )
-    # A near-digital copy at the original key and timing is almost certainly
-    # loudspeaker/headphone bleed, not a human take. Keep this gate deliberately
-    # strict so an excellent singer is not rejected.
+    # Only near-bit-perfect copies (not a good original-key take, and not
+    # karaoke-with-headphones) should trip this gate.
     if (
         global_shift == 0
-        and float(np.median(cents_error)) < 3
-        and float(np.percentile(cents_error, 90)) < 8
+        and float(np.median(cents_error)) < 1.0
+        and float(np.percentile(cents_error, 90)) < 2.5
         and rhythm > 97
-        and duration_delta < 0.08
+        and duration_delta < 0.04
     ):
         return {
             "evaluable": False,

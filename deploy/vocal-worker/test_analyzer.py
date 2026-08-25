@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+import wave
+from pathlib import Path
+
+import numpy as np
 
 from analyzer import score_features
 
@@ -81,6 +86,71 @@ class VocalScoringTests(unittest.TestCase):
         result = score_features(self.reference, copied)
         self.assertFalse(result["evaluable"])
         self.assertEqual(result["confidence"]["playback_leak"], "severe")
+
+    def test_reasonable_human_take_returns_numeric_score(self) -> None:
+        human = features(
+            [
+                (value + 0.08) if index % 3 == 0 else (value - 0.06)
+                for index, value in enumerate(self.reference["pitch_midi"])
+            ],
+            duration=7.4,
+            onsets=[0.45, 2.0, 3.6, 5.1],
+        )
+        result = score_features(self.reference, human)
+        self.assertTrue(result["evaluable"])
+        self.assertIsInstance(result["overall"], int)
+        self.assertGreaterEqual(result["overall"], 40)
+        self.assertLessEqual(result["overall"], 100)
+
+    def test_sparse_singing_in_long_recording_is_scored(self) -> None:
+        sung = [60, 60, 62, 62, 64, 64, 67, 67] * 2
+        sparse = [None] * 40 + sung + [None] * 40
+        take = features(sparse, duration=45.0, coverage=0.05, rms_db=-17)
+        result = score_features(self.reference, take)
+        self.assertTrue(result["evaluable"])
+        self.assertIsInstance(result["overall"], int)
+
+    def test_extracted_reasonable_take_is_scored(self) -> None:
+        try:
+            import soundfile  # noqa: F401
+            from analyzer import extract_features
+        except ImportError:
+            self.skipTest("librosa/soundfile are not installed in this environment")
+
+        sample_rate = 16_000
+        seconds = 2.4
+        times = np.linspace(0, seconds, int(sample_rate * seconds), endpoint=False)
+        freqs_ref = [220.0, 246.9, 261.6, 293.7]
+        freqs_stu = [246.9, 277.2, 293.7, 329.6]
+        segment = len(times) // 4
+
+        def melody(freqs: list[float]) -> np.ndarray:
+            audio = np.zeros_like(times)
+            for index, freq in enumerate(freqs):
+                sl = slice(index * segment, (index + 1) * segment)
+                audio[sl] = 0.22 * np.sin(2 * np.pi * freq * times[sl])
+            return np.clip(audio, -1.0, 1.0)
+
+        def write_wav(path: Path, audio: np.ndarray) -> None:
+            pcm = (audio * 32767.0).astype(np.int16)
+            with wave.open(str(path), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(sample_rate)
+                handle.writeframes(pcm.tobytes())
+
+        with tempfile.TemporaryDirectory(prefix="uvs-score-") as temp:
+            ref_path = Path(temp) / "ref.wav"
+            stu_path = Path(temp) / "stu.wav"
+            write_wav(ref_path, melody(freqs_ref))
+            write_wav(stu_path, melody(freqs_stu))
+            result = score_features(
+                extract_features(str(ref_path)),
+                extract_features(str(stu_path)),
+            )
+        self.assertTrue(result["evaluable"], result)
+        self.assertIsInstance(result["overall"], int)
+        self.assertGreaterEqual(result["overall"], 40)
 
 
 if __name__ == "__main__":

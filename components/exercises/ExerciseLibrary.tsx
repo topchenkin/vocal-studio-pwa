@@ -10,6 +10,10 @@ import {
   progressLabel,
 } from "@/lib/exercise-progress";
 import { supabase } from "@/lib/supabase";
+import {
+  EXERCISE_PHRASE_LIST_LIMIT,
+  phrasesForExercise,
+} from "@/lib/vocal-exercise";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
@@ -113,7 +117,12 @@ export default function ExerciseLibrary() {
     const loadExercises = async () => {
       const [exerciseResult, phraseResult, progressResult] = await Promise.all([
         supabase.from("exercises").select("*").order("title"),
-        supabase.from("exercise_phrases").select("*").order("sort_order"),
+        supabase
+          .from("exercise_phrases")
+          .select("*")
+          .order("sort_order")
+          .order("created_at")
+          .limit(EXERCISE_PHRASE_LIST_LIMIT),
         user
           ? supabase
               .from("vocal_phrase_progress")
@@ -209,9 +218,7 @@ export default function ExerciseLibrary() {
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {audioExercises.map((exercise) => {
-            const exercisePhrases = phrases.filter(
-              (phrase) => phrase.exercise_id === exercise.id
-            );
+            const exercisePhrases = phrasesForExercise(phrases, exercise.id);
             const passed = countPassedPhrases(
               exercisePhrases.map((phrase) => phrase.id),
               bestScores

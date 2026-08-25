@@ -19,7 +19,11 @@ import {
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@/lib/pcm-capture";
 import { supabase } from "@/lib/supabase";
-import { teacherReaction, weakestDimension } from "@/lib/vocal-exercise";
+import {
+  EXERCISE_ATTEMPT_MAX_SEC,
+  teacherReaction,
+  weakestDimension,
+} from "@/lib/vocal-exercise";
 import type { Exercise, ExercisePhrase, VocalExerciseAttempt } from "@/types";
 
 type PracticeStage =
@@ -189,7 +193,7 @@ export default function VocalExercisePractice({
       captureRef.current = capture;
       await playSelectedPhrase();
       const seconds = Math.min(
-        45,
+        EXERCISE_ATTEMPT_MAX_SEC,
         Math.max(3, Number(selected.end_sec) - Number(selected.start_sec) + 1.5)
       );
       await Promise.race([
@@ -326,7 +330,7 @@ export default function VocalExercisePractice({
 
   const canListen = Boolean(selected) && ["idle", "listening", "recording", "failed"].includes(stage);
   const canRecord =
-    Boolean(selected) && ["idle", "listening", "failed"].includes(stage);
+    selected?.feature_status === "ready" && ["idle", "listening", "failed"].includes(stage);
 
   return (
     <div className="mt-3 rounded-2xl bg-studio-card p-4 ring-1 ring-studio-accent/25">
@@ -393,7 +397,13 @@ export default function VocalExercisePractice({
             >
               {phrase.title || `Фраза ${index + 1}`} ·{" "}
               {Math.round(Number(phrase.end_sec) - Number(phrase.start_sec))} сек
-              {passed ? " · ✓" : ""}
+              {phrase.feature_status !== "ready"
+                ? phrase.feature_status === "failed"
+                  ? " · ошибка"
+                  : " · готовится"
+                : passed
+                  ? " · ✓"
+                  : ""}
             </button>
           );
         })}

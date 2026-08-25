@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { teacherReaction } from "../lib/vocal-exercise";
+import {
+  EXERCISE_ATTEMPT_MAX_SEC,
+  EXERCISE_PHRASE_MAX_SEC,
+  nextPhraseSortOrder,
+  phrasesForExercise,
+  teacherReaction,
+} from "../lib/vocal-exercise";
 import {
   AUDIO_FILE_ACCEPT,
   isAllowedAudioFile,
@@ -117,5 +123,44 @@ const caddy = readFileSync(
 assert.ok(caddy.includes("protocols tls1.2 tls1.2"));
 assert.ok(caddy.includes("protocols h1 h2"));
 assert.ok(!/^\s*protocols h1 h2 h3/m.test(caddy));
+
+assert.equal(EXERCISE_PHRASE_MAX_SEC, 600);
+assert.equal(EXERCISE_ATTEMPT_MAX_SEC, 600);
+const fourPhrases = [
+  { exercise_id: "ex-1", sort_order: 0 },
+  { exercise_id: "ex-1", sort_order: 1 },
+  { exercise_id: "ex-1", sort_order: 2 },
+  { exercise_id: "ex-1", sort_order: 3 },
+  { exercise_id: "ex-2", sort_order: 0 },
+];
+assert.equal(phrasesForExercise(fourPhrases, "ex-1").length, 4);
+assert.equal(nextPhraseSortOrder(phrasesForExercise(fourPhrases, "ex-1")), 4);
+assert.equal(nextPhraseSortOrder([{ sort_order: 0 }, { sort_order: 2 }]), 3);
+
+const editor = readFileSync(
+  path.join(process.cwd(), "components", "admin", "PhraseEditor.tsx"),
+  "utf8"
+);
+const practice = readFileSync(
+  path.join(process.cwd(), "components", "exercises", "VocalExercisePractice.tsx"),
+  "utf8"
+);
+assert.ok(!editor.includes("nextEnd - nextStart > 45"));
+assert.ok(editor.includes("nextPhraseSortOrder"));
+assert.ok(!practice.includes("Math.min(\n        45,"));
+assert.ok(practice.includes("EXERCISE_ATTEMPT_MAX_SEC"));
+
+const uncapSql = readFileSync(
+  path.join(process.cwd(), "supabase-migrations", "2026-08-25-exercise-phrases-uncap.sql"),
+  "utf8"
+);
+for (const expected of [
+  "drop constraint if exists exercise_phrases_exercise_id_sort_order_key",
+  "duration_sec <= 600",
+  "exercise_phrases_student_read",
+]) {
+  assert.ok(uncapSql.includes(expected), `uncap migration is missing: ${expected}`);
+}
+assert.ok(!uncapSql.includes("between 1 and 45"));
 
 console.log("vocal exercise UI, progress, notifications, accept, TLS: ok");

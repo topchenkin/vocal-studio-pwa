@@ -5,6 +5,11 @@ import { ChevronDown, ChevronUp, Pause, Play, Plus, Scissors, Trash2 } from "luc
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
+import {
+  EXERCISE_PHRASE_LIST_LIMIT,
+  EXERCISE_PHRASE_MAX_SEC,
+  nextPhraseSortOrder,
+} from "@/lib/vocal-exercise";
 import type { Exercise, ExerciseAnalysisJob, ExercisePhrase } from "@/types";
 
 type DragKind = "create" | "start" | "end";
@@ -35,7 +40,9 @@ export default function PhraseEditor({
       .from("exercise_phrases")
       .select("*")
       .eq("exercise_id", exercise.id)
-      .order("sort_order");
+      .order("sort_order")
+      .order("created_at")
+      .limit(EXERCISE_PHRASE_LIST_LIMIT);
     if (phraseResult.error) {
       setError(phraseResult.error.message);
       return;
@@ -109,7 +116,8 @@ export default function PhraseEditor({
     const minLen = Math.min(1, Math.max(0.4, duration));
     let nextStart = Math.min(Math.max(0, start), Math.max(0, duration - minLen));
     let nextEnd = Math.min(duration, Math.max(nextStart + 0.4, end));
-    if (nextEnd - nextStart > 45) nextEnd = nextStart + 45;
+    const maxLen = Math.min(EXERCISE_PHRASE_MAX_SEC, Math.max(1, duration));
+    if (nextEnd - nextStart > maxLen) nextEnd = nextStart + maxLen;
     return {
       start: Number(nextStart.toFixed(2)),
       end: Number(nextEnd.toFixed(2)),
@@ -149,9 +157,10 @@ export default function PhraseEditor({
 
   const addFromSelection = async (startSec: number, endSec: number) => {
     const range = clampRange(startSec, endSec);
+    const sortOrder = nextPhraseSortOrder(phrases);
     const { error: insertError } = await supabase.from("exercise_phrases").insert({
       exercise_id: exercise.id,
-      sort_order: phrases.length,
+      sort_order: sortOrder,
       title: `Фраза ${phrases.length + 1}`,
       start_sec: range.start,
       end_sec: range.end,

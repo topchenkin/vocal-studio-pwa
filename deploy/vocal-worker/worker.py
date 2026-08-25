@@ -216,35 +216,43 @@ def process_analysis(job: dict[str, Any]) -> None:
             download("exercise-analysis", vocal_path, vocal_wav)
             phrases = select(
                 "exercise_phrases"
-                f"?exercise_id=eq.{job['exercise_id']}&select=*&order=sort_order.asc"
+                f"?exercise_id=eq.{job['exercise_id']}&select=*&order=sort_order.asc,created_at.asc&limit=500"
             )
             if not phrases:
                 raise RuntimeError("No phrases were approved")
+            ready = 0
             for index, phrase in enumerate(phrases):
-                features = extract_features(
-                    str(vocal_wav),
-                    offset=float(phrase["start_sec"]),
-                    duration=float(phrase["end_sec"]) - float(phrase["start_sec"]),
-                )
-                rest(
-                    "POST",
-                    "/rest/v1/exercise_phrase_features?on_conflict=phrase_id",
-                    json={
-                        "phrase_id": phrase["id"],
-                        "analyzer_version": ANALYZER_VERSION,
-                        "features": features,
-                    },
-                    headers={
-                        "content-type": "application/json",
-                        "Prefer": "resolution=merge-duplicates,return=minimal",
-                    },
-                )
-                patch("exercise_phrases", phrase["id"], {"feature_status": "ready"})
+                try:
+                    features = extract_features(
+                        str(vocal_wav),
+                        offset=float(phrase["start_sec"]),
+                        duration=float(phrase["end_sec"]) - float(phrase["start_sec"]),
+                    )
+                    rest(
+                        "POST",
+                        "/rest/v1/exercise_phrase_features?on_conflict=phrase_id",
+                        json={
+                            "phrase_id": phrase["id"],
+                            "analyzer_version": ANALYZER_VERSION,
+                            "features": features,
+                        },
+                        headers={
+                            "content-type": "application/json",
+                            "Prefer": "resolution=merge-duplicates,return=minimal",
+                        },
+                    )
+                    patch("exercise_phrases", phrase["id"], {"feature_status": "ready"})
+                    ready += 1
+                except Exception:
+                    log.exception("phrase %s extract failed", phrase.get("id"))
+                    patch("exercise_phrases", phrase["id"], {"feature_status": "failed"})
                 patch(
                     "exercise_analysis_jobs",
                     job_id,
                     {"progress": 72 + round(27 * (index + 1) / len(phrases))},
                 )
+            if ready == 0:
+                raise RuntimeError("No phrases could be extracted")
             patch(
                 "exercise_analysis_jobs",
                 job_id,
