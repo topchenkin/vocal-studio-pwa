@@ -203,18 +203,17 @@ class VocalScoringTests(unittest.TestCase):
             self.skipTest("librosa/soundfile are not installed in this environment")
 
         sample_rate = 16_000
-        seconds = 2.4
-        times = np.linspace(0, seconds, int(sample_rate * seconds), endpoint=False)
-        freqs_ref = [220.0, 246.9, 261.6, 293.7]
-        freqs_stu = [246.9, 277.2, 293.7, 329.6]
-        segment = len(times) // 4
+        freqs_ref = [220.0, 246.9, 261.6, 293.7, 329.6]
+        freqs_stu = [246.9, 277.2, 293.7, 329.6, 349.2]
+        note_sec, gap_sec = 0.45, 0.16
 
         def melody(freqs: list[float]) -> np.ndarray:
-            audio = np.zeros_like(times)
-            for index, freq in enumerate(freqs):
-                sl = slice(index * segment, (index + 1) * segment)
-                audio[sl] = 0.22 * np.sin(2 * np.pi * freq * times[sl])
-            return np.clip(audio, -1.0, 1.0)
+            pieces = []
+            for freq in freqs:
+                times = np.linspace(0, note_sec, int(sample_rate * note_sec), endpoint=False)
+                pieces.append(0.22 * np.sin(2 * np.pi * freq * times))
+                pieces.append(np.zeros(int(sample_rate * gap_sec)))
+            return np.clip(np.concatenate(pieces), -1.0, 1.0)
 
         def write_wav(path: Path, audio: np.ndarray) -> None:
             pcm = (audio * 32767.0).astype(np.int16)
