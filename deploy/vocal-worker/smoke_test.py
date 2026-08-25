@@ -10,7 +10,7 @@ import soundfile as sf
 from analyzer import ANALYZER_VERSION, extract_features, score_features
 
 
-def _melody(path: Path, freqs: list[float], seconds: float = 1.4, sample_rate: int = 16_000) -> None:
+def _melody(path: Path, freqs: list[float], seconds: float = 2.8, sample_rate: int = 16_000) -> None:
     times = np.linspace(0, seconds, int(sample_rate * seconds), endpoint=False)
     audio = np.zeros_like(times)
     segment = max(1, len(times) // len(freqs))
@@ -24,8 +24,8 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="uvs-smoke-") as temp:
         ref_path = Path(temp) / "ref.wav"
         stu_path = Path(temp) / "stu.wav"
-        _melody(ref_path, [220.0, 246.9, 261.6])
-        _melody(stu_path, [246.9, 277.2, 293.7])
+        _melody(ref_path, [220.0, 246.9, 261.6, 293.7])
+        _melody(stu_path, [246.9, 277.2, 293.7, 329.6])
         reference = extract_features(str(ref_path))
         student = extract_features(str(stu_path))
         result = score_features(reference, student)
