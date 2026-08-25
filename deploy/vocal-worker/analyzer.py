@@ -7,12 +7,75 @@ used as the scoring target.
 from __future__ import annotations
 
 import math
+import os
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 ANALYZER_VERSION = "vocal-score-1"
 SAMPLE_RATE = 16_000
+DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
+
+_librosa = None
+
+
+def configure_numba_runtime() -> Path:
+    """Point Numba at a writable cache. systemd ProtectSystem=strict makes
+    site-packages read-only, so the default in-tree locator cannot be used.
+    """
+    cache_dir = Path(os.environ.get("NUMBA_CACHE_DIR", DEFAULT_NUMBA_CACHE))
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        probe = cache_dir / ".write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except OSError:
+        cache_dir = Path(tempfile.gettempdir()) / "vocal-worker-numba"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
+    os.environ.pop("NUMBA_CACHE_LOCATOR_CLASSES", None)
+    return cache_dir
+
+
+def _disable_numba_function_cache() -> None:
+    import numba
+    from numba.core import decorators
+
+    original = decorators.jit
+
+    def jit(*args, cache=False, **kwargs):  # noqa: ANN002
+        kwargs["cache"] = False
+        return original(*args, **kwargs)
+
+    decorators.jit = jit
+    numba.jit = jit
+    for name in list(sys.modules):
+        if name == "librosa" or name.startswith("librosa."):
+            del sys.modules[name]
+
+
+def _import_librosa():
+    global _librosa
+    if _librosa is not None:
+        return _librosa
+    configure_numba_runtime()
+    try:
+        import librosa
+        import librosa.core.notation  # noqa: F401  # eager: lazy loader hides cache errors
+    except RuntimeError as error:
+        message = str(error)
+        if "no locator available" not in message and "cannot cache function" not in message:
+            raise
+        _disable_numba_function_cache()
+        import librosa
+    _librosa = librosa
+    return librosa
+
+
+configure_numba_runtime()
 
 
 def _round_list(values: np.ndarray, digits: int) -> list[float]:
@@ -20,7 +83,7 @@ def _round_list(values: np.ndarray, digits: int) -> list[float]:
 
 
 def extract_features(path: str, offset: float = 0, duration: float | None = None) -> dict[str, Any]:
-    import librosa
+    librosa = _import_librosa()
 
     audio, sample_rate = librosa.load(
         path,

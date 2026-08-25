@@ -6,8 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/uniquevocal/vocal-worker.env
+Environment=NUMBA_CACHE_DIR=/var/cache/vocal-worker/numba
+Environment=MPLCONFIGDIR=/var/cache/vocal-worker/mpl
 WorkingDirectory=/opt/vocal-worker
 ExecStart=/opt/vocal-worker/.venv/bin/python /opt/vocal-worker/worker.py
+TimeoutStartSec=120
 Restart=always
 RestartSec=5
 User=www-data
@@ -16,7 +19,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/tmp
+ReadWritePaths=/tmp /var/cache/vocal-worker
 
 [Install]
 WantedBy=multi-user.target

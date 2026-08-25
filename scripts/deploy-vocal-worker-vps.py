@@ -10,6 +10,42 @@ import paramiko
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "deploy" / "vocal-worker"
 MIGRATION = ROOT / "supabase-migrations" / "2026-08-25-vocal-exercise-scoring.sql"
+INSTALL_VENV = r"""
+set -eu
+mkdir -p /var/cache/vocal-worker/numba /var/cache/vocal-worker/mpl
+PY=""
+for cand in python3.13 python3.12 python3.11 python3; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    PY=$(command -v "$cand")
+    break
+  fi
+done
+echo "USING $PY"
+"$PY" --version
+WANT=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+HAVE=""
+if [ -x /opt/vocal-worker/.venv/bin/python ]; then
+  HAVE=$(/opt/vocal-worker/.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)
+fi
+if [ "$HAVE" != "$WANT" ]; then
+  rm -rf /opt/vocal-worker/.venv
+  "$PY" -m venv /opt/vocal-worker/.venv
+fi
+/opt/vocal-worker/.venv/bin/pip install --upgrade pip
+/opt/vocal-worker/.venv/bin/pip install -r /opt/vocal-worker/requirements.txt
+"""
+SANDBOX_SMOKE = r"""
+systemd-run --wait --pipe --collect \
+  --uid=www-data --gid=www-data \
+  --working-directory=/opt/vocal-worker \
+  --property=ProtectSystem=strict \
+  --property=ProtectHome=true \
+  --property=PrivateTmp=true \
+  --property='ReadWritePaths=/tmp /var/cache/vocal-worker' \
+  --setenv=NUMBA_CACHE_DIR=/var/cache/vocal-worker/numba \
+  --setenv=MPLCONFIGDIR=/var/cache/vocal-worker/mpl \
+  /opt/vocal-worker/.venv/bin/python /opt/vocal-worker/smoke_test.py
+"""
 
 
 def local_env() -> dict[str, str]:
@@ -64,6 +100,8 @@ def main() -> None:
             f"DEMUCS_HF_SPACE={env.get('DEMUCS_HF_SPACE', 'abidlabs/music-separation')}",
             "POLL_SECONDS=3",
             "PYTHONUNBUFFERED=1",
+            "NUMBA_CACHE_DIR=/var/cache/vocal-worker/numba",
+            "MPLCONFIGDIR=/var/cache/vocal-worker/mpl",
             "",
         ]
     ).encode()
@@ -82,7 +120,7 @@ def main() -> None:
         run(client, "mkdir -p /opt/vocal-worker /opt/uvs-migrate /etc/uniquevocal")
         sftp = client.open_sftp()
         try:
-            for name in ("worker.py", "analyzer.py", "requirements.txt"):
+            for name in ("worker.py", "analyzer.py", "requirements.txt", "smoke_test.py"):
                 sftp.put(str(WORKER / name), f"/opt/vocal-worker/{name}")
             sftp.put(str(MIGRATION), f"/opt/uvs-migrate/{MIGRATION.name}")
             sftp.put(
@@ -99,25 +137,24 @@ def main() -> None:
             f"-v ON_ERROR_STOP=1 < /opt/uvs-migrate/{MIGRATION.name}",
         )
         run(client, "apt-get update -qq && apt-get install -y -qq python3-venv ffmpeg libsndfile1")
-        run(
-            client,
-            "python3 -m venv /opt/vocal-worker/.venv "
-            "&& /opt/vocal-worker/.venv/bin/pip install --upgrade pip "
-            "&& /opt/vocal-worker/.venv/bin/pip install -r /opt/vocal-worker/requirements.txt",
-            timeout=1200,
-        )
-        run(client, "chown -R www-data:www-data /opt/vocal-worker")
+        run(client, INSTALL_VENV, timeout=1200)
+        run(client, "chown -R www-data:www-data /opt/vocal-worker /var/cache/vocal-worker")
         run(
             client,
             "chown root:www-data /etc/uniquevocal/vocal-worker.env "
             "&& chmod 640 /etc/uniquevocal/vocal-worker.env",
         )
+        run(client, SANDBOX_SMOKE, timeout=180)
         run(
             client,
             "systemctl daemon-reload && systemctl enable --now vocal-worker "
-            "&& systemctl restart vocal-worker && sleep 3 "
+            "&& systemctl restart vocal-worker "
+            "&& for i in $(seq 1 20); do "
+            "journalctl -u vocal-worker -n 80 --no-pager | grep -q 'worker started' && break; "
+            "sleep 3; done "
             "&& systemctl is-active vocal-worker "
-            "&& journalctl -u vocal-worker -n 20 --no-pager",
+            "&& journalctl -u vocal-worker -n 30 --no-pager",
+            timeout=180,
         )
     finally:
         client.close()

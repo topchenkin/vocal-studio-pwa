@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -36,10 +37,23 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 log = logging.getLogger("vocal-worker")
+PUBLIC_FAILURE = "Не удалось обработать запись. Нажмите «Повторить»."
+_INTERNAL_ERROR = re.compile(
+    r"(/opt/|/usr/|/home/|site-packages|\.venv|Traceback|numba|librosa|"
+    r"llvmlite|locator|cannot cache function)",
+    re.I,
+)
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def public_error(error: BaseException) -> str:
+    text = str(error).strip()
+    if not text or _INTERNAL_ERROR.search(text) or re.search(r"[A-Za-z]:\\|/(tmp|var)/", text):
+        return PUBLIC_FAILURE
+    return text[:300]
 
 
 def rest(method: str, path: str, **kwargs: Any) -> requests.Response:
@@ -247,7 +261,7 @@ def process_analysis(job: dict[str, Any]) -> None:
         patch(
             "exercise_analysis_jobs",
             job_id,
-            {"status": "failed", "error": str(error)[:1200], "locked_at": None},
+            {"status": "failed", "error": public_error(error), "locked_at": None},
         )
 
 
@@ -366,7 +380,7 @@ def process_attempt(attempt: dict[str, Any]) -> None:
                 {
                     "status": "evaluated",
                     "share_requested": False,
-                    "error": f"Chat share failed: {error}"[:1200],
+                    "error": public_error(error),
                     "locked_at": None,
                 },
             )
@@ -374,7 +388,7 @@ def process_attempt(attempt: dict[str, Any]) -> None:
         patch(
             "vocal_exercise_attempts",
             attempt_id,
-            {"status": "failed", "error": str(error)[:1200], "locked_at": None},
+            {"status": "failed", "error": public_error(error), "locked_at": None},
         )
 
 
@@ -398,6 +412,9 @@ def cleanup_expired() -> None:
 
 
 def main() -> None:
+    from smoke_test import main as run_smoke
+
+    run_smoke()
     log.info("worker started analyzer=%s demucs=%s", ANALYZER_VERSION, DEMUCS_SPACE)
     last_cleanup = 0.0
     while True:
