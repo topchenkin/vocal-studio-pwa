@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "vocal-score-1"
+ANALYZER_VERSION = "vocal-score-2"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
@@ -199,22 +199,60 @@ def _voiced_track(features: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
         if value is not None and float(confidence) >= 0.3:
             times.append(float(time))
             pitch.append(float(value))
-    return np.asarray(times), np.asarray(pitch)
+    return np.asarray(times), _unwrap_octave_jumps(np.asarray(pitch, dtype=float))
+
+
+def _unwrap_octave_jumps(pitch: np.ndarray) -> np.ndarray:
+    """Remove isolated ±12/±24 tracker jumps; keep real melodic motion."""
+    if pitch.size < 2:
+        return pitch
+    out = np.empty_like(pitch)
+    out[0] = pitch[0]
+    cumulative = 0.0
+    for index in range(1, len(pitch)):
+        delta = float(pitch[index] - pitch[index - 1])
+        octaves = round(delta / 12.0)
+        if abs(octaves) >= 1 and abs(delta - 12.0 * octaves) <= 1.5:
+            cumulative -= 12.0 * octaves
+        out[index] = pitch[index] + cumulative
+    return out
+
+
+def _wrap_octave(semitone: float) -> float:
+    return semitone - 12.0 * round(semitone / 12.0)
+
+
+def _wrap_octaves(semitones: np.ndarray) -> np.ndarray:
+    """Map interval error into [-6, 6] so gender/octave is not a pitch error."""
+    return semitones - 12.0 * np.rint(semitones / 12.0)
+
+
+def _best_global_shift(differences: np.ndarray) -> int:
+    """One transposition for the whole phrase, including octave (±12, ±24)."""
+    median = float(np.median(differences))
+    base = int(np.rint(median))
+    candidates = {base, base - 12, base + 12, base - 24, base + 24}
+
+    def cost(shift: int) -> tuple[float, float]:
+        folded = _wrap_octaves(differences - shift)
+        return float(np.median(np.abs(folded))), abs(shift - median)
+
+    return min(candidates, key=cost)
 
 
 def _dtw_pairs(reference: np.ndarray, student: np.ndarray) -> list[tuple[int, int]]:
-    """DTW on median-relative melody, so one global transposition is alignable."""
+    """DTW on octave-folded relative contour so male/female takes still align."""
     if reference.size == 0 or student.size == 0:
         return []
-    ref_relative = reference - np.median(reference)
-    stu_relative = student - np.median(student)
+    ref_relative = _wrap_octaves(reference - np.median(reference))
+    stu_relative = _wrap_octaves(student - np.median(student))
     n, m = len(reference), len(student)
     costs = np.full((n + 1, m + 1), np.inf)
     costs[0, 0] = 0
     parent = np.zeros((n + 1, m + 1), dtype=np.uint8)
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            local = min(12.0, abs(ref_relative[i - 1] - stu_relative[j - 1]))
+            local = abs(_wrap_octave(float(ref_relative[i - 1] - stu_relative[j - 1])))
             choices = (costs[i - 1, j - 1], costs[i - 1, j] + 0.18, costs[i, j - 1] + 0.18)
             move = int(np.argmin(choices))
             costs[i, j] = local + choices[move]
@@ -235,21 +273,61 @@ def _dtw_pairs(reference: np.ndarray, student: np.ndarray) -> list[tuple[int, in
     return pairs
 
 
-def _rhythm_score(reference: dict[str, Any], student: dict[str, Any]) -> float:
+def _thin_onsets(onsets: np.ndarray, min_gap: float = 0.28) -> np.ndarray:
+    if onsets.size == 0:
+        return onsets
+    ordered = np.sort(onsets.astype(float))
+    kept = [float(ordered[0])]
+    for time in ordered[1:]:
+        if time - kept[-1] >= min_gap:
+            kept.append(float(time))
+    return np.asarray(kept)
+
+
+def _rhythm_score(
+    reference: dict[str, Any],
+    student: dict[str, Any],
+    pairs: list[tuple[int, int]],
+    n_ref: int,
+    n_stu: int,
+) -> float:
     ref_duration = max(0.1, float(reference.get("duration", 0)))
     stu_duration = max(0.1, float(student.get("duration", 0)))
-    ref_onsets = np.asarray(reference.get("onsets", []), dtype=float)
-    stu_onsets = np.asarray(student.get("onsets", []), dtype=float)
-    duration_penalty = min(1.0, abs(stu_duration - ref_duration) / ref_duration)
+    # Practice recording adds ~1.5s after the phrase; that tail is not dragging.
+    tail_slack = 2.0
+    if stu_duration < ref_duration * 0.88:
+        duration_penalty = min(1.0, (ref_duration - stu_duration) / ref_duration)
+    elif stu_duration > ref_duration + tail_slack:
+        duration_penalty = min(1.0, (stu_duration - ref_duration - tail_slack) / ref_duration)
+    else:
+        duration_penalty = 0.0
+
+    window = ref_duration + 0.35
+    ref_onsets = _thin_onsets(
+        np.asarray(reference.get("onsets", []), dtype=float)
+    )
+    stu_onsets = _thin_onsets(
+        np.asarray(student.get("onsets", []), dtype=float)
+    )
+    ref_onsets = ref_onsets[ref_onsets <= window] if ref_onsets.size else ref_onsets
+    stu_onsets = stu_onsets[stu_onsets <= window] if stu_onsets.size else stu_onsets
     if ref_onsets.size == 0:
-        onset_score = max(0.0, 1.0 - duration_penalty)
+        onset_score = 1.0
     elif stu_onsets.size == 0:
-        onset_score = 0.0
+        onset_score = 0.35
     else:
         errors = [float(np.min(np.abs(stu_onsets - onset))) / ref_duration for onset in ref_onsets]
         missing = max(0, len(ref_onsets) - len(stu_onsets)) / len(ref_onsets)
-        onset_score = math.exp(-8.0 * float(np.mean(errors))) * (1.0 - 0.55 * missing)
-    return 100.0 * max(0.0, onset_score * (1.0 - 0.55 * duration_penalty))
+        onset_score = math.exp(-5.0 * float(np.mean(errors))) * (1.0 - 0.25 * missing)
+
+    warp_score = 1.0
+    if pairs and n_ref > 1 and n_stu > 1:
+        ref_idx = np.asarray([i for i, _ in pairs], dtype=float) / (n_ref - 1)
+        stu_idx = np.asarray([j for _, j in pairs], dtype=float) / (n_stu - 1)
+        warp_score = math.exp(-2.8 * float(np.median(np.abs(stu_idx - ref_idx))))
+
+    combined = 0.45 * onset_score + 0.35 * warp_score + 0.20 * (1.0 - duration_penalty)
+    return 100.0 * max(0.0, combined)
 
 
 def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[str, Any]:
@@ -294,33 +372,17 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         }
 
     differences = np.asarray([stu_pitch[j] - ref_pitch[i] for i, j in pairs])
-    global_shift = int(np.rint(np.median(differences)))
-    cents_error = np.abs((differences - global_shift) * 100)
-    frame_quality = np.clip(1.0 - cents_error / 100.0, 0.0, 1.0)
+    global_shift = _best_global_shift(differences)
+    cents_error = np.abs(_wrap_octaves(differences - global_shift) * 100)
+    # 180¢ → 0: ~20¢ tracker noise still scores ~89, a 2-semitone miss is 0.
+    frame_quality = np.clip(1.0 - cents_error / 180.0, 0.0, 1.0)
     intonation = 100.0 * float(np.mean(frame_quality))
-    rhythm = _rhythm_score(reference, student)
-    duration_delta = abs(
-        float(student.get("duration", 0)) - float(reference.get("duration", 0))
+    rhythm = _rhythm_score(reference, student, pairs, len(ref_pitch), len(stu_pitch))
+    ref_voiced_sec = max(
+        0.35,
+        float(reference.get("voiced_coverage", 0.05)) * max(0.1, float(reference.get("duration", 0))),
     )
-    # Only near-bit-perfect copies (not a good original-key take, and not
-    # karaoke-with-headphones) should trip this gate.
-    if (
-        global_shift == 0
-        and float(np.median(cents_error)) < 1.0
-        and float(np.percentile(cents_error, 90)) < 2.5
-        and rhythm > 97
-        and duration_delta < 0.04
-    ):
-        return {
-            "evaluable": False,
-            "reason": "Фонограмма слишком сильно попала в микрофон. Используйте наушники и повторите.",
-            "confidence": {
-                "playback_leak": "severe",
-                "median_residual_cents": round(float(np.median(cents_error)), 1),
-            },
-        }
-    ref_coverage = max(0.05, float(reference.get("voiced_coverage", 0.05)))
-    voiced_ratio = min(1.0, coverage / ref_coverage)
+    voiced_ratio = min(1.0, voiced_seconds / ref_voiced_sec)
     aligned_ratio = min(1.0, len({i for i, _ in pairs}) / max(1, len(ref_pitch)))
     completeness = 100.0 * (0.65 * voiced_ratio + 0.35 * aligned_ratio)
 

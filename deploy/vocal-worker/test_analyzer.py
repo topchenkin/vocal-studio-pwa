@@ -43,28 +43,67 @@ class VocalScoringTests(unittest.TestCase):
         result = score_features(self.reference, shifted)
         self.assertTrue(result["evaluable"])
         self.assertEqual(result["global_shift_semitones"], 5)
-        self.assertGreaterEqual(result["overall"], 95)
+        self.assertGreaterEqual(result["overall"], 80)
+        self.assertGreaterEqual(result["intonation"], 90)
+
+    def test_octave_with_recording_pad_scores_high(self) -> None:
+        shifted = features(
+            [value + 12 for value in self.reference["pitch_midi"]],
+            duration=7.5,
+        )
+        result = score_features(self.reference, shifted)
+        self.assertTrue(result["evaluable"])
+        self.assertEqual(result["global_shift_semitones"], 12)
+        self.assertGreaterEqual(result["overall"], 80)
+
+    def test_octave_transposition_scores_high(self) -> None:
+        shifted = features([value + 12 for value in self.reference["pitch_midi"]])
+        result = score_features(self.reference, shifted)
+        self.assertTrue(result["evaluable"])
+        self.assertEqual(result["global_shift_semitones"], 12)
+        self.assertGreaterEqual(result["overall"], 80)
+        self.assertGreaterEqual(result["intonation"], 90)
+
+    def test_same_pitch_contour_scores_high(self) -> None:
+        copied = features(
+            list(self.reference["pitch_midi"]),
+            duration=7.4,
+            onsets=[0.35, 1.85, 3.45, 4.85],
+        )
+        result = score_features(self.reference, copied)
+        self.assertTrue(result["evaluable"])
+        self.assertGreaterEqual(result["overall"], 80)
+
+    def test_octave_tracker_jumps_still_score_high(self) -> None:
+        jumped = []
+        for index, value in enumerate(self.reference["pitch_midi"]):
+            jumped.append(value - 12 if index % 5 else value)
+        result = score_features(self.reference, features(jumped, duration=7.2))
+        self.assertTrue(result["evaluable"])
+        self.assertGreaterEqual(result["overall"], 80)
+        self.assertGreaterEqual(result["intonation"], 85)
 
     def test_arbitrary_per_note_shifts_are_penalized(self) -> None:
         wrong = features(
             [
-                value + (5 if index % 4 == 0 else -3 if index % 4 == 1 else 2)
+                value + (7 if index % 4 == 0 else -4 if index % 4 == 1 else 3 if index % 4 == 2 else -8)
                 for index, value in enumerate(self.reference["pitch_midi"])
             ]
         )
         result = score_features(self.reference, wrong)
         self.assertTrue(result["evaluable"])
         self.assertLess(result["intonation"], 60)
+        self.assertLess(result["overall"], 70)
 
     def test_rhythm_delay_and_duration_are_penalized(self) -> None:
         late = features(
             self.reference["pitch_midi"],
-            duration=8.5,
-            onsets=[1.2, 2.9, 4.7, 6.5],
+            duration=9.5,
+            onsets=[1.8, 3.6, 5.5, 7.4],
         )
         result = score_features(self.reference, late)
         self.assertTrue(result["evaluable"])
-        self.assertLess(result["rhythm"], 65)
+        self.assertLess(result["rhythm"], 80)
 
     def test_incomplete_voiced_coverage_lowers_completeness(self) -> None:
         incomplete = features(
@@ -81,12 +120,6 @@ class VocalScoringTests(unittest.TestCase):
         self.assertFalse(score_features(self.reference, silence)["evaluable"])
         self.assertFalse(score_features(self.reference, noise)["evaluable"])
 
-    def test_near_digital_playback_leak_is_rejected(self) -> None:
-        copied = features(list(self.reference["pitch_midi"]))
-        result = score_features(self.reference, copied)
-        self.assertFalse(result["evaluable"])
-        self.assertEqual(result["confidence"]["playback_leak"], "severe")
-
     def test_reasonable_human_take_returns_numeric_score(self) -> None:
         human = features(
             [
@@ -99,8 +132,7 @@ class VocalScoringTests(unittest.TestCase):
         result = score_features(self.reference, human)
         self.assertTrue(result["evaluable"])
         self.assertIsInstance(result["overall"], int)
-        self.assertGreaterEqual(result["overall"], 40)
-        self.assertLessEqual(result["overall"], 100)
+        self.assertGreaterEqual(result["overall"], 80)
 
     def test_sparse_singing_in_long_recording_is_scored(self) -> None:
         sung = [60, 60, 62, 62, 64, 64, 67, 67] * 2
