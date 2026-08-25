@@ -56,6 +56,15 @@ class VocalScoringTests(unittest.TestCase):
         self.assertEqual(result["global_shift_semitones"], 12)
         self.assertGreaterEqual(result["overall"], 80)
 
+    def test_fractional_octave_shift_scores_high(self) -> None:
+        # Male take ~12.7 semitones down: integer rounding used to leave ~70¢ error.
+        shifted = features([value - 12.7 for value in self.reference["pitch_midi"]])
+        result = score_features(self.reference, shifted)
+        self.assertTrue(result["evaluable"])
+        self.assertIn(result["global_shift_semitones"], {-12, -13})
+        self.assertGreaterEqual(result["overall"], 80)
+        self.assertGreaterEqual(result["intonation"], 90)
+
     def test_octave_transposition_scores_high(self) -> None:
         shifted = features([value + 12 for value in self.reference["pitch_midi"]])
         result = score_features(self.reference, shifted)

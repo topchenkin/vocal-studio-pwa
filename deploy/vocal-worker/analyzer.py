@@ -227,13 +227,12 @@ def _wrap_octaves(semitones: np.ndarray) -> np.ndarray:
     return semitones - 12.0 * np.rint(semitones / 12.0)
 
 
-def _best_global_shift(differences: np.ndarray) -> int:
+def _best_global_shift(differences: np.ndarray) -> float:
     """One transposition for the whole phrase, including octave (±12, ±24)."""
     median = float(np.median(differences))
-    base = int(np.rint(median))
-    candidates = {base, base - 12, base + 12, base - 24, base + 24}
+    candidates = [median + 12.0 * step for step in (-2, -1, 0, 1, 2)]
 
-    def cost(shift: int) -> tuple[float, float]:
+    def cost(shift: float) -> tuple[float, float]:
         folded = _wrap_octaves(differences - shift)
         return float(np.median(np.abs(folded))), abs(shift - median)
 
@@ -371,7 +370,7 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
             "confidence": {"aligned_frames": len(pairs), "voiced_coverage": coverage},
         }
 
-    differences = np.asarray([stu_pitch[j] - ref_pitch[i] for i, j in pairs])
+    differences = np.asarray([stu_pitch[j] - ref_pitch[i] for i, j in pairs], dtype=float)
     global_shift = _best_global_shift(differences)
     cents_error = np.abs(_wrap_octaves(differences - global_shift) * 100)
     # 180¢ → 0: ~20¢ tracker noise still scores ~89, a 2-semitone miss is 0.
@@ -407,7 +406,7 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         "intonation": intonation_i,
         "rhythm": rhythm_i,
         "completeness": completeness_i,
-        "global_shift_semitones": global_shift,
+        "global_shift_semitones": int(np.rint(global_shift)),
         "feedback": feedback,
         "confidence": {
             "aligned_frames": len(pairs),
