@@ -2,9 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Lock, Play, Video } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import {
+  bestScoreMap,
+  countPassedPhrases,
+  phraseProgressPercent,
+  progressLabel,
+} from "@/lib/exercise-progress";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
-import { useAuth } from "@/context/AuthContext";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -93,9 +99,10 @@ const demoExercises: Exercise[] = [
 ];
 
 export default function ExerciseLibrary() {
-  const { tier } = useAuth();
+  const { user, tier } = useAuth();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
+  const [bestScores, setBestScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [lockedTier, setLockedTier] = useState<AppSubscriptionTier | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
@@ -104,9 +111,15 @@ export default function ExerciseLibrary() {
     let mounted = true;
 
     const loadExercises = async () => {
-      const [exerciseResult, phraseResult] = await Promise.all([
+      const [exerciseResult, phraseResult, progressResult] = await Promise.all([
         supabase.from("exercises").select("*").order("title"),
         supabase.from("exercise_phrases").select("*").order("sort_order"),
+        user
+          ? supabase
+              .from("vocal_phrase_progress")
+              .select("phrase_id,best_score")
+              .eq("student_id", user.id)
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (!mounted) return;
@@ -118,6 +131,7 @@ export default function ExerciseLibrary() {
       } else {
         setPhrases(phraseResult.data ?? []);
       }
+      setBestScores(bestScoreMap(progressResult.data ?? []));
       const resolvedExercises = await Promise.all(
         (exerciseResult.data ?? []).map(async (exercise) => {
           if (!exercise.storage_path) return exercise;
@@ -145,7 +159,7 @@ export default function ExerciseLibrary() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [user]);
 
   const audioExercises = useMemo(
     () => exercises.filter((exercise) => exercise.type === "audio"),
@@ -194,26 +208,51 @@ export default function ExerciseLibrary() {
           </p>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          {audioExercises.map((exercise) => (
+          {audioExercises.map((exercise) => {
+            const exercisePhrases = phrases.filter(
+              (phrase) => phrase.exercise_id === exercise.id
+            );
+            const passed = countPassedPhrases(
+              exercisePhrases.map((phrase) => phrase.id),
+              bestScores
+            );
+            const percent = phraseProgressPercent(exercisePhrases.length, passed);
+            return (
             <div key={exercise.id}>
               <div className="mb-2">
-                <h3 className="font-medium">{exercise.title}</h3>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-medium">{exercise.title}</h3>
+                  {exercisePhrases.length > 0 && (
+                    <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+                      {progressLabel(percent)}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-studio-muted">
                   {exercise.description}
                 </p>
+                {exercisePhrases.length > 0 && (
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
+                    <div
+                      className="h-full rounded-full bg-emerald-400"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+                )}
               </div>
               <ExerciseAudioPlayer
                 src={exercise.media_url}
                 title={exercise.title}
               />
-              {phrases.some((phrase) => phrase.exercise_id === exercise.id) && (
+              {exercisePhrases.length > 0 && (
                 <VocalExercisePractice
                   exercise={exercise}
-                  phrases={phrases.filter((phrase) => phrase.exercise_id === exercise.id)}
+                  phrases={exercisePhrases}
                 />
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

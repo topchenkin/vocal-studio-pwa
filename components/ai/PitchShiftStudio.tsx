@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import MediaAudio from "@/components/media/MediaAudio";
 import {
@@ -174,15 +175,9 @@ export default function PitchShiftStudio({ locked = false }: Props) {
 
   const selectFile = async (selected?: File | null) => {
     if (!selected) return;
-    const name = selected.name.toLowerCase();
-    const okType =
-      selected.type.includes("mpeg") ||
-      selected.type.includes("wav") ||
-      selected.type.includes("wave") ||
-      name.endsWith(".mp3") ||
-      name.endsWith(".wav");
+    const okType = isAllowedAudioFile(selected);
     if (!okType) {
-      setError("Загрузите MP3 или WAV.");
+      setError("Загрузите аудио: MP3, M4A, WAV, OGG, AAC или FLAC.");
       return;
     }
     if (selected.size > maxBytes) {
@@ -324,7 +319,7 @@ export default function PitchShiftStudio({ locked = false }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept="audio/mpeg,audio/wav,audio/x-wav,audio/wave,.mp3,.wav"
+        accept={AUDIO_FILE_ACCEPT}
         className="hidden"
         onChange={(event) => void selectFile(event.target.files?.[0])}
       />

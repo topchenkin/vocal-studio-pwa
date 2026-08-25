@@ -1,4 +1,5 @@
 import { isVocalReportText } from "@/lib/vocal-report-payload";
+import { isExerciseResultText } from "@/lib/exercise-result-payload";
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -62,7 +63,9 @@ export function resolveNotificationHref(input: {
   const isChat =
     input.kind === "chat" ||
     isVocalReportText(message) ||
-    /отчет от ученика/i.test(message);
+    isExerciseResultText(message) ||
+    /отчет от ученика/i.test(message) ||
+    /результаты упражнения/i.test(message);
 
   if (isChat) {
     const next = new URLSearchParams();
@@ -73,6 +76,8 @@ export function resolveNotificationHref(input: {
     else if (input.isAdmin && student && UUID.test(student)) {
       next.set("student", student);
     }
+    const messageId = parsed?.searchParams.get("message");
+    if (messageId && UUID.test(messageId)) next.set("message", messageId);
     return `${input.isAdmin ? "/dashboard/admin" : "/dashboard/student"}?${next}`;
   }
 

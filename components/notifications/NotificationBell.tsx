@@ -9,6 +9,7 @@ import { realtimeTopic } from "@/lib/client-instance";
 import { resolveNotificationHref } from "@/lib/notification-href";
 import { supabase } from "@/lib/supabase";
 import { isVocalReportText } from "@/lib/vocal-report-payload";
+import { isExerciseResultText } from "@/lib/exercise-result-payload";
 import type { AppNotification } from "@/types";
 
 function formatNotificationDate(value: string) {
@@ -21,6 +22,17 @@ function formatNotificationDate(value: string) {
 }
 
 function previewNotificationMessage(raw: string) {
+  if (isExerciseResultText(raw)) {
+    if (/результаты упражнения/i.test(raw) && !raw.includes("{")) {
+      return raw;
+    }
+    const sender = raw.split(":")[0]?.trim();
+    if (sender && sender.includes(", Результаты")) return sender;
+    if (sender && !sender.includes("{") && sender.length < 80) {
+      return `${sender}, Результаты упражнения`;
+    }
+    return "Результаты упражнения";
+  }
   if (isVocalReportText(raw)) {
     const sender = raw.split(":")[0]?.trim();
     if (sender && !sender.includes("{") && sender.length < 80) {

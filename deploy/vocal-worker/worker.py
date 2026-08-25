@@ -286,12 +286,7 @@ def share_attempt(attempt: dict[str, Any]) -> None:
         download("vocal-attempts", source_path, source)
         upload("chat-media", chat_path, source, attempt["media_mime"])
     phrase_title = phrase["title"] or f"{float(phrase['start_sec']):.1f}–{float(phrase['end_sec']):.1f} сек"
-    message = (
-        f"🎤 Попытка упражнения «{exercise_title}» · {phrase_title} · "
-        f"{attempt['overall_score']}/100 "
-        f"(интонация {attempt['intonation_score']}, ритм {attempt['rhythm_score']}, "
-        f"полнота {attempt['completeness_score']})"
-    )
+    message = f"UVS_EXERCISE_VOICE {exercise_title} · {phrase_title}"
     inserted = rest(
         "POST",
         "/rest/v1/chat_messages",

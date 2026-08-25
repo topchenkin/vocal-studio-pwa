@@ -191,11 +191,12 @@ export async function sendChatMessageDirect(input: {
   const payloadMessage =
     messageType === "text" || messageType === "sticker"
       ? text
-      : messageType === "voice"
-        ? "🎤 Голосовое сообщение"
-        : messageType === "video"
-          ? "🎬 Видеосообщение"
-          : "📷 Фото";
+      : text ||
+        (messageType === "voice"
+          ? "🎤 Голосовое сообщение"
+          : messageType === "video"
+            ? "🎬 Видеосообщение"
+            : "📷 Фото");
 
   if (input.groupId) {
     const { data, error } = await supabase

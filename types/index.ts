@@ -141,6 +141,15 @@ export interface ExercisePhrase {
   updated_at: string;
 }
 
+export interface VocalPhraseProgress {
+  [key: string]: unknown;
+  student_id: string;
+  phrase_id: string;
+  best_score: number;
+  best_attempt_id: string | null;
+  updated_at: string;
+}
+
 export interface VocalExerciseAttempt {
   [key: string]: unknown;
   id: string;
@@ -449,6 +458,18 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<ExercisePhrase>;
+        Relationships: [];
+      };
+      vocal_phrase_progress: {
+        Row: VocalPhraseProgress;
+        Insert: {
+          student_id: string;
+          phrase_id: string;
+          best_score: number;
+          best_attempt_id?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<VocalPhraseProgress>;
         Relationships: [];
       };
       vocal_exercise_attempts: {
@@ -887,6 +908,10 @@ export interface Database {
       request_vocal_attempt_share: {
         Args: { p_attempt_id: string };
         Returns: undefined;
+      };
+      student_exercise_progress: {
+        Args: { p_exercise_id: string; p_student_id: string };
+        Returns: number;
       };
       discard_vocal_attempt: {
         Args: { p_attempt_id: string };

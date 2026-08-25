@@ -29,6 +29,7 @@ import {
   decodeBlobToAudioBuffer,
   mixAudioBuffersWithOffsets,
 } from "@/lib/wav-client";
+import { AUDIO_FILE_ACCEPT } from "@/lib/file-accept";
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { preferIosPlayback, releaseIosCapture } from "@/lib/ios-audio-session";
 import MediaAudio from "@/components/media/MediaAudio";
@@ -1041,7 +1042,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       <input
         ref={fileInputRef}
         type="file"
-        accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.webm"
+        accept={AUDIO_FILE_ACCEPT}
         className="hidden"
         onChange={(event) => void addFromFile(event.target.files?.[0])}
       />

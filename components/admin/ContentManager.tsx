@@ -15,6 +15,12 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import PhraseEditor from "@/components/admin/PhraseEditor";
 import { useAuth } from "@/context/AuthContext";
+import {
+  isAllowedAudioFile,
+  isAllowedVideoFile,
+  mediaAcceptFor,
+  rejectedMediaMessage,
+} from "@/lib/file-accept";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_LABELS, CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
@@ -22,6 +28,7 @@ import type {
   CatLevel,
   Exercise,
   ExerciseAnalysisJob,
+  ExercisePhrase,
   StudentFolder,
   StudentProfile,
 } from "@/types";
@@ -134,6 +141,7 @@ export default function ContentManager() {
   const { user, isMockAdmin } = useAuth();
   const [items, setItems] = useState<Exercise[]>([]);
   const [analysisJobs, setAnalysisJobs] = useState<ExerciseAnalysisJob[]>([]);
+  const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [folders, setFolders] = useState<StudentFolder[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [folderAccess, setFolderAccess] = useState<
@@ -166,6 +174,7 @@ export default function ContentManager() {
       folderAccessResult,
       studentAccessResult,
       analysisResult,
+      phraseResult,
     ] =
       await Promise.all([
         supabase.from("exercises").select("*").order("created_at", { ascending: false }),
@@ -174,6 +183,7 @@ export default function ContentManager() {
         supabase.from("exercise_folder_access").select("*"),
         supabase.from("exercise_student_access").select("*"),
         supabase.from("exercise_analysis_jobs").select("*"),
+        supabase.from("exercise_phrases").select("id,exercise_id,title,feature_status").order("sort_order"),
       ]);
 
     const queryError =
@@ -182,7 +192,8 @@ export default function ContentManager() {
       studentsResult.error ??
       folderAccessResult.error ??
       studentAccessResult.error ??
-      analysisResult.error;
+      analysisResult.error ??
+      phraseResult.error;
     if (queryError) {
       setError(`Не удалось загрузить библиотеку: ${queryError.message}`);
     } else {
@@ -192,6 +203,7 @@ export default function ContentManager() {
       setFolderAccess(folderAccessResult.data ?? []);
       setStudentAccess(studentAccessResult.data ?? []);
       setAnalysisJobs(analysisResult.data ?? []);
+      setPhrases((phraseResult.data ?? []) as ExercisePhrase[]);
     }
     setLoading(false);
   }, [isMockAdmin]);
@@ -410,6 +422,7 @@ export default function ContentManager() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => {
             const analysis = analysisJobs.find((job) => job.exercise_id === item.id);
+            const childPhrases = phrases.filter((phrase) => phrase.exercise_id === item.id);
             return (
             <article
               key={item.id}
@@ -441,6 +454,12 @@ export default function ContentManager() {
                 {item.min_tier_required} · {CAT_LEVEL_LABELS[item.min_cat_level]}{" "}
                 · {item.audience_mode}
               </p>
+              {childPhrases.length > 0 && (
+                <p className="mt-2 text-xs text-studio-muted">
+                  {childPhrases.length}{" "}
+                  {childPhrases.length === 1 ? "фраза-потомок" : "фраз-потомков"} этого упражнения
+                </p>
+              )}
               {item.type === "audio" && item.storage_path && (
                 <div className="mt-3 rounded-xl bg-studio-bg/70 p-3 ring-1 ring-studio-border">
                   <div className="flex items-center justify-between gap-2 text-xs">
@@ -556,12 +575,30 @@ export default function ContentManager() {
               {file?.name || (editing?.storage_path ? "Заменить медиафайл" : "Выбрать медиафайл")}
             </span>
             <span className="mt-1 block text-xs text-studio-muted">
-              До 500 МБ · MP3/WAV/OGG/M4A/MP4/WebM
+              До 500 МБ · MP3/WAV/OGG/M4A/AAC/FLAC/MP4/WebM. На iPhone выбирайте файл из Файлов или iCloud.
             </span>
             <input
               type="file"
-              accept={draft.type === "audio" ? "audio/*" : "video/*"}
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              accept={mediaAcceptFor(draft.type)}
+              onChange={(event) => {
+                const picked = event.target.files?.[0] ?? null;
+                if (!picked) {
+                  setFile(null);
+                  return;
+                }
+                const allowed =
+                  draft.type === "audio"
+                    ? isAllowedAudioFile(picked)
+                    : isAllowedVideoFile(picked);
+                if (!allowed) {
+                  setError(rejectedMediaMessage(draft.type));
+                  setFile(null);
+                  event.target.value = "";
+                  return;
+                }
+                setError("");
+                setFile(picked);
+              }}
               className="sr-only"
             />
           </label>

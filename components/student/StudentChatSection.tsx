@@ -138,6 +138,7 @@ export default function StudentChatSection() {
             disabled={!hasChatAccess}
             sendError={teacherError}
             sending={sendingTeacher}
+            focusMessageId={searchParams.get("message")}
           />
         ) : activeGroup ? (
           <ChatWindow

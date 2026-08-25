@@ -6,8 +6,6 @@ from pathlib import Path
 
 import paramiko
 
-HOST = os.environ.get("UVS_SSH_HOST", "5.42.123.142")
-PASSWORD = os.environ.get("UVS_SSH_PASS", "")
 ROOT = Path(__file__).resolve().parents[1]
 PUSH = ROOT / "deploy" / "push-api"
 ENV_LOCAL = ROOT / ".env.local"
@@ -38,6 +36,11 @@ def local_env() -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
+
+
+LOCAL = local_env()
+HOST = os.environ.get("UVS_SSH_HOST") or LOCAL.get("UVS_SSH_HOST", "5.42.123.142")
+PASSWORD = os.environ.get("UVS_SSH_PASS") or LOCAL.get("UVS_SSH_PASS", "")
 
 
 def env_file_bytes() -> bytes:

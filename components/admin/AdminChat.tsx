@@ -241,6 +241,7 @@ export default function AdminChat() {
               onDelete={(id) => void removeDirect(id)}
               sendError={directError}
               sending={sendingDirect}
+              focusMessageId={searchParams.get("message")}
             />
           ) : mode === "groups" && activeGroup ? (
             <ChatWindow

@@ -51,6 +51,15 @@ async function sb(path, init = {}) {
   return response;
 }
 
+function isExerciseResultText(raw) {
+  const text = String(raw || "");
+  return (
+    text.includes("UVS_EXERCISE_RESULT") ||
+    text.includes('"kind":"exercise_result"') ||
+    /результаты упражнения/i.test(text)
+  );
+}
+
 function isVocalReportText(raw) {
   const text = String(raw || "");
   return (
@@ -87,6 +96,17 @@ function safeActionUrl(row) {
 
 function previewPayload(row) {
   const message = String(row.message || "");
+  if (isExerciseResultText(message) || /результаты упражнения/i.test(String(row.title || ""))) {
+    const text =
+      String(row.title || "").trim() ||
+      message.replace(/\s+/g, " ").trim() ||
+      "Результаты упражнения";
+    return {
+      title: text,
+      body: "Результаты упражнения",
+      url: safeActionUrl(row),
+    };
+  }
   if (isVocalReportText(message)) {
     return {
       title: row.title || "Иришка",

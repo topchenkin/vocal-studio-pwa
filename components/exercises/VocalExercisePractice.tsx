@@ -4,6 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
+import { renderExerciseResultPng } from "@/lib/exercise-result-card";
+import {
+  bestScoreMap,
+  countPassedPhrases,
+  phraseProgressPercent,
+  progressLabel,
+} from "@/lib/exercise-progress";
+import {
+  exerciseResultChatText,
+  type ExerciseResultPayload,
+} from "@/lib/exercise-result-payload";
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@/lib/pcm-capture";
 import { supabase } from "@/lib/supabase";
@@ -30,11 +42,13 @@ export default function VocalExercisePractice({
   exercise: Exercise;
   phrases: ExercisePhrase[];
 }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const audioRef = useRef<HTMLAudioElement>(null);
   const captureRef = useRef<PcmCaptureSession | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
+  const stageRef = useRef<PracticeStage>("idle");
+  const selectedRef = useRef(phrases[0] ?? null);
   const [selected, setSelected] = useState(phrases[0] ?? null);
   const [stage, setStage] = useState<PracticeStage>("idle");
   const [countIn, setCountIn] = useState(true);
@@ -42,6 +56,11 @@ export default function VocalExercisePractice({
   const [attempt, setAttempt] = useState<VocalExerciseAttempt | null>(null);
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState(false);
+  const [bestScores, setBestScores] = useState<Record<string, number>>({});
+  const [guideOn, setGuideOn] = useState(false);
+
+  stageRef.current = stage;
+  selectedRef.current = selected;
 
   useEffect(
     () => () => {
@@ -53,8 +72,39 @@ export default function VocalExercisePractice({
     []
   );
 
-  const stopEverything = () => {
-    audioRef.current?.pause();
+  useEffect(() => {
+    if (!user || phrases.length === 0) return;
+    let mounted = true;
+    const loadProgress = async () => {
+      const { data } = await supabase
+        .from("vocal_phrase_progress")
+        .select("phrase_id,best_score")
+        .eq("student_id", user.id)
+        .in(
+          "phrase_id",
+          phrases.map((phrase) => phrase.id)
+        );
+      if (!mounted) return;
+      setBestScores(bestScoreMap(data ?? []));
+    };
+    void loadProgress();
+    return () => {
+      mounted = false;
+    };
+  }, [phrases, user]);
+
+  const passedCount = countPassedPhrases(
+    phrases.map((phrase) => phrase.id),
+    bestScores
+  );
+  const percent = phraseProgressPercent(phrases.length, passedCount);
+
+  const setPracticeStage = (next: PracticeStage) => {
+    stageRef.current = next;
+    setStage(next);
+  };
+
+  const stopCaptureOnly = () => {
     captureRef.current?.abort();
     captureRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -63,17 +113,37 @@ export default function VocalExercisePractice({
     stopRecordingRef.current = null;
   };
 
-  const listen = async () => {
-    if (!selected || !audioRef.current || stage === "recording") return;
+  const stopEverything = () => {
+    audioRef.current?.pause();
+    stopCaptureOnly();
+  };
+
+  const playSelectedPhrase = async () => {
+    const phrase = selectedRef.current;
     const audio = audioRef.current;
-    if (stage === "listening") {
+    if (!phrase || !audio) return;
+    audio.currentTime = Number(phrase.start_sec);
+    try {
+      await audio.play();
+    } catch {
+      /* iOS may interrupt; recording still continues */
+    }
+  };
+
+  const listen = async () => {
+    const phrase = selectedRef.current;
+    if (!phrase || !audioRef.current) return;
+    const audio = audioRef.current;
+    const current = stageRef.current;
+    if (!audio.paused && (current === "listening" || current === "recording")) {
       audio.pause();
-      setStage("idle");
+      if (current === "listening") setPracticeStage("idle");
       return;
     }
-    audio.currentTime = Number(selected.start_sec);
-    setStage("listening");
-    await audio.play();
+    await playSelectedPhrase();
+    if (current !== "recording" && current !== "counting") {
+      setPracticeStage("listening");
+    }
   };
 
   const pollAttempt = async (
@@ -99,23 +169,25 @@ export default function VocalExercisePractice({
 
   const record = async () => {
     if (!user || !selected || !exercise.media_url) return;
-    stopEverything();
+    audioRef.current?.pause();
+    stopCaptureOnly();
     setError("");
     setAttempt(null);
     try {
       const stream = await getSingingMicStream();
       streamRef.current = stream;
       if (countIn) {
-        setStage("counting");
+        setPracticeStage("counting");
         for (const value of [3, 2, 1]) {
           setCount(value);
           await sleep(650);
         }
         setCount(0);
       }
-      setStage("recording");
+      setPracticeStage("recording");
       const capture = await startPcmCapture(stream);
       captureRef.current = capture;
+      await playSelectedPhrase();
       const seconds = Math.min(
         45,
         Math.max(3, Number(selected.end_sec) - Number(selected.start_sec) + 1.5)
@@ -127,6 +199,7 @@ export default function VocalExercisePractice({
         }),
       ]);
       stopRecordingRef.current = null;
+      audioRef.current?.pause();
       const buffer = await capture.stop();
       if (buffer.duration < 1) {
         throw new Error("Запись слишком короткая. Попробуйте ещё раз.");
@@ -135,7 +208,7 @@ export default function VocalExercisePractice({
       stream.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       const blob = audioBufferToWavBlob(buffer);
-      setStage("uploading");
+      setPracticeStage("uploading");
       const storagePath = `${user.id}/${crypto.randomUUID()}.wav`;
       const { error: uploadError } = await supabase.storage
         .from("vocal-attempts")
@@ -161,23 +234,30 @@ export default function VocalExercisePractice({
         await supabase.storage.from("vocal-attempts").remove([storagePath]);
         throw insertError;
       }
-      setStage("evaluating");
+      setPracticeStage("evaluating");
       const evaluated = await pollAttempt(created.id);
       setAttempt(evaluated);
       if (evaluated.status === "failed") {
         throw new Error(evaluated.error || "Не удалось обработать запись");
       }
-      setStage("result");
+      if (evaluated.overall_score != null) {
+        setBestScores((current) => ({
+          ...current,
+          [selected.id]: Math.max(current[selected.id] ?? 0, evaluated.overall_score ?? 0),
+        }));
+      }
+      setPracticeStage("result");
     } catch (caught) {
       stopEverything();
       setError(caught instanceof Error ? caught.message : "Не удалось записать попытку");
-      setStage("failed");
+      setPracticeStage("failed");
     }
   };
 
   const stopRecording = async () => {
-    if (!captureRef.current || stage !== "recording") return;
-    setStage("uploading");
+    if (!captureRef.current || stageRef.current !== "recording") return;
+    setPracticeStage("uploading");
+    audioRef.current?.pause();
     stopRecordingRef.current?.();
   };
 
@@ -187,22 +267,46 @@ export default function VocalExercisePractice({
     }
     setAttempt(null);
     setError("");
-    setStage("idle");
+    setPracticeStage("idle");
   };
 
   const share = async () => {
-    if (!attempt || sharing) return;
+    if (!attempt || sharing || !user || !selected) return;
     setSharing(true);
     setError("");
-    const { error: shareError } = await supabase.rpc("request_vocal_attempt_share", {
-      p_attempt_id: attempt.id,
-    });
-    if (shareError) {
-      setError(shareError.message);
-      setSharing(false);
-      return;
-    }
     try {
+      const studentName = profile?.full_name?.trim() || "Ученик";
+      const payload: ExerciseResultPayload = {
+        v: 2,
+        kind: "exercise_result",
+        overall: attempt.overall_score ?? 0,
+        intonation: attempt.intonation_score ?? 0,
+        rhythm: attempt.rhythm_score ?? 0,
+        completeness: attempt.completeness_score ?? 0,
+        exerciseTitle: exercise.title,
+        phraseTitle: selected.title || "Фраза",
+        shift: attempt.global_shift_semitones,
+      };
+      const card = await renderExerciseResultPng({
+        studentName,
+        payload,
+        weakest: weakestDimension(attempt),
+      });
+      const file = new File([card], "exercise-result.png", { type: "image/png" });
+      const uploaded = await uploadChatMediaFile(user.id, "image", file);
+      await sendChatMessageDirect({
+        studentId: user.id,
+        senderId: user.id,
+        senderName: studentName,
+        messageType: "image",
+        message: exerciseResultChatText(studentName, payload),
+        mediaPath: uploaded.path,
+        mediaMime: uploaded.mime,
+      });
+      const { error: shareError } = await supabase.rpc("request_vocal_attempt_share", {
+        p_attempt_id: attempt.id,
+      });
+      if (shareError) throw shareError;
       const shared = await pollAttempt(attempt.id, true);
       setAttempt(shared);
       if (shared.status !== "shared") {
@@ -220,6 +324,10 @@ export default function VocalExercisePractice({
       ? teacherReaction(attempt.overall_score, weakestDimension(attempt))
       : null;
 
+  const canListen = Boolean(selected) && ["idle", "listening", "recording", "failed"].includes(stage);
+  const canRecord =
+    Boolean(selected) && ["idle", "listening", "failed"].includes(stage);
+
   return (
     <div className="mt-3 rounded-2xl bg-studio-card p-4 ring-1 ring-studio-accent/25">
       <audio
@@ -227,51 +335,68 @@ export default function VocalExercisePractice({
         src={exercise.media_url}
         preload="metadata"
         playsInline
+        onPlay={() => setGuideOn(true)}
+        onPause={() => setGuideOn(false)}
         onTimeUpdate={(event) => {
-          if (
-            stage === "listening" &&
-            selected &&
-            event.currentTarget.currentTime >= Number(selected.end_sec)
-          ) {
+          const phrase = selectedRef.current;
+          if (!phrase) return;
+          if (event.currentTarget.currentTime >= Number(phrase.end_sec)) {
             event.currentTarget.pause();
-            setStage("idle");
+            if (stageRef.current === "listening") setPracticeStage("idle");
           }
         }}
-        onEnded={() => setStage("idle")}
+        onEnded={() => {
+          if (stageRef.current === "listening") setPracticeStage("idle");
+        }}
       />
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-studio-accent/15">
           <Mic className="h-5 w-5 text-studio-accent-light" />
         </div>
-        <div>
-          <h4 className="font-medium">Повторите за преподавателем</h4>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <h4 className="font-medium">Повторите за преподавателем</h4>
+            <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+              {progressLabel(percent)}
+            </span>
+          </div>
           <p className="mt-1 text-xs text-studio-muted">
-            Сначала послушайте фразу, затем спойте её в удобной тональности.
+            Слушайте фразу и пойте вместе с ней — как караоке. Можно записывать во время воспроизведения.
           </p>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
+            <div
+              className="h-full rounded-full bg-emerald-400 transition-all"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
         </div>
       </div>
 
       <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-        {phrases.map((phrase, index) => (
-          <button
-            key={phrase.id}
-            type="button"
-            disabled={!["idle", "result", "failed"].includes(stage)}
-            onClick={() => {
-              setSelected(phrase);
-              setAttempt(null);
-              setStage("idle");
-            }}
-            className={`shrink-0 rounded-xl px-3 py-2 text-xs ring-1 ${
-              selected?.id === phrase.id
-                ? "bg-studio-accent/20 text-white ring-studio-accent"
-                : "bg-studio-surface text-studio-muted ring-studio-border"
-            }`}
-          >
-            {phrase.title || `Фраза ${index + 1}`} ·{" "}
-            {Math.round(Number(phrase.end_sec) - Number(phrase.start_sec))} сек
-          </button>
-        ))}
+        {phrases.map((phrase, index) => {
+          const passed = (bestScores[phrase.id] ?? 0) > 80;
+          return (
+            <button
+              key={phrase.id}
+              type="button"
+              disabled={!["idle", "listening", "result", "failed"].includes(stage)}
+              onClick={() => {
+                setSelected(phrase);
+                setAttempt(null);
+                setPracticeStage("idle");
+              }}
+              className={`shrink-0 rounded-xl px-3 py-2 text-xs ring-1 ${
+                selected?.id === phrase.id
+                  ? "bg-studio-accent/20 text-white ring-studio-accent"
+                  : "bg-studio-surface text-studio-muted ring-studio-border"
+              }`}
+            >
+              {phrase.title || `Фраза ${index + 1}`} ·{" "}
+              {Math.round(Number(phrase.end_sec) - Number(phrase.start_sec))} сек
+              {passed ? " · ✓" : ""}
+            </button>
+          );
+        })}
       </div>
 
       {!resultReaction && attempt?.status !== "rejected" && (
@@ -279,10 +404,10 @@ export default function VocalExercisePractice({
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Button
               variant="secondary"
-              disabled={!selected || !["idle", "listening", "failed"].includes(stage)}
+              disabled={!canListen}
               onClick={() => void listen()}
             >
-              {stage === "listening" ? "Остановить" : "Послушать"}
+              {guideOn ? "Остановить фонограмму" : "Послушать"}
             </Button>
             {stage === "recording" ? (
               <Button variant="danger" onClick={() => void stopRecording()}>
@@ -290,10 +415,7 @@ export default function VocalExercisePractice({
                 Стоп
               </Button>
             ) : (
-              <Button
-                disabled={!selected || !["idle", "failed"].includes(stage)}
-                onClick={() => void record()}
-              >
+              <Button disabled={!canRecord} onClick={() => void record()}>
                 <Mic className="h-4 w-4" />
                 Записать
               </Button>
@@ -317,7 +439,9 @@ export default function VocalExercisePractice({
         </div>
       )}
       {stage === "recording" && (
-        <p className="mt-3 animate-pulse text-center text-sm text-red-300">● Идёт запись…</p>
+        <p className="mt-3 animate-pulse text-center text-sm text-red-300">
+          ● Идёт запись… фонограмма играет вместе с вами
+        </p>
       )}
       {(stage === "uploading" || stage === "evaluating") && (
         <div className="mt-4 rounded-xl bg-studio-surface p-4 text-center text-sm text-studio-muted">
@@ -372,7 +496,7 @@ export default function VocalExercisePractice({
           )}
           {attempt.status === "shared" ? (
             <p className="text-center text-sm text-emerald-300">
-              Запись сохранена и отправлена преподавателю в чат.
+              Карточка и запись отправлены преподавателю в чат.
             </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
@@ -402,7 +526,7 @@ export default function VocalExercisePractice({
       {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
       <p className="mt-4 flex items-center gap-2 text-[11px] text-studio-muted">
         <Headphones className="h-4 w-4 shrink-0" />
-        Лучше использовать наушники: так фонограмма не попадёт в микрофон. Неотправленная запись удалится максимум через час.
+        Лучше использовать наушники: так фонограмма не попадёт в микрофон и не завысит оценку. Неотправленная запись удалится максимум через час.
       </p>
     </div>
   );

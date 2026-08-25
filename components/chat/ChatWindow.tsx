@@ -37,6 +37,7 @@ import {
   isVocalReportText,
   parseVocalReportPayload,
 } from "@/lib/vocal-report-payload";
+import { isExerciseResultText } from "@/lib/exercise-result-payload";
 
 const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
@@ -56,6 +57,7 @@ interface ChatWindowProps {
   flush?: boolean;
   sendError?: string;
   sending?: boolean;
+  focusMessageId?: string | null;
 }
 
 export default function ChatWindow({
@@ -70,6 +72,7 @@ export default function ChatWindow({
   flush = false,
   sendError,
   sending,
+  focusMessageId,
 }: ChatWindowProps) {
   const [text, setText] = useState("");
   const [panel, setPanel] = useState<"none" | "emoji" | "sticker">("none");
@@ -97,9 +100,26 @@ export default function ChatWindow({
   const canSendText = Boolean(text.trim());
   const maxMs = recordKind === "video" ? MAX_VIDEO_MS : MAX_VOICE_MS;
 
+  const focusedId =
+    focusMessageId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      focusMessageId
+    )
+      ? focusMessageId
+      : null;
+
   useEffect(() => {
+    if (!focusedId) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    const node = document.querySelector(`[data-message-id="${focusedId}"]`);
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages.length]);
+  }, [chatMessages.length, focusedId]);
 
   useEffect(() => {
     if (phase === "idle" || recordKind !== "video") return;
@@ -376,6 +396,7 @@ export default function ChatWindow({
               Boolean(vocalReport) ||
               msg.messageType === "vocal_report" ||
               isVocalReportText(msg.text || "");
+            const isExerciseCard = isExerciseResultText(msg.text || "");
             const canManage =
               !disabled &&
               !isAnnouncement &&
@@ -384,6 +405,7 @@ export default function ChatWindow({
             return (
               <div
                 key={msg.id}
+                data-message-id={msg.id}
                 className={`group flex ${
                   isAnnouncement
                     ? "justify-center"
@@ -394,7 +416,11 @@ export default function ChatWindow({
               >
                 <div
                   className={`relative min-w-0 rounded-2xl px-4 py-2.5 ${
-                    isVocalBubble ? "w-full max-w-sm" : "max-w-[80%]"
+                    isVocalBubble || isExerciseCard || focusedId === msg.id
+                      ? "w-full max-w-sm"
+                      : "max-w-[80%]"
+                  } ${
+                    focusedId === msg.id ? "ring-2 ring-studio-accent/80" : ""
                   } ${
                     isAnnouncement
                       ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
@@ -424,12 +450,21 @@ export default function ChatWindow({
                       className="h-28 w-28 object-contain"
                     />
                   ) : msg.messageType === "image" && msg.mediaUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={msg.mediaUrl}
-                      alt="Фото в чате"
-                      className="max-h-56 rounded-xl object-cover"
-                    />
+                    <div className="space-y-1">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={msg.mediaUrl}
+                        alt={isExerciseCard ? "Результаты упражнения" : "Фото в чате"}
+                        className={
+                          isExerciseCard
+                            ? "max-h-[28rem] w-full rounded-xl object-contain"
+                            : "max-h-56 rounded-xl object-cover"
+                        }
+                      />
+                      {isExerciseCard ? (
+                        <p className="text-xs text-studio-accent-light">Результаты упражнения</p>
+                      ) : null}
+                    </div>
                   ) : msg.messageType === "video" && msg.mediaUrl ? (
                     <div className="space-y-1">
                       <CircleVideoFrame className="h-48 w-48">
