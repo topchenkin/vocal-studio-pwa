@@ -14,7 +14,8 @@ assert.ok(fn.includes("clampDuration"));
 assert.ok(fn.includes("durationSec"));
 assert.ok(fn.includes("isRetryable"));
 assert.ok(fn.includes("EXT-X-ENDLIST"));
-assert.ok(fn.includes('Deno.env.get("HUGGINGFACE_API_KEY")'));
+assert.ok(!fn.includes("Authorization: `Bearer ${token}`"));
+assert.ok(!fn.includes("authHeaders"));
 assert.ok(fn.includes('error: "loading"'));
 assert.ok(fn.includes("estimated_time"));
 assert.ok(fn.includes("audioBase64"));
@@ -66,7 +67,7 @@ assert.ok(access.includes('"musicgen"'));
 
 const client = readFileSync(path.join(root, "lib", "supabase.ts"), "utf8");
 assert.ok(client.includes("functions"));
-assert.ok(client.includes("180_000"));
+assert.ok(client.includes("240_000"));
 
 const sql = readFileSync(
   path.join(root, "supabase-migrations", "2026-08-26-ai-musicgen-tool.sql"),

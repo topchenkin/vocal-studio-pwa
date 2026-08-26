@@ -12,6 +12,8 @@ FN = ROOT / "supabase" / "functions" / "generate-music" / "index.ts"
 SQL = ROOT / "supabase-migrations" / "2026-08-26-ai-musicgen-tool.sql"
 REMOTE_DIR = "/opt/supabase/volumes/functions/generate-music"
 REMOTE_MAIN = "/opt/supabase/volumes/functions/main/index.ts"
+KONG = "/opt/supabase/volumes/api/kong.yml"
+ENVOY = "/opt/supabase/volumes/api/envoy/lds.template.yaml"
 COMPOSE = "/opt/supabase/docker-compose.yml"
 ENV_PATH = "/opt/supabase/.env"
 COMPOSE_MARKER = "HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY}"
@@ -61,24 +63,47 @@ def patch_compose(text: str) -> str:
 
 
 def patch_worker_timeout(text: str) -> str:
-    next_text = (
-        text.replace(
-            "const workerTimeoutMs = 1 * 60 * 1000",
-            "const workerTimeoutMs = 3 * 60 * 1000",
-        )
-        .replace(
-            "workerTimeoutMs: 1 * 60 * 1000",
-            "workerTimeoutMs: 3 * 60 * 1000",
-        )
+    next_text = text.replace("const memoryLimitMb = 150", "const memoryLimitMb = 256")
+    replacements = (
+        ("const workerTimeoutMs = 1 * 60 * 1000", "const workerTimeoutMs = 10 * 60 * 1000"),
+        ("const workerTimeoutMs = 3 * 60 * 1000", "const workerTimeoutMs = 10 * 60 * 1000"),
+        ("const workerTimeoutMs = 60 * 1000", "const workerTimeoutMs = 10 * 60 * 1000"),
+        ("workerTimeoutMs: 1 * 60 * 1000", "workerTimeoutMs: 10 * 60 * 1000"),
+        ("workerTimeoutMs: 3 * 60 * 1000", "workerTimeoutMs: 10 * 60 * 1000"),
     )
-    if "const workerTimeoutMs = 60 * 1000" in next_text:
-        next_text = next_text.replace(
-            "const workerTimeoutMs = 60 * 1000",
-            "const workerTimeoutMs = 3 * 60 * 1000",
-        )
-    if "3 * 60 * 1000" not in next_text and "180000" not in next_text:
+    for old, new in replacements:
+        next_text = next_text.replace(old, new)
+    if "10 * 60 * 1000" not in next_text and "600000" not in next_text:
         raise SystemExit("could not patch workerTimeoutMs in main/index.ts")
     return next_text
+
+
+def patch_kong(text: str) -> str:
+    return text.replace(
+        "url: http://functions:9000/\n    read_timeout: 150000",
+        "url: http://functions:9000/\n    read_timeout: 300000",
+        1,
+    )
+
+
+def patch_envoy(text: str) -> str:
+    needle = (
+        "cluster: functions\n"
+        "                          prefix_rewrite: /\n"
+        "                          timeout: 150s"
+    )
+    repl = (
+        "cluster: functions\n"
+        "                          prefix_rewrite: /\n"
+        "                          timeout: 300s"
+    )
+    if needle in text:
+        return text.replace(needle, repl, 1)
+    return text.replace(
+        "prefix: /functions/v1/\n                        route:\n                          cluster: functions\n                          prefix_rewrite: /\n                          timeout: 150s",
+        "prefix: /functions/v1/\n                        route:\n                          cluster: functions\n                          prefix_rewrite: /\n                          timeout: 300s",
+        1,
+    )
 
 
 def run(client: paramiko.SSHClient, command: str, timeout: int = 180) -> None:
@@ -130,9 +155,15 @@ def main() -> None:
                 compose_text = handle.read().decode("utf-8", "replace")
             with sftp.file(REMOTE_MAIN, "r") as handle:
                 main_text = handle.read().decode("utf-8", "replace")
+            with sftp.file(KONG, "r") as handle:
+                kong_text = handle.read().decode("utf-8", "replace")
+            with sftp.file(ENVOY, "r") as handle:
+                envoy_text = handle.read().decode("utf-8", "replace")
             next_env = upsert_env(env_text, "HUGGINGFACE_API_KEY", hf_key)
             next_compose = patch_compose(compose_text)
             next_main = patch_worker_timeout(main_text)
+            next_kong = patch_kong(kong_text)
+            next_envoy = patch_envoy(envoy_text)
             with sftp.file(ENV_PATH, "w") as handle:
                 handle.write(next_env.encode("utf-8"))
             if next_compose != compose_text:
@@ -141,6 +172,12 @@ def main() -> None:
             if next_main != main_text:
                 with sftp.file(REMOTE_MAIN, "w") as handle:
                     handle.write(next_main.encode("utf-8"))
+            if next_kong != kong_text:
+                with sftp.file(KONG, "w") as handle:
+                    handle.write(next_kong.encode("utf-8"))
+            if next_envoy != envoy_text:
+                with sftp.file(ENVOY, "w") as handle:
+                    handle.write(next_envoy.encode("utf-8"))
         finally:
             sftp.close()
         run(
@@ -153,6 +190,12 @@ def main() -> None:
             "cd /opt/supabase && docker compose up -d --no-deps --force-recreate functions",
             timeout=180,
         )
+        if next_envoy != envoy_text:
+            run(
+                client,
+                "cd /opt/supabase && docker compose up -d --no-deps --force-recreate api-gw",
+                timeout=180,
+            )
         run(
             client,
             "for i in $(seq 1 20); do "

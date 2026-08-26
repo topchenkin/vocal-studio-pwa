@@ -62,6 +62,8 @@ function humanizeError(code: string | undefined) {
     case "prompt_too_long":
       return "Описание слишком длинное. Сократите текст.";
     case "timeout":
+    case "space_empty":
+    case "space_no_file":
       return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
     case "busy":
     case "space_gpu":

@@ -19,7 +19,7 @@ end $$;
 
 alter table public.ai_tool_access
   add constraint ai_tool_access_tool_id_check
-  check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen'));
+  check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'songwriter'));
 
 insert into public.ai_tool_access (tool_id, min_tier, enabled, title)
 values ('musicgen', 'premium', true, 'ИИ-композитор')

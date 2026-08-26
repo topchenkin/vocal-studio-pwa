@@ -14,6 +14,8 @@ assert.ok(fn.includes("Ты профессиональный музыкальн�
 assert.ok(fn.includes("Access-Control-Allow-Origin"));
 assert.ok(fn.includes("premium_required"));
 assert.ok(fn.includes("{ reply:"));
+assert.ok(fn.includes("huggingface-projects-llama-3-2-3b-instruct.hf.space"));
+assert.ok(fn.includes("completeViaSpace"));
 assert.ok(!fn.includes("role: rec.role === \"system\""));
 
 const page = readFileSync(
