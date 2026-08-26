@@ -5,7 +5,8 @@ export type CatXpKind =
   | "analyzer"
   | "exercise_share"
   | "pro_test"
-  | "streak";
+  | "streak"
+  | "lesson";
 
 export type CatXpResult = {
   awarded: number;

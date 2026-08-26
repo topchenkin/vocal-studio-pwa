@@ -890,6 +890,10 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      grant_due_lesson_cat_xp: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
       award_cat_xp: {
         Args: { p_kind: string; p_source_id?: string | null };
         Returns: Record<string, unknown>;

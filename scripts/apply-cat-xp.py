@@ -8,7 +8,7 @@ from pathlib import Path
 import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
-SQL = ROOT / "supabase-migrations" / "2026-08-26-cat-xp.sql"
+SQL = ROOT / "supabase-migrations" / "2026-08-26-cat-xp-lessons.sql"
 
 
 def local_env() -> dict[str, str]:

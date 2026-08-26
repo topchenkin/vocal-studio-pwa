@@ -60,7 +60,7 @@ export async function saveVocalTestResult(
 
 export async function listVocalTestResults(
   userId: string,
-  limit = 24
+  limit = 80
 ): Promise<VocalTestResultRow[]> {
   const { data, error } = await supabase
     .from("vocal_test_results")

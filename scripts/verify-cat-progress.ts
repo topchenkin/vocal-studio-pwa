@@ -8,6 +8,24 @@ const sql = readFileSync(
   "utf8"
 );
 assert.ok(sql.includes("award_cat_xp"));
+assert.ok(
+  readFileSync(
+    path.join(root, "supabase-migrations", "2026-08-26-cat-xp-lessons.sql"),
+    "utf8"
+  ).includes("grant_due_lesson_cat_xp")
+);
+assert.ok(
+  readFileSync(
+    path.join(root, "supabase-migrations", "2026-08-26-cat-xp-lessons.sql"),
+    "utf8"
+  ).includes("'lesson'")
+);
+assert.ok(
+  readFileSync(
+    path.join(root, "components", "student", "VocalProgressSection.tsx"),
+    "utf8"
+  ).includes("groupKey")
+);
 assert.ok(sql.includes("review_vocal_test"));
 assert.ok(sql.includes("cat_exam_ready"));
 assert.ok(sql.includes("when 'beginner' then 48"));

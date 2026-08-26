@@ -280,6 +280,28 @@ async function remindSubscriptionExpiring() {
   }
 }
 
+async function grantDueLessonXp() {
+  const response = await sb("/rest/v1/rpc/grant_due_lesson_cat_xp", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "grant lesson xp failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("lesson cat xp granted", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
 async function tick() {
   if (ticking) return;
   ticking = true;
@@ -289,6 +311,7 @@ async function tick() {
       lastRemindAt = Date.now();
       await remindPendingReschedules();
       await remindSubscriptionExpiring();
+      await grantDueLessonXp();
     }
   } catch (error) {
     console.error("push poll failed", error?.message || error);
