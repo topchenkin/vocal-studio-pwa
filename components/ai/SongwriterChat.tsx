@@ -112,12 +112,8 @@ export default function SongwriterChat({ locked }: Props) {
     const field = fieldRef.current;
     if (!field) return;
     field.style.height = "auto";
-    field.style.height = `${Math.max(88, Math.min(field.scrollHeight, 220))}px`;
+    field.style.height = `${Math.min(field.scrollHeight, 160)}px`;
   };
-
-  useEffect(() => {
-    resizeField();
-  }, [draft]);
 
   const send = async (raw?: string) => {
     const text = (raw ?? draft).trim();
@@ -128,7 +124,9 @@ export default function SongwriterChat({ locked }: Props) {
     setError("");
     setBusy(true);
     requestAnimationFrame(() => {
-      resizeField();
+      if (fieldRef.current) {
+        fieldRef.current.style.height = "auto";
+      }
     });
     try {
       const token = await getChatSessionToken();
@@ -280,12 +278,13 @@ export default function SongwriterChat({ locked }: Props) {
           <textarea
             ref={fieldRef}
             value={draft}
-            rows={3}
+            rows={1}
             maxLength={4000}
             disabled={busy}
             placeholder="Напишите тему, строку или вопрос по вокалу..."
             onChange={(event) => {
               setDraft(event.target.value);
+              resizeField();
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -293,7 +292,7 @@ export default function SongwriterChat({ locked }: Props) {
                 void send();
               }
             }}
-            className="min-h-[5.5rem] max-h-56 flex-1 resize-none overflow-y-auto rounded-2xl bg-studio-surface px-4 py-3 text-sm leading-relaxed ring-1 ring-studio-border placeholder:text-studio-muted/70 focus:outline-none focus:ring-studio-accent"
+            className="max-h-40 min-h-11 flex-1 resize-none rounded-2xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border placeholder:text-studio-muted/70 focus:outline-none focus:ring-studio-accent"
           />
           <button
             type="button"

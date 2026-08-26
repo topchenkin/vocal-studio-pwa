@@ -5,7 +5,7 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -133,10 +133,7 @@ const CHAT_SPACES = [
 
 const MUSICGEN_DURATIONS = [10, 15, 20, 25, 30];
 const SONGWRITER_SYSTEM =
-  "Ты профессиональный музыкальный продюсер и автор хитов. Помогаешь вокалистам писать тексты, структуру (Куплет, Бридж, Припев) и рифмы, даёшь советы по вокалу (субтон, бэлтинг, вибрато). Общайся как наставник: кратко и по делу. " +
-  "Всегда отвечай на русском языке: пояснения, советы, названия частей песни. " +
-  "Текст песни тоже пиши по-русски, кроме случая, когда ученик ЯВНО попросил другой язык (например: «куплет на английском», «припев на испанском»). " +
-  "Не вставляй японские, китайские, корейские и случайные английские слова в русские ответы.";
+  "Ты профессиональный музыкальный продюсер и автор хитов. Твоя задача — помогать вокалистам писать тексты песен, придумывать структуру (Куплет, Бридж, Припев) и рифмы. Давай советы по вокалу (где петь тише (субтон), где использовать бэлтинг, где добавить вибрато). Общайся вдохновляюще, как наставник. Отвечай кратко и структурировано. Пиши только по-русски. Текст песни тоже на русском, если ученик явно не попросил другой язык.";
 
 async function incomingRequest(req) {
   const chunks = [];
@@ -543,14 +540,9 @@ function isHlsUrl(url, file) {
   return Boolean(file && typeof file === "object" && file.is_stream);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function ffmpegRun(args, cwd) {
+function ffmpegRun(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], {
-      cwd,
       stdio: ["ignore", "ignore", "pipe"],
     });
     const errChunks = [];
@@ -574,100 +566,15 @@ function ffmpegRun(args, cwd) {
   });
 }
 
-async function waitForHlsPlaylist(playlistUrl) {
-  let text = "";
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const response = await fetch(playlistUrl, {
-      headers: hfHeaders(),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!response.ok) throw new Error(`playlist ${response.status}`);
-    text = await response.text();
-    if (/#EXT-X-ENDLIST/i.test(text)) return text;
-    await sleep(1200);
-  }
-  return text;
-}
-
-function hlsSegmentUrls(playlist, playlistUrl) {
-  const base = playlistUrl.replace(/[^/]+(?:\?.*)?$/, "");
-  return playlist
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .map((name) => (/^https?:\/\//i.test(name) ? name : new URL(name, base).href));
-}
-
-function pickHlsSources(files) {
-  if (files.length <= 1) return files.map((item) => item.name);
-  const increasing = files.every(
-    (item, index) => index === 0 || item.size >= files[index - 1].size * 0.9
-  );
-  const last = files[files.length - 1];
-  const first = files[0];
-  if (increasing && last.size >= first.size * 1.6) {
-    return [last.name];
-  }
-  return files.map((item) => item.name);
-}
-
 async function hlsToWav(playlistUrl) {
   const dir = await mkdtemp(join(tmpdir(), "uvs-mg-"));
+  const out = join(dir, "out.wav");
   try {
-    const playlist = await waitForHlsPlaylist(playlistUrl);
-    const urls = hlsSegmentUrls(playlist, playlistUrl);
-    if (urls.length === 0) throw new Error("empty hls");
-    const files = [];
-    for (let index = 0; index < urls.length; index += 1) {
-      const response = await fetch(urls[index], {
-        headers: hfHeaders(),
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) throw new Error(`segment ${response.status}`);
-      const buf = Buffer.from(await response.arrayBuffer());
-      if (buf.length < 32) continue;
-      const ext =
-        buf[0] === 0x47 ? "ts" : buf[0] === 0xff && (buf[1] & 0xf0) === 0xf0 ? "aac" : "bin";
-      const name = `seg-${String(index).padStart(3, "0")}.${ext}`;
-      await writeFile(join(dir, name), buf);
-      files.push({ name, size: buf.length });
-    }
-    if (files.length === 0) throw new Error("empty hls segments");
-    const sources = pickHlsSources(files);
-    console.info(`[musicgen] hls segs=${files.length} using=${sources.length}`);
-    const out = join(dir, "out.wav");
-    try {
-      if (sources.length === 1) {
-        await ffmpegRun(["-i", sources[0], "-ac", "1", "-ar", "32000", "-c:a", "pcm_s16le", out], dir);
-      } else {
-        await writeFile(
-          join(dir, "list.txt"),
-          sources.map((name) => `file '${name}'`).join("\n")
-        );
-        await ffmpegRun(
-          [
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            "list.txt",
-            "-ac",
-            "1",
-            "-ar",
-            "32000",
-            "-c:a",
-            "pcm_s16le",
-            out,
-          ],
-          dir
-        );
-      }
-    } catch (error) {
-      const fallback = files[files.length - 1].name;
-      console.error("[musicgen] concat failed, last segment", error instanceof Error ? error.message : error);
-      await ffmpegRun(["-i", fallback, "-ac", "1", "-ar", "32000", "-c:a", "pcm_s16le", out], dir);
-    }
+    const headers = HF_TOKEN ? `Authorization: Bearer ${HF_TOKEN}\r\n` : "";
+    const args = ["-protocol_whitelist", "file,http,https,tcp,tls,crypto", "-allowed_extensions", "ALL"];
+    if (headers) args.push("-headers", headers);
+    args.push("-i", playlistUrl, "-acodec", "pcm_s16le", "-ar", "32000", "-ac", "2", out);
+    await ffmpegRun(args);
     const wav = await readFile(out);
     if (!sniffAudio(wav)) throw new Error("ffmpeg returned non-wav");
     return wav;
@@ -720,7 +627,7 @@ async function generateOnSpace(space, prompt, durationSec) {
 async function chatOnSpace(space, prompt) {
   await wakeSpace(space.host);
   const outputs = unwrapOutputs(
-    await callGradioPreferComplete(space.host, space.endpoint, [prompt, 700, 0.55, 0.9, 40, 1.15])
+    await callGradioPreferComplete(space.host, space.endpoint, [prompt, 700, 0.8, 0.9, 50, 1.2])
   );
   const reply = replyFromGradio(outputs);
   if (!reply) throw new Error(`${space.id}: пустой ответ`);
@@ -735,7 +642,7 @@ function toChatPrompt(messages) {
     if (!content) continue;
     lines.push(item.role === "user" ? `Ученик: ${content.slice(0, 4000)}` : `Продюсер: ${content.slice(0, 4000)}`);
   }
-  lines.push("Продюсер (только русский, если ученик не попросил другой язык для текста песни):");
+  lines.push("Продюсер:");
   return lines.join("\n").slice(-8000);
 }
 
