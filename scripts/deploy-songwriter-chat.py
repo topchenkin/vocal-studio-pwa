@@ -51,16 +51,17 @@ def upsert_env(text: str, key: str, value: str) -> str:
 
 
 def patch_compose(text: str) -> str:
-    next_text = text
-    if VERIFY_LINE not in next_text:
+    if VERIFY_LINE not in text:
         raise SystemExit("docker-compose.yml is missing VERIFY_JWT for functions")
+    index = text.find(VERIFY_LINE)
+    window = text[index : index + 500]
     insert = VERIFY_LINE
     for marker in MARKERS:
-        if marker not in next_text:
+        if marker not in window:
             insert += "\n      " + marker
     if insert == VERIFY_LINE:
-        return next_text
-    return next_text.replace(VERIFY_LINE, insert, 1)
+        return text
+    return text.replace(VERIFY_LINE, insert, 1)
 
 
 def run(client: paramiko.SSHClient, command: str, timeout: int = 180) -> None:
