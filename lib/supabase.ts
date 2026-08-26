@@ -43,7 +43,9 @@ const STORAGE_MS = 120_000;
 const WS_CONNECT_MS = 8_000;
 
 function timeoutFor(url: string) {
-  return /\/storage\/v1\//i.test(url) ? STORAGE_MS : REQUEST_MS;
+  if (/\/storage\/v1\//i.test(url)) return STORAGE_MS;
+  if (/\/functions\/v1\//i.test(url)) return 120_000;
+  return REQUEST_MS;
 }
 
 function raceBudget() {

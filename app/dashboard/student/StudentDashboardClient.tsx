@@ -185,6 +185,20 @@ export default function StudentDashboardClient() {
                     </p>
                   </div>
                 </Link>
+                <Link
+                  href="/dashboard/student/ai-music"
+                  className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-fuchsia-600/20 via-violet-600/15 to-sky-500/10 p-4 ring-1 ring-fuchsia-400/25 transition hover:ring-fuchsia-300/50"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/20">
+                    <Sparkles className="h-5 w-5 text-fuchsia-200" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">ИИ-композитор</p>
+                    <p className="text-xs text-studio-muted">
+                      Авторская минусовка по текстовому описанию
+                    </p>
+                  </div>
+                </Link>
                 <GiftRedeemCard />
                 <section>
                   <h3 className="font-display text-lg font-semibold">

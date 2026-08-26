@@ -38,7 +38,10 @@ export default function StudentNav() {
         const active =
           item.href === "/dashboard/student"
             ? pathname === item.href
-            : pathname.startsWith(item.href);
+            : item.href === "/dashboard/student/ai-tools"
+              ? pathname.startsWith(item.href) ||
+                pathname.startsWith("/dashboard/student/ai-music")
+              : pathname.startsWith(item.href);
 
         return (
           <Link
