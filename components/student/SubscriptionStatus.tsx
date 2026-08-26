@@ -23,7 +23,7 @@ import type { CatLevel } from "@/types";
 import Link from "next/link";
 
 export default function SubscriptionStatus() {
-  const { profile, tier } = useAuth();
+  const { profile, tier, refreshProfile } = useAuth();
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
 
   if (!profile) return null;
@@ -236,6 +236,9 @@ export default function SubscriptionStatus() {
           open
           purpose={payment}
           onClose={() => setPayment(null)}
+          onSuccess={() => {
+            void refreshProfile();
+          }}
         />
       )}
     </>

@@ -103,7 +103,7 @@ const demoExercises: Exercise[] = [
 ];
 
 export default function ExerciseLibrary() {
-  const { user, tier } = useAuth();
+  const { user, tier, refreshProfile } = useAuth();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [bestScores, setBestScores] = useState<Record<string, number>>({});
@@ -358,6 +358,9 @@ export default function ExerciseLibrary() {
           open
           purpose={payment}
           onClose={() => setPayment(null)}
+          onSuccess={() => {
+            void refreshProfile();
+          }}
         />
       )}
     </>

@@ -288,11 +288,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     window.addEventListener("uvs-route-recovered", onRecovered);
     window.addEventListener("uvs-reconnecting", onReconnecting);
+    const onProfileUpdated = () => {
+      void loadProfile(user, true);
+    };
+    window.addEventListener("uvs-profile-updated", onProfileUpdated);
 
     return () => {
       void supabase.removeChannel(channel);
       window.removeEventListener("uvs-route-recovered", onRecovered);
       window.removeEventListener("uvs-reconnecting", onReconnecting);
+      window.removeEventListener("uvs-profile-updated", onProfileUpdated);
     };
   }, [isMockAdmin, loadProfile, user]);
 
