@@ -18,6 +18,8 @@ import {
 } from "@/components/dashboard/CabinetTabLink";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import Link from "next/link";
+import { Sparkles } from "lucide-react";
 
 const TABS = ["home", "notes", "chat", "lessons", "audio"] as const;
 type TabId = (typeof TABS)[number];
@@ -169,6 +171,20 @@ export default function StudentDashboardClient() {
             {activeTab === "home" && (
               <div className="space-y-8">
                 <SubscriptionStatus />
+                <Link
+                  href="/dashboard/student/pocket-studio"
+                  className="flex items-center gap-3 rounded-2xl bg-gradient-to-r from-violet-600/25 via-fuchsia-600/15 to-amber-500/10 p-4 ring-1 ring-violet-400/25 transition hover:ring-violet-300/50"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-500/20">
+                    <Sparkles className="h-5 w-5 text-violet-200" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">Карманная студия</p>
+                    <p className="text-xs text-studio-muted">
+                      Пойте под минус и сведите голос со студийными эффектами
+                    </p>
+                  </div>
+                </Link>
                 <GiftRedeemCard />
                 <section>
                   <h3 className="font-display text-lg font-semibold">
