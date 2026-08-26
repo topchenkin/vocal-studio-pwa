@@ -74,3 +74,13 @@ export function phrasesForExercise<T extends { exercise_id: string }>(
 ): T[] {
   return phrases.filter((phrase) => phrase.exercise_id === exerciseId);
 }
+
+const UNRECOGNIZED_FEEDBACK = "Не удалось распознать";
+
+export function sanitizeAttemptFeedback(text: string | null | undefined): string {
+  const trimmed = text?.trim() ?? "";
+  if (!trimmed) return UNRECOGNIZED_FEEDBACK;
+  const marks = (trimmed.match(/\?/g) ?? []).length;
+  if (marks >= 8 || /\?{6,}/.test(trimmed)) return UNRECOGNIZED_FEEDBACK;
+  return trimmed;
+}

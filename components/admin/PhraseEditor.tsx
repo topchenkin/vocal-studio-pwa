@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Pause, Play, Plus, Scissors, Trash2 } from "lucide-react";
+import PhraseAnchors from "@/components/admin/PhraseAnchors";
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
@@ -24,10 +25,14 @@ export default function PhraseEditor({
   onChanged: () => Promise<void>;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const clipAudioRef = useRef<HTMLAudioElement>(null);
+  const minusAudioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [audioUrl, setAudioUrl] = useState("");
+  const [minusUrl, setMinusUrl] = useState("");
+  const [clipUrls, setClipUrls] = useState<Record<string, string>>({});
   const [duration, setDuration] = useState(Number(job.duration_sec) || 0);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
@@ -54,7 +59,24 @@ export default function PhraseEditor({
         .createSignedUrl(job.vocal_storage_path, 30 * 60);
       setAudioUrl(rewriteSupabaseAssetUrl(data?.signedUrl ?? ""));
     }
-  }, [exercise.id, job.vocal_storage_path]);
+    if (job.instrumental_storage_path) {
+      const { data } = await supabase.storage
+        .from("exercise-analysis")
+        .createSignedUrl(job.instrumental_storage_path, 30 * 60);
+      setMinusUrl(rewriteSupabaseAssetUrl(data?.signedUrl ?? ""));
+    } else {
+      setMinusUrl("");
+    }
+    const nextClips: Record<string, string> = {};
+    for (const phrase of phraseResult.data ?? []) {
+      if (!phrase.vocal_clip_storage_path) continue;
+      const { data } = await supabase.storage
+        .from("exercise-analysis")
+        .createSignedUrl(phrase.vocal_clip_storage_path, 30 * 60);
+      if (data?.signedUrl) nextClips[phrase.id] = rewriteSupabaseAssetUrl(data.signedUrl);
+    }
+    setClipUrls(nextClips);
+  }, [exercise.id, job.instrumental_storage_path, job.vocal_storage_path]);
 
   useEffect(() => {
     void load();
@@ -238,6 +260,8 @@ export default function PhraseEditor({
   const previewRange = async (start: number, end: number, id: string) => {
     const audio = audioRef.current;
     if (!audio) return;
+    clipAudioRef.current?.pause();
+    minusAudioRef.current?.pause();
     if (playingId === id) {
       audio.pause();
       setPlayingId(null);
@@ -249,7 +273,36 @@ export default function PhraseEditor({
   };
 
   const preview = async (phrase: ExercisePhrase) => {
+    const clipUrl = clipUrls[phrase.id];
+    if (clipUrl && clipAudioRef.current) {
+      const clip = clipAudioRef.current;
+      audioRef.current?.pause();
+      minusAudioRef.current?.pause();
+      if (playingId === phrase.id) {
+        clip.pause();
+        setPlayingId(null);
+        return;
+      }
+      clip.src = clipUrl;
+      setPlayingId(phrase.id);
+      await clip.play();
+      return;
+    }
     await previewRange(Number(phrase.start_sec), Number(phrase.end_sec), phrase.id);
+  };
+
+  const playMinus = async () => {
+    const audio = minusAudioRef.current;
+    if (!audio || !minusUrl) return;
+    audioRef.current?.pause();
+    clipAudioRef.current?.pause();
+    if (playingId === "minus") {
+      audio.pause();
+      setPlayingId(null);
+      return;
+    }
+    setPlayingId("minus");
+    await audio.play();
   };
 
   const approve = async () => {
@@ -274,8 +327,8 @@ export default function PhraseEditor({
         <div>
           <h5 className="font-medium">Фразы для интерактивной практики</h5>
           <p className="mt-1 text-xs text-studio-muted">
-            Выделите фрагмент на волне пальцем или мышью — начало и конец подставятся сами.
-            Фразы остаются детьми этого упражнения.
+            Эталон вокала (Demucs) — волна и нарезка по фразам. Ученик в кабинете по-прежнему
+            слушает исходный микс. Минус создаётся автоматически, вокал с фортепиано размечать не нужно.
           </p>
         </div>
         <Scissors className="h-5 w-5 text-studio-accent" />
@@ -293,6 +346,8 @@ export default function PhraseEditor({
         }}
         onEnded={() => setPlayingId(null)}
       />
+      <audio ref={clipAudioRef} onEnded={() => setPlayingId(null)} />
+      {minusUrl && <audio ref={minusAudioRef} src={minusUrl} onEnded={() => setPlayingId(null)} />}
       <div
         ref={waveRef}
         className="relative mt-4 touch-none overflow-hidden rounded-xl"
@@ -395,14 +450,21 @@ export default function PhraseEditor({
             }}
           >
             <Play className="h-4 w-4" />
-            Слушать вокальную дорожку
+            Слушать эталон вокала (Demucs)
+          </Button>
+        )}
+        {minusUrl && (
+          <Button size="sm" variant="ghost" onClick={() => void playMinus()}>
+            {playingId === "minus" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            Слушать минус
           </Button>
         )}
       </div>
 
       <div className="mt-4 space-y-2">
         {phrases.map((phrase, index) => (
-          <div key={phrase.id} className="grid gap-2 rounded-xl bg-studio-card p-3 sm:grid-cols-[1fr_90px_90px_auto]">
+          <div key={phrase.id} className="rounded-xl bg-studio-card p-3">
+            <div className="grid gap-2 sm:grid-cols-[1fr_90px_90px_auto]">
             <input
               value={phrase.title}
               onChange={(event) =>
@@ -450,6 +512,13 @@ export default function PhraseEditor({
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+            </div>
+            {clipUrls[phrase.id] && (
+              <p className="mt-2 text-[11px] text-emerald-200/90">
+                Есть обработанный вокал фразы — кнопка воспроизведения играет эталон вокала (Demucs).
+              </p>
+            )}
+            <PhraseAnchors exerciseId={exercise.id} phrase={phrase} />
           </div>
         ))}
       </div>

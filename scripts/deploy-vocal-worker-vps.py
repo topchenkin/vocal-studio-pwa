@@ -12,6 +12,7 @@ WORKER = ROOT / "deploy" / "vocal-worker"
 MIGRATION = ROOT / "supabase-migrations" / "2026-08-25-vocal-exercise-scoring.sql"
 PROGRESS_SQL = ROOT / "supabase-migrations" / "2026-08-25-exercise-progress-and-report.sql"
 UNCAP_SQL = ROOT / "supabase-migrations" / "2026-08-25-exercise-phrases-uncap.sql"
+STEMS_SQL = ROOT / "supabase-migrations" / "2026-08-26-vocal-stems-anchors-student-features.sql"
 INSTALL_VENV = r"""
 set -eu
 mkdir -p /var/cache/vocal-worker/numba /var/cache/vocal-worker/mpl
@@ -127,6 +128,7 @@ def main() -> None:
             sftp.put(str(MIGRATION), f"/opt/uvs-migrate/{MIGRATION.name}")
             sftp.put(str(PROGRESS_SQL), f"/opt/uvs-migrate/{PROGRESS_SQL.name}")
             sftp.put(str(UNCAP_SQL), f"/opt/uvs-migrate/{UNCAP_SQL.name}")
+            sftp.put(str(STEMS_SQL), f"/opt/uvs-migrate/{STEMS_SQL.name}")
             sftp.put(
                 str(WORKER / "vocal-worker.service"),
                 "/etc/systemd/system/vocal-worker.service",
@@ -149,6 +151,11 @@ def main() -> None:
             client,
             f"docker exec -i supabase-db psql -U postgres -d postgres "
             f"-v ON_ERROR_STOP=1 < /opt/uvs-migrate/{UNCAP_SQL.name}",
+        )
+        run(
+            client,
+            f"docker exec -i supabase-db psql -U postgres -d postgres "
+            f"-v ON_ERROR_STOP=1 < /opt/uvs-migrate/{STEMS_SQL.name}",
         )
         run(client, "apt-get update -qq && apt-get install -y -qq python3-venv ffmpeg libsndfile1")
         run(client, INSTALL_VENV, timeout=1200)

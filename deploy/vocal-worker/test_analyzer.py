@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from analyzer import score_features
+from analyzer import score_features, score_with_anchors
 
 
 def features(
@@ -142,26 +142,77 @@ class VocalScoringTests(unittest.TestCase):
     def test_drone_is_not_scored(self) -> None:
         result = score_features(self.reference, features([60] * 24, coverage=0.9))
         self.assertFalse(result["evaluable"])
+        self.assertRegex(result["reason"], r"[\u0410-\u044f\u0401\u0451]")
+        self.assertNotIn("????", result["reason"])
 
-    def test_hum_narrow_chroma_is_not_scored(self) -> None:
-        hum = features([60.1, 60.0, 59.8, 60.2] * 6, coverage=0.88)
-        result = score_features(self.reference, hum)
-        self.assertFalse(result["evaluable"])
+    def test_humming_similar_melody_is_evaluable(self) -> None:
+        hummed = features(
+            [value + (0.18 if index % 2 else -0.12) for index, value in enumerate(MELODY)],
+            coverage=0.86,
+        )
+        result = score_features(self.reference, hummed)
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["overall"], 70)
+        self.assertRegex(result["feedback"], r"[\u0410-\u044f\u0401\u0451]")
+        self.assertNotIn("?", result["feedback"])
+
+    def test_sparse_hummed_outline_is_scored(self) -> None:
+        outline = []
+        for value in MELODY:
+            outline.extend([value, value, None])
+        result = score_features(self.reference, features(outline, coverage=0.62, duration=7.2))
+        self.assertTrue(result["evaluable"], result)
+        self.assertIsInstance(result["overall"], int)
 
     def test_abort_mid_phrase_is_not_scored(self) -> None:
         abort = features(MELODY[:4] + [None] * 20, coverage=0.14)
         result = score_features(self.reference, abort)
         self.assertFalse(result["evaluable"])
 
-    def test_chance_contour_is_not_scored(self) -> None:
+    def test_chance_contour_gets_numeric_low_score(self) -> None:
         reversed_take = features(list(reversed(MELODY)), coverage=0.85)
-        self.assertFalse(score_features(self.reference, reversed_take)["evaluable"])
+        reversed_result = score_features(self.reference, reversed_take)
+        self.assertTrue(reversed_result["evaluable"], reversed_result)
+        self.assertLess(reversed_result["overall"], 55)
         rng = np.random.default_rng(7)
         random_take = features(
             [float(48 + rng.integers(0, 24)) for _ in MELODY],
             coverage=0.85,
         )
-        self.assertFalse(score_features(self.reference, random_take)["evaluable"])
+        random_result = score_features(self.reference, random_take)
+        self.assertTrue(random_result["evaluable"], random_result)
+        self.assertLess(random_result["overall"], 60)
+
+    def test_russian_strings_are_cyrillic_not_question_marks(self) -> None:
+        from analyzer import UNRECOGNIZED
+
+        source = Path(__file__).with_name("analyzer.py").read_text(encoding="utf-8")
+        self.assertIn("\\u041d\\u0435", source)
+        self.assertNotIn("?? ???????", source)
+        self.assertIn("\u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u0442\u044c", UNRECOGNIZED)
+        self.assertRegex(UNRECOGNIZED, r"[\u0410-\u044f\u0401\u0451]")
+        scored = score_features(self.reference, features(list(MELODY)))
+        self.assertTrue(scored["evaluable"], scored)
+        self.assertRegex(scored["feedback"], r"[\u0410-\u044f\u0401\u0451]")
+        self.assertNotIn("????", scored["feedback"])
+        rejected = score_features(self.reference, features([None] * 24, coverage=0.0, rms_db=-80))
+        self.assertFalse(rejected["evaluable"])
+        self.assertRegex(rejected["reason"], r"[\u0410-\u044f\u0401\u0451]")
+        self.assertLess(rejected["reason"].count("?"), 3)
+
+    def test_anchor_blend_pulls_toward_matching_band(self) -> None:
+        high = features(list(MELODY))
+        low = features(list(reversed(MELODY)))
+        matched = score_with_anchors(self.reference, features(list(MELODY)), {"high": high, "low": low})
+        self.assertTrue(matched["evaluable"], matched)
+        self.assertGreaterEqual(matched["overall"], 80)
+        mismatched = score_with_anchors(
+            self.reference,
+            features(list(reversed(MELODY))),
+            {"high": high, "low": low},
+        )
+        self.assertTrue(mismatched["evaluable"], mismatched)
+        self.assertLess(mismatched["overall"], matched["overall"])
 
     def test_piano_rests_are_not_melody_targets(self) -> None:
         rest = [None] * 8

@@ -121,6 +121,7 @@ export interface ExerciseAnalysisJob {
   error: string | null;
   analyzer_version: string;
   vocal_storage_path: string | null;
+  instrumental_storage_path: string | null;
   duration_sec: number | null;
   attempts: number;
   locked_at: string | null;
@@ -137,6 +138,40 @@ export interface ExercisePhrase {
   start_sec: number;
   end_sec: number;
   feature_status: "pending" | "ready" | "failed";
+  vocal_clip_storage_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PhrasePitchFeatures {
+  [key: string]: unknown;
+  times?: number[];
+  pitch_midi?: Array<number | null>;
+  confidence?: number[];
+  duration?: number;
+}
+
+export interface ExercisePhraseFeatures {
+  [key: string]: unknown;
+  phrase_id: string;
+  analyzer_version: string;
+  features: PhrasePitchFeatures;
+  created_at: string;
+}
+
+export type PhraseAnchorBand = "high" | "mid" | "low";
+
+export interface ExercisePhraseAnchor {
+  [key: string]: unknown;
+  id: string;
+  phrase_id: string;
+  band: PhraseAnchorBand;
+  storage_path: string;
+  feature_status: "pending" | "extracting" | "ready" | "failed";
+  features: PhrasePitchFeatures | null;
+  analyzer_version: string | null;
+  error: string | null;
+  locked_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -434,6 +469,7 @@ export interface Database {
           error?: string | null;
           analyzer_version?: string;
           vocal_storage_path?: string | null;
+          instrumental_storage_path?: string | null;
           duration_sec?: number | null;
           source_sha256?: string | null;
           attempts?: number;
@@ -454,10 +490,39 @@ export interface Database {
           start_sec: number;
           end_sec: number;
           feature_status?: ExercisePhrase["feature_status"];
+          vocal_clip_storage_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<ExercisePhrase>;
+        Relationships: [];
+      };
+      exercise_phrase_features: {
+        Row: ExercisePhraseFeatures;
+        Insert: {
+          phrase_id: string;
+          analyzer_version: string;
+          features: PhrasePitchFeatures;
+          created_at?: string;
+        };
+        Update: Partial<ExercisePhraseFeatures>;
+        Relationships: [];
+      };
+      exercise_phrase_anchors: {
+        Row: ExercisePhraseAnchor;
+        Insert: {
+          id?: string;
+          phrase_id: string;
+          band: PhraseAnchorBand;
+          storage_path: string;
+          feature_status?: ExercisePhraseAnchor["feature_status"];
+          features?: PhrasePitchFeatures | null;
+          analyzer_version?: string | null;
+          error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<ExercisePhraseAnchor>;
         Relationships: [];
       };
       vocal_phrase_progress: {
@@ -916,6 +981,10 @@ export interface Database {
       discard_vocal_attempt: {
         Args: { p_attempt_id: string };
         Returns: undefined;
+      };
+      claim_exercise_phrase_anchor: {
+        Args: Record<string, never>;
+        Returns: ExercisePhraseAnchor | null;
       };
     };
     Enums: { [_ in never]: never };

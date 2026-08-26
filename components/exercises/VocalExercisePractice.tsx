@@ -21,10 +21,12 @@ import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@
 import { supabase } from "@/lib/supabase";
 import {
   EXERCISE_ATTEMPT_MAX_SEC,
+  sanitizeAttemptFeedback,
   teacherReaction,
   weakestDimension,
 } from "@/lib/vocal-exercise";
-import type { Exercise, ExercisePhrase, VocalExerciseAttempt } from "@/types";
+import type { Exercise, ExercisePhrase, PhrasePitchFeatures, VocalExerciseAttempt } from "@/types";
+import LiveMelodyGuide from "@/components/exercises/LiveMelodyGuide";
 
 type PracticeStage =
   | "idle"
@@ -62,6 +64,9 @@ export default function VocalExercisePractice({
   const [sharing, setSharing] = useState(false);
   const [bestScores, setBestScores] = useState<Record<string, number>>({});
   const [guideOn, setGuideOn] = useState(false);
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [phraseFeatures, setPhraseFeatures] = useState<PhrasePitchFeatures | null>(null);
+  const [playheadSec, setPlayheadSec] = useState(0);
 
   stageRef.current = stage;
   selectedRef.current = selected;
@@ -75,6 +80,31 @@ export default function VocalExercisePractice({
     },
     []
   );
+
+  useEffect(() => {
+    if (!selected?.id || selected.feature_status !== "ready") {
+      setPhraseFeatures(null);
+      return;
+    }
+    let mounted = true;
+    const loadFeatures = async () => {
+      const { data, error: loadError } = await supabase
+        .from("exercise_phrase_features")
+        .select("features")
+        .eq("phrase_id", selected.id)
+        .maybeSingle();
+      if (!mounted) return;
+      if (loadError) {
+        setPhraseFeatures(null);
+        return;
+      }
+      setPhraseFeatures((data?.features as PhrasePitchFeatures | null) ?? null);
+    };
+    void loadFeatures();
+    return () => {
+      mounted = false;
+    };
+  }, [selected?.id, selected?.feature_status]);
 
   useEffect(() => {
     if (!user || phrases.length === 0) return;
@@ -113,6 +143,7 @@ export default function VocalExercisePractice({
     captureRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    setLiveStream(null);
     stopRecordingRef.current?.();
     stopRecordingRef.current = null;
   };
@@ -180,6 +211,8 @@ export default function VocalExercisePractice({
     try {
       const stream = await getSingingMicStream();
       streamRef.current = stream;
+      setLiveStream(stream);
+      setPlayheadSec(0);
       if (countIn) {
         setPracticeStage("counting");
         for (const value of [3, 2, 1]) {
@@ -211,6 +244,7 @@ export default function VocalExercisePractice({
       captureRef.current = null;
       stream.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      setLiveStream(null);
       const blob = audioBufferToWavBlob(buffer);
       setPracticeStage("uploading");
       const storagePath = `${user.id}/${crypto.randomUUID()}.wav`;
@@ -344,6 +378,7 @@ export default function VocalExercisePractice({
         onTimeUpdate={(event) => {
           const phrase = selectedRef.current;
           if (!phrase) return;
+          setPlayheadSec(Math.max(0, event.currentTarget.currentTime - Number(phrase.start_sec)));
           if (event.currentTarget.currentTime >= Number(phrase.end_sec)) {
             event.currentTarget.pause();
             if (stageRef.current === "listening") setPracticeStage("idle");
@@ -365,7 +400,7 @@ export default function VocalExercisePractice({
             </span>
           </div>
           <p className="mt-1 text-xs text-studio-muted">
-            Слушайте фразу и пойте вместе с ней — как караоке. Можно записывать во время воспроизведения.
+            Слушайте фразу и пойте вместе с ней — как караоке. Во время записи виден контур эталона и ваш голос.
           </p>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
             <div
@@ -387,6 +422,7 @@ export default function VocalExercisePractice({
               onClick={() => {
                 setSelected(phrase);
                 setAttempt(null);
+                setPlayheadSec(0);
                 setPracticeStage("idle");
               }}
               className={`shrink-0 rounded-xl px-3 py-2 text-xs ring-1 ${
@@ -448,6 +484,19 @@ export default function VocalExercisePractice({
           <p className="mt-1 font-display text-5xl font-semibold">{count}</p>
         </div>
       )}
+      {(stage === "idle" ||
+        stage === "listening" ||
+        stage === "counting" ||
+        stage === "recording" ||
+        stage === "failed") &&
+        (phraseFeatures || liveStream) && (
+        <LiveMelodyGuide
+          features={phraseFeatures}
+          stream={liveStream}
+          active={stage === "counting" || stage === "recording"}
+          playheadSec={playheadSec}
+        />
+      )}
       {stage === "recording" && (
         <p className="mt-3 animate-pulse text-center text-sm text-red-300">
           ● Идёт запись… фонограмма играет вместе с вами
@@ -462,7 +511,7 @@ export default function VocalExercisePractice({
       {attempt?.status === "rejected" && (
         <div className="mt-4 rounded-2xl bg-amber-500/10 p-4 ring-1 ring-amber-400/25">
           <h5 className="font-medium text-amber-100">Не удалось оценить</h5>
-          <p className="mt-1 text-sm text-studio-muted">{attempt.feedback}</p>
+          <p className="mt-1 text-sm text-studio-muted">{sanitizeAttemptFeedback(attempt.feedback)}</p>
           <Button className="mt-3" fullWidth variant="secondary" onClick={() => void discard()}>
             <RotateCcw className="h-4 w-4" />
             Повторить

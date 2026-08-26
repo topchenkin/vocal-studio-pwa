@@ -6,6 +6,7 @@ import {
   EXERCISE_PHRASE_MAX_SEC,
   nextPhraseSortOrder,
   phrasesForExercise,
+  sanitizeAttemptFeedback,
   teacherReaction,
 } from "../lib/vocal-exercise";
 import {
@@ -34,6 +35,9 @@ assert.equal(teacherReaction(79, "rhythm").mood, "satisfied");
 assert.equal(teacherReaction(50, "completeness").avatar, "/teacher-score-medium.webp");
 assert.equal(teacherReaction(49, "intonation").mood, "supportive");
 assert.equal(teacherReaction(0, "rhythm").avatar, "/teacher-score-low.webp");
+assert.equal(sanitizeAttemptFeedback("??????????????????????"), "Не удалось распознать");
+assert.equal(sanitizeAttemptFeedback("Не удалось распознать вокальную мелодию."), "Не удалось распознать вокальную мелодию.");
+assert.equal(sanitizeAttemptFeedback(null), "Не удалось распознать");
 
 const migration = readFileSync(
   path.join(process.cwd(), "supabase-migrations", "2026-08-25-vocal-exercise-scoring.sql"),
@@ -162,5 +166,28 @@ for (const expected of [
   assert.ok(uncapSql.includes(expected), `uncap migration is missing: ${expected}`);
 }
 assert.ok(!uncapSql.includes("between 1 and 45"));
+
+const stemsSql = readFileSync(
+  path.join(process.cwd(), "supabase-migrations", "2026-08-26-vocal-stems-anchors-student-features.sql"),
+  "utf8"
+);
+for (const expected of [
+  "instrumental_storage_path",
+  "vocal_clip_storage_path",
+  "exercise_phrase_anchors",
+  "phrase_features_student_read",
+  "claim_exercise_phrase_anchor",
+]) {
+  assert.ok(stemsSql.includes(expected), `stems migration is missing: ${expected}`);
+}
+
+const guide = readFileSync(
+  path.join(process.cwd(), "components", "exercises", "LiveMelodyGuide.tsx"),
+  "utf8"
+);
+assert.ok(guide.includes("createYinDetector"));
+assert.ok(practice.includes("LiveMelodyGuide"));
+assert.ok(practice.includes("sanitizeAttemptFeedback"));
+assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
 
 console.log("vocal exercise UI, progress, notifications, accept, TLS: ok");

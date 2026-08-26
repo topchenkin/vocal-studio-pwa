@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Feature extraction and timbre-independent vocal phrase scoring.
 
 MIT-compatible runtime stack: librosa (ISC), NumPy (BSD), SciPy (BSD).
@@ -15,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "vocal-score-3"
+ANALYZER_VERSION = "vocal-score-4"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
@@ -124,7 +125,7 @@ def extract_features(
     )
     times = librosa.times_like(f0, sr=sample_rate, hop_length=hop)
     probability = np.nan_to_num(voiced_probability, nan=0.0)
-    voicing_min = 0.32 if yin_fill else 0.48
+    voicing_min = 0.26 if yin_fill else 0.48
     voiced = (
         np.asarray(voiced_flag, dtype=bool)
         & np.isfinite(f0)
@@ -411,7 +412,59 @@ def _voiced_midis(features: dict[str, Any]) -> np.ndarray:
     )
 
 
-UNRECOGNIZED = "?? ??????? ?????????? ?????????? ?????. ?????????? ? ????? ????? ?????."
+UNRECOGNIZED = (
+    "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u0442\u044c "
+    "\u0432\u043e\u043a\u0430\u043b\u044c\u043d\u0443\u044e \u043c\u0435\u043b\u043e\u0434\u0438\u044e. "
+    "\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437 \u0441\u043f\u0435\u0442\u044c \u0444\u0440\u0430\u0437\u0443."
+)
+TOO_QUIET = (
+    "\u0421\u043b\u0438\u0448\u043a\u043e\u043c \u0442\u0438\u0445\u043e\u0435 \u0430\u0443\u0434\u0438\u043e. "
+    "\u041f\u0440\u0438\u0434\u0432\u0438\u043d\u044c\u0442\u0435\u0441\u044c \u0431\u043b\u0438\u0436\u0435 \u043a \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0443 "
+    "\u0438\u043b\u0438 \u0441\u043f\u043e\u0439\u0442\u0435 \u0433\u0440\u043e\u043c\u0447\u0435."
+)
+CLIPPED = (
+    "\u0417\u0430\u043f\u0438\u0441\u044c \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0436\u0435\u043d\u0430. "
+    "\u0423\u043c\u0435\u043d\u044c\u0448\u0438\u0442\u0435 \u0433\u0440\u043e\u043c\u043a\u043e\u0441\u0442\u044c \u043d\u0430 \u043c\u0438\u043a\u0440\u043e\u0444\u043e\u043d\u0435."
+)
+NOISY = (
+    "\u0412 \u0437\u0430\u043f\u0438\u0441\u0438 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u043d\u043e\u0433\u043e \u0448\u0443\u043c\u0430 "
+    "\u0438\u043b\u0438 \u043f\u043e\u0441\u0442\u043e\u0440\u043e\u043d\u043d\u0438\u0445 \u0437\u0432\u0443\u043a\u043e\u0432."
+)
+WEAK_REFERENCE = (
+    "\u0412 \u044d\u0442\u0430\u043b\u043e\u043d\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u0435 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u0430\u043b\u043e \u043d\u043e\u0442, "
+    "\u0447\u0442\u043e\u0431\u044b \u043e\u0446\u0435\u043d\u0438\u0432\u0430\u0442\u044c \u043c\u0435\u043b\u043e\u0434\u0438\u044e."
+)
+DRONE = (
+    "\u042d\u0442\u043e \u043f\u043e\u0445\u043e\u0436\u0435 \u043d\u0430 \u043e\u0434\u043d\u0443 \u043d\u043e\u0442\u0443, "
+    "\u0430 \u0432 \u044d\u0442\u0430\u043b\u043e\u043d\u0435 \u043c\u0435\u043b\u043e\u0434\u0438\u044f \u0434\u0432\u0438\u0436\u0435\u0442\u0441\u044f."
+)
+ABORTED = (
+    "\u0424\u0440\u0430\u0437\u0430 \u043e\u0431\u043e\u0440\u0432\u0430\u043d\u0430 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0440\u0430\u043d\u043e. "
+    "\u0414\u043e\u043f\u043e\u0439\u0442\u0435 \u0435\u0451 \u0434\u043e \u043a\u043e\u043d\u0446\u0430."
+)
+FEEDBACK = {
+    "intonation": (
+        "\u0414\u0435\u0440\u0436\u0438\u0442\u0435 \u043d\u043e\u0442\u044b \u0431\u043b\u0438\u0436\u0435 \u043a \u043a\u043e\u043d\u0442\u0443\u0440\u0443 "
+        "\u0438 \u0434\u0432\u0438\u0433\u0430\u0439\u0442\u0435\u0441\u044c \u0432\u043c\u0435\u0441\u0442\u0435 \u0441\u043e \u0444\u0440\u0430\u0437\u043e\u0439."
+    ),
+    "rhythm": (
+        "\u041f\u043e\u0439\u043c\u0430\u0439\u0442\u0435 \u0442\u043e\u0447\u043d\u0435\u0435 \u0432\u0441\u0442\u0443\u043f\u043b\u0435\u043d\u0438\u044f "
+        "\u043f\u0435\u0432\u0447\u0435\u0441\u043a\u0438\u0445 \u043d\u043e\u0442 \u043f\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438."
+    ),
+    "completeness": (
+        "\u0414\u043e\u043f\u043e\u0439\u0442\u0435 \u0432\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 \u043a\u0443\u0441\u043a\u0438 "
+        "\u0438 \u043f\u043e\u043c\u043e\u043b\u0447\u0438\u0442\u0435 \u043d\u0430 \u043f\u0430\u0443\u0437\u0430\u0445 \u0444\u043e\u0440\u0442\u0435\u043f\u0438\u0430\u043d\u043e."
+    ),
+}
+BAND_CENTER = {"high": 90.0, "mid": 65.0, "low": 28.0}
+
+
+def _unevaluable(reason: str, **confidence: Any) -> dict[str, Any]:
+    return {
+        "evaluable": False,
+        "reason": reason,
+        "confidence": confidence,
+    }
 
 
 def _garbage_reason(
@@ -420,27 +473,25 @@ def _garbage_reason(
     ref_notes: list[dict[str, float]],
     stu_notes: list[dict[str, float]],
 ) -> str | None:
+    """Reject only silence-like aborts and a true drone against a moving melody.
+
+    Humming, sparse outlines and off-contour singing must still receive a score.
+    """
     if len(ref_notes) < 3:
-        return "? ????????? ????? ??????? ???? ?????? ????????????? ??? ??????."
-    if len(stu_notes) < 3:
-        return UNRECOGNIZED
+        return WEAK_REFERENCE
     ref_voiced = sum(note["dur"] for note in ref_notes)
     stu_voiced = sum(note["dur"] for note in stu_notes)
     if stu_voiced < 0.28 * max(0.4, ref_voiced):
-        return UNRECOGNIZED
+        return ABORTED
     ref_m = _voiced_midis(reference)
     stu_m = _voiced_midis(student)
-    ref_chroma = {int(round(value)) % 12 for value in ref_m} if ref_m.size else set()
-    stu_chroma = {int(round(value)) % 12 for value in stu_m} if stu_m.size else set()
-    if len(ref_chroma) >= 4 and len(stu_chroma) <= 2:
-        return UNRECOGNIZED
     if (
         ref_m.size >= 8
         and float(np.ptp(ref_m)) >= 4.0
         and stu_m.size >= 8
         and float(np.ptp(stu_m)) < 1.6
     ):
-        return UNRECOGNIZED
+        return DRONE
     return None
 
 
@@ -512,34 +563,49 @@ def _shape_corr(ref_notes: list[dict[str, float]], stu_notes: list[dict[str, flo
 
 
 def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[str, Any]:
-    """Score sung notes vs teacher vocal melody. Loudness and manner are ignored."""
+    """Score sung or hummed notes vs teacher vocal melody. Loudness and manner are ignored."""
     coverage = float(student.get("voiced_coverage", 0))
     rms_db = float(student.get("rms_db", -120))
     clipping = float(student.get("clipping_ratio", 0))
     flatness = float(student.get("spectral_flatness", 0))
     duration = float(student.get("duration", 0))
     voiced_seconds = coverage * max(0.0, duration)
-    gate_reason: str | None = None
     if rms_db < -48:
-        gate_reason = "?????? ??????? ?????. ????????? ???????? ????? ? ?????? ??? ???."
-    elif voiced_seconds < 0.35 and coverage < 0.06:
-        gate_reason = UNRECOGNIZED
-    elif clipping > 0.015:
-        gate_reason = "?????? ???????????. ???????????? ??????? ?? ?????????."
-    elif flatness > 0.55 and coverage < 0.3:
-        gate_reason = "? ?????? ??????? ????? ???? ??? ??????? ??????."
-    if gate_reason:
-        return {
-            "evaluable": False,
-            "reason": gate_reason,
-            "confidence": {
-                "voiced_coverage": coverage,
-                "voiced_seconds": round(voiced_seconds, 3),
-                "rms_db": rms_db,
-                "clipping_ratio": clipping,
-                "spectral_flatness": flatness,
-            },
-        }
+        return _unevaluable(
+            TOO_QUIET,
+            voiced_coverage=coverage,
+            voiced_seconds=round(voiced_seconds, 3),
+            rms_db=rms_db,
+            clipping_ratio=clipping,
+            spectral_flatness=flatness,
+        )
+    if voiced_seconds < 0.35 and coverage < 0.06:
+        return _unevaluable(
+            UNRECOGNIZED,
+            voiced_coverage=coverage,
+            voiced_seconds=round(voiced_seconds, 3),
+            rms_db=rms_db,
+            clipping_ratio=clipping,
+            spectral_flatness=flatness,
+        )
+    if clipping > 0.015:
+        return _unevaluable(
+            CLIPPED,
+            voiced_coverage=coverage,
+            voiced_seconds=round(voiced_seconds, 3),
+            rms_db=rms_db,
+            clipping_ratio=clipping,
+            spectral_flatness=flatness,
+        )
+    if flatness > 0.55 and coverage < 0.3:
+        return _unevaluable(
+            NOISY,
+            voiced_coverage=coverage,
+            voiced_seconds=round(voiced_seconds, 3),
+            rms_db=rms_db,
+            clipping_ratio=clipping,
+            spectral_flatness=flatness,
+        )
 
     rests = _rest_intervals(reference)
     ref_notes = _note_events(reference)
@@ -547,75 +613,55 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
     stu_notes = _melody_notes(stu_all, rests)
     garbage = _garbage_reason(reference, student, ref_notes, stu_notes)
     if garbage:
-        return {
-            "evaluable": False,
-            "reason": garbage,
-            "confidence": {
-                "voiced_coverage": coverage,
-                "ref_notes": len(ref_notes),
-                "stu_notes": len(stu_notes),
-            },
-        }
+        return _unevaluable(
+            garbage,
+            voiced_coverage=coverage,
+            ref_notes=len(ref_notes),
+            stu_notes=len(stu_notes),
+        )
 
     pairs = _dtw_note_pairs(ref_notes, stu_notes)
     matched = {i for i, _ in pairs}
-    if len(pairs) < min(3, len(ref_notes)) or len(matched) / max(1, len(ref_notes)) < 0.32:
-        return {
-            "evaluable": False,
-            "reason": UNRECOGNIZED,
-            "confidence": {
-                "aligned_notes": len(pairs),
-                "ref_notes": len(ref_notes),
-                "voiced_coverage": coverage,
-            },
-        }
+    rest_score = _rest_silence_score(rests, stu_all)
+    coverage_notes = min(1.0, len(matched) / max(1, len(ref_notes)))
+    global_shift = 0.0
+    cents_error = np.asarray([0.0])
+    paired_corr: float | None = None
 
-    differences = np.asarray(
-        [stu_notes[j]["midi"] - ref_notes[i]["midi"] for i, j in pairs],
-        dtype=float,
-    )
-    global_shift = _best_global_shift(differences)
-    qualities = [
-        _note_quality(float(stu_notes[j]["midi"] - ref_notes[i]["midi"] - global_shift))
-        for i, j in pairs
-    ]
-    melody = 100.0 * float(np.mean(qualities))
-
-    paired_ref = np.asarray([ref_notes[i]["midi"] for i, _ in pairs], dtype=float)
-    paired_stu = np.asarray(
-        [stu_notes[j]["midi"] - global_shift for _, j in pairs],
-        dtype=float,
-    )
-    if len(pairs) >= 4 and float(np.std(_wrap_octaves(paired_ref - np.median(paired_ref)))) > 0.35:
-        paired_corr = float(
-            np.corrcoef(
-                _wrap_octaves(paired_ref - np.median(paired_ref)),
-                _wrap_octaves(paired_stu - np.median(paired_ref)),
-            )[0, 1]
+    if pairs:
+        differences = np.asarray(
+            [stu_notes[j]["midi"] - ref_notes[i]["midi"] for i, j in pairs],
+            dtype=float,
         )
-        if not np.isfinite(paired_corr) or paired_corr < 0.18:
-            return {
-                "evaluable": False,
-                "reason": UNRECOGNIZED,
-                "confidence": {
-                    "contour_corr": None if not np.isfinite(paired_corr) else round(paired_corr, 3),
-                    "voiced_coverage": coverage,
-                },
-            }
+        global_shift = _best_global_shift(differences)
+        qualities = [
+            _note_quality(float(stu_notes[j]["midi"] - ref_notes[i]["midi"] - global_shift))
+            for i, j in pairs
+        ]
+        melody = 100.0 * float(np.mean(qualities))
+        paired_ref = np.asarray([ref_notes[i]["midi"] for i, _ in pairs], dtype=float)
+        paired_stu = np.asarray(
+            [stu_notes[j]["midi"] - global_shift for _, j in pairs],
+            dtype=float,
+        )
+        if len(pairs) >= 4 and float(np.std(_wrap_octaves(paired_ref - np.median(paired_ref)))) > 0.35:
+            paired_corr = float(
+                np.corrcoef(
+                    _wrap_octaves(paired_ref - np.median(paired_ref)),
+                    _wrap_octaves(paired_stu - np.median(paired_ref)),
+                )[0, 1]
+            )
+            if not np.isfinite(paired_corr) or paired_corr < 0.18:
+                melody = min(melody, 38.0 * max(0.0, (float(paired_corr or 0.0) + 1.0) / 1.18))
+        cents_error = np.abs(_wrap_octaves(differences - global_shift) * 100)
+    else:
+        melody = 18.0
 
-    ref_span = max(0.2, float(ref_notes[-1]["t"] - ref_notes[0]["t"]))
-    stu_span = max(0.2, float(stu_notes[-1]["t"] - stu_notes[0]["t"]))
-    if stu_span >= 0.8 * ref_span:
-        shape = _shape_corr(ref_notes, stu_notes)
-        if shape < 0.22:
-            return {
-                "evaluable": False,
-                "reason": UNRECOGNIZED,
-                "confidence": {
-                    "contour_corr": round(shape, 3),
-                    "voiced_coverage": coverage,
-                },
-            }
+    shape = _shape_corr(ref_notes, stu_notes)
+    if len(ref_notes) >= 4 and len(stu_notes) >= 4 and shape < 0.22:
+        melody = min(melody, 38.0 * max(0.0, (shape + 1.0) / 1.22))
+    if len(pairs) < min(3, len(ref_notes)) or coverage_notes < 0.32:
+        melody = min(melody, 42.0)
 
     rhythm = _rhythm_from_notes(
         ref_notes,
@@ -624,8 +670,6 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         max(0.1, float(reference.get("duration", 0))),
         max(0.1, duration),
     )
-    coverage_notes = min(1.0, len(matched) / max(1, len(ref_notes)))
-    rest_score = _rest_silence_score(rests, stu_all)
     completeness = 100.0 * (0.7 * coverage_notes + 0.3 * rest_score)
 
     melody_i = int(round(np.clip(melody, 0, 100)))
@@ -638,12 +682,6 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         ("completeness", completeness_i),
         key=lambda item: item[1],
     )[0]
-    feedback = {
-        "intonation": "???????? ?????? ? ???? ??????? ? ????????? ? ?????? ?? ?????.",
-        "rhythm": "?????????? ?????? ????????? ?????????? ????????? ???.",
-        "completeness": "???????? ????????? ????? ? ????????? ?? ??????????.",
-    }[weakest]
-    cents_error = np.abs(_wrap_octaves(differences - global_shift) * 100)
     return {
         "evaluable": True,
         "overall": overall,
@@ -651,11 +689,66 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         "rhythm": rhythm_i,
         "completeness": completeness_i,
         "global_shift_semitones": int(np.rint(global_shift)),
-        "feedback": feedback,
+        "feedback": FEEDBACK[weakest],
         "confidence": {
             "aligned_notes": len(pairs),
             "voiced_coverage": coverage,
             "median_residual_cents": round(float(np.median(cents_error)), 1),
             "rest_silence": round(rest_score, 3),
+            "contour_corr": None if not np.isfinite(shape) else round(float(shape), 3),
+            "paired_corr": None if paired_corr is None or not np.isfinite(paired_corr) else round(float(paired_corr), 3),
         },
     }
+
+
+def _softmax(values: np.ndarray, temperature: float = 12.0) -> np.ndarray:
+    scaled = np.asarray(values, dtype=float) / max(1e-6, temperature)
+    scaled = scaled - float(np.max(scaled))
+    exp = np.exp(scaled)
+    total = float(np.sum(exp))
+    if total <= 0:
+        return np.full(len(values), 1.0 / max(1, len(values)))
+    return exp / total
+
+
+def _anchor_interpolated(usable: dict[str, float]) -> float:
+    bands = [band for band in ("high", "mid", "low") if band in usable]
+    if not bands:
+        return 50.0
+    sims = np.asarray([usable[band] for band in bands], dtype=float)
+    if len(bands) == 1:
+        peak = float(np.clip(sims[0], 0, 100)) / 100.0
+        return float(BAND_CENTER[bands[0]]) * peak + 50.0 * (1.0 - peak)
+    weights = _softmax(sims)
+    return float(sum(float(weights[index]) * BAND_CENTER[band] for index, band in enumerate(bands)))
+
+
+def score_with_anchors(
+    reference: dict[str, Any],
+    student: dict[str, Any],
+    anchors: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Blend stem-vs-student score with optional high/mid/low few-shot examples."""
+    stem = score_features(reference, student)
+    usable: dict[str, float] = {}
+    for band, features in (anchors or {}).items():
+        if band not in BAND_CENTER or not isinstance(features, dict):
+            continue
+        compared = score_features(features, student)
+        if compared.get("evaluable"):
+            usable[band] = float(compared["overall"])
+        else:
+            shape = _shape_corr(_note_events(features), _note_events(student))
+            usable[band] = float(np.clip(50.0 * (shape + 1.0), 0, 100))
+    if not usable or not stem.get("evaluable"):
+        return stem
+    interpolated = _anchor_interpolated(usable)
+    blended = int(round(np.clip(0.5 * float(stem["overall"]) + 0.5 * interpolated, 0, 100)))
+    result = dict(stem)
+    result["overall"] = blended
+    result["confidence"] = {
+        **dict(stem.get("confidence") or {}),
+        "anchor_score": round(interpolated, 1),
+        "anchor_sims": {band: round(score, 1) for band, score in usable.items()},
+    }
+    return result
