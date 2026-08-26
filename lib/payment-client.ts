@@ -45,13 +45,15 @@ export async function startPayment(purpose: PaymentPurpose) {
       ? { type: "debt" }
       : purpose.type === "abonement"
         ? { type: "abonement", lessonsCount: purpose.lessonsCount }
-        : purpose.type === "test_payment"
-          ? { type: "test_payment" }
-          : {
-              type: purpose.type,
-              tier: purpose.tier,
-              months: purpose.months,
-            };
+        : purpose.type === "lesson"
+          ? { type: "lesson", lessonId: purpose.lessonId }
+          : purpose.type === "test_payment"
+            ? { type: "test_payment" }
+            : {
+                type: purpose.type,
+                tier: purpose.tier,
+                months: purpose.months,
+              };
 
   const payload = await postPayment("/init", body);
   window.location.assign(payload.paymentUrl!);

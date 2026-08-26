@@ -302,6 +302,28 @@ async function grantDueLessonXp() {
   }
 }
 
+async function notifyUnpaidEndedLessons() {
+  const response = await sb("/rest/v1/rpc/notify_unpaid_ended_lessons", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "unpaid lesson notify failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("unpaid lesson reminders", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
 async function tick() {
   if (ticking) return;
   ticking = true;
@@ -312,6 +334,7 @@ async function tick() {
       await remindPendingReschedules();
       await remindSubscriptionExpiring();
       await grantDueLessonXp();
+      await notifyUnpaidEndedLessons();
     }
   } catch (error) {
     console.error("push poll failed", error?.message || error);

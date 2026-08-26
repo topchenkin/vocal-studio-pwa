@@ -17,6 +17,7 @@ GIFT_ADMIN_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-admin-actions.s
 GIFT_SIGNUP_SQL = ROOT / "supabase-migrations" / "2026-08-22-gift-redeem-on-signup.sql"
 SUB_SQL = ROOT / "supabase-migrations" / "2026-08-23-subscription-expiry.sql"
 TEST_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-23-test-payment.sql"
+LESSON_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-26-lesson-schedule-pay.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -105,7 +106,16 @@ def main() -> None:
     password = PASSWORD or local.get("UVS_SSH_PASS", "")
     if not password:
         raise SystemExit("UVS_SSH_PASS is not set")
-    for path in (SQL, GIFT_SQL, YK_SQL, GIFT_ADMIN_SQL, GIFT_SIGNUP_SQL, SUB_SQL, TEST_PAY_SQL):
+    for path in (
+        SQL,
+        GIFT_SQL,
+        YK_SQL,
+        GIFT_ADMIN_SQL,
+        GIFT_SIGNUP_SQL,
+        SUB_SQL,
+        TEST_PAY_SQL,
+        LESSON_PAY_SQL,
+    ):
         if not path.is_file():
             raise SystemExit(f"missing {path}")
     env = env_file_bytes()
@@ -150,6 +160,8 @@ def main() -> None:
                 fh.write(SUB_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/test-payment.sql", "wb") as fh:
                 fh.write(TEST_PAY_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/lesson-schedule-pay.sql", "wb") as fh:
+                fh.write(LESSON_PAY_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -157,15 +169,7 @@ def main() -> None:
             client,
             "chown root:www-data /etc/uniquevocal/pay-api.env && chmod 640 /etc/uniquevocal/pay-api.env",
         )
-        for sql_name in (
-            "payment-confirm.sql",
-            "gift-certificates.sql",
-            "yookassa-confirm.sql",
-            "gift-admin-actions.sql",
-            "gift-redeem-on-signup.sql",
-            "subscription-expiry.sql",
-            "test-payment.sql",
-        ):
+        for sql_name in ("lesson-schedule-pay.sql",):
             run(
                 client,
                 f"docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/{sql_name}",

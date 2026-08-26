@@ -88,6 +88,8 @@ export interface Lesson {
   preferred_reschedule_at?: string | null;
   reschedule_note?: string | null;
   cancel_note?: string | null;
+  paid_at?: string | null;
+  unpaid_notified_at?: string | null;
 }
 
 export interface Exercise {
@@ -310,7 +312,8 @@ export interface PaymentTransaction {
     | "lesson_package"
     | "app_subscription"
     | "gift_certificate"
-    | "test_payment";
+    | "test_payment"
+    | "lesson_one_time";
   amount_rub: number;
   provider: string;
   status: "pending" | "confirmed" | "failed" | "cancelled" | "refunded";
@@ -924,6 +927,10 @@ export interface Database {
       complete_lesson: {
         Args: { lesson_id: string };
         Returns: undefined;
+      };
+      notify_unpaid_ended_lessons: {
+        Args: Record<string, never>;
+        Returns: number;
       };
       book_lesson_slot: {
         Args: { slot_id: string };

@@ -60,6 +60,10 @@ export function resolveNotificationHref(input: {
     return "/dashboard/admin?tab=students";
   }
 
+  if (input.kind === "payment" && !input.isAdmin) {
+    return "/dashboard/student?tab=lessons";
+  }
+
   const isChat =
     input.kind === "chat" ||
     isVocalReportText(message) ||

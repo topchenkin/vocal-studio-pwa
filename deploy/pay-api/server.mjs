@@ -65,7 +65,7 @@ async function authUser(accessToken) {
 
 async function loadProfile(userId) {
   const response = await sb(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,debt_amount,app_sub_variant,app_sub_tier,app_sub_expires_at,lesson_pay_type,custom_abonement_price,lessons_balance&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,debt_amount,app_sub_variant,app_sub_tier,app_sub_expires_at,lesson_pay_type,custom_abonement_price,custom_lesson_price,lessons_balance&limit=1`
   );
   if (!response.ok) return null;
   const rows = await response.json();
@@ -276,6 +276,35 @@ async function handleInit(req, res) {
     productCode = null;
     description = `Unique Vocal Studio — абонемент (${lessonsCount} занятий)`;
     metadata.lessons_count = lessonsCount;
+  } else if (kind === "lesson") {
+    if (profile.lesson_pay_type !== "one_time") {
+      return json(res, 400, { error: "Этот урок оплачивается абонементом" });
+    }
+    const lessonId = String(body.lessonId || "").trim();
+    if (!lessonId) return json(res, 400, { error: "Нет урока" });
+    amount = Number(profile.custom_lesson_price || 0);
+    if (!(amount > 0)) {
+      return json(res, 400, { error: "Стоимость урока не задана" });
+    }
+    const lessonRes = await sb(
+      `/rest/v1/lessons?id=eq.${encodeURIComponent(lessonId)}&student_id=eq.${encodeURIComponent(user.id)}&select=id,status,paid_at&limit=1`
+    );
+    if (!lessonRes.ok) {
+      return json(res, 500, { error: "Не удалось проверить урок" });
+    }
+    const lessonRows = await lessonRes.json();
+    const lesson = Array.isArray(lessonRows) ? lessonRows[0] : lessonRows;
+    if (!lesson) return json(res, 404, { error: "Урок не найден" });
+    if (lesson.status !== "scheduled" && lesson.status !== "completed") {
+      return json(res, 400, { error: "Этот урок нельзя оплатить" });
+    }
+    if (lesson.paid_at) {
+      return json(res, 400, { error: "Урок уже оплачен" });
+    }
+    purpose = "lesson_one_time";
+    productCode = null;
+    description = "Unique Vocal Studio — занятие";
+    metadata.lesson_id = lessonId;
   } else if (kind === "subscription" || kind === "duo_subscription") {
     tier = String(body.tier || "");
     if (!["standard", "premium", "vip"].includes(tier)) {

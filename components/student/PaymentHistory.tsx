@@ -10,6 +10,7 @@ const purposeLabels: Record<PaymentTransaction["purpose"], string> = {
   app_subscription: "Подписка платформы",
   lesson_debt: "Оплата задолженности",
   lesson_package: "Пакет уроков",
+  lesson_one_time: "Оплата занятия",
   gift_certificate: "Подарочный сертификат",
   test_payment: "Тестовая оплата",
 };

@@ -17,6 +17,11 @@ type PaymentPurpose =
       lessonsCount?: number;
     }
   | {
+      type: "lesson";
+      amount: number;
+      lessonId: string;
+    }
+  | {
       type: "subscription";
       amount: number;
       tier: Exclude<AppSubscriptionTier, "none">;
@@ -47,6 +52,7 @@ function SbpLogo() {
 function purposeLabel(purpose: PaymentPurpose) {
   if (purpose.type === "debt") return "Оплата задолженности за урок";
   if (purpose.type === "abonement") return "Оплата абонемента";
+  if (purpose.type === "lesson") return "Оплата занятия";
   if (purpose.type === "test_payment") return "Тестовая оплата · 1 ₽";
   return `Подписка ${purpose.tier}${
     purpose.type === "duo_subscription" ? " Duo" : ""
