@@ -14,8 +14,6 @@ import { randomUUID } from "node:crypto";
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
 ).replace(/\/$/, "");
-const RETURN_URL = `${APP_ORIGIN}/pay/success`;
-
 const SHOP_ID = process.env.YOOKASSA_SHOP_ID || "";
 const SECRET_KEY = process.env.YOOKASSA_SECRET_KEY || "";
 /** Payouts gateway agentId (gate_id). Separate from shopId. */
@@ -213,7 +211,10 @@ export const yookassa = {
       amount: { value: outSum, currency: "RUB" },
       capture: true,
       description: description.slice(0, 128),
-      confirmation: { type: "redirect", return_url: RETURN_URL },
+      confirmation: {
+        type: "redirect",
+        return_url: `${APP_ORIGIN}/pay/success?invoice=${encodeURIComponent(String(invId))}`,
+      },
       metadata: { invoice_no: String(invId) },
     };
     if (email) base.metadata.payer_email = email;

@@ -94,6 +94,137 @@ async function confirmPayment(invoiceNo, outSum, externalId) {
   });
 }
 
+async function markInvoiceFailed(txId) {
+  await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(txId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "failed" }),
+  });
+}
+
+async function syncYookassaPayment(tx) {
+  const paymentId = String(tx.external_id || "").trim();
+  if (!paymentId) return { status: tx.status || "pending", paid: false };
+
+  let payment;
+  try {
+    payment = await yookassa.fetchPayment(paymentId);
+  } catch (error) {
+    console.error("yookassa fetch payment failed", paymentId, error);
+    throw error;
+  }
+
+  if (payment.status === "succeeded") {
+    const invoiceNo = Number(
+      payment?.metadata?.invoice_no || tx.invoice_no
+    );
+    const outSum = Number(payment?.amount?.value || tx.amount_rub || 0);
+    if (!invoiceNo || !(outSum > 0)) {
+      throw new Error("missing invoice metadata");
+    }
+    const confirm = await confirmPayment(invoiceNo, outSum, payment.id);
+    if (!confirm.ok) {
+      const text = await confirm.text();
+      console.error("yookassa confirm failed", confirm.status, text);
+      throw new Error("confirm failed");
+    }
+    return { status: "confirmed", paid: true };
+  }
+
+  if (payment.status === "canceled") {
+    if (tx.id && tx.status === "pending") await markInvoiceFailed(tx.id);
+    return { status: "failed", paid: false };
+  }
+
+  return { status: "pending", paid: false };
+}
+
+let pendingSyncRunning = false;
+
+async function syncPendingPayments() {
+  if (pendingSyncRunning) return;
+  pendingSyncRunning = true;
+  try {
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const response = await sb(
+      `/rest/v1/payment_transactions?status=eq.pending&external_id=not.is.null&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,status&order=created_at.desc&limit=30`
+    );
+    if (!response.ok) {
+      console.error("pending payments query failed", response.status);
+      return;
+    }
+    const rows = await response.json();
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    for (const tx of rows) {
+      try {
+        const result = await syncYookassaPayment(tx);
+        if (result.paid) {
+          console.log("pending payment confirmed", tx.invoice_no);
+        }
+      } catch (error) {
+        console.error(
+          "pending payment sync failed",
+          tx.invoice_no,
+          error?.message || error
+        );
+      }
+    }
+  } finally {
+    pendingSyncRunning = false;
+  }
+}
+
+async function handleStatus(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "method" });
+  const auth = String(req.headers.authorization || "");
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json(res, 401, { error: "Нужно войти в кабинет" });
+
+  const user = await authUser(token);
+  if (!user?.id) {
+    return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  }
+
+  let body = {};
+  try {
+    body = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return json(res, 400, { error: "Некорректный запрос" });
+  }
+
+  const invoiceNo = Number(body.invoiceNo);
+  if (!invoiceNo) return json(res, 400, { error: "Нет номера счёта" });
+
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&student_id=eq.${encodeURIComponent(user.id)}&select=id,invoice_no,amount_rub,external_id,status,student_id,purpose&limit=1`
+  );
+  if (!txRes.ok) {
+    return json(res, 500, { error: "Не удалось прочитать счёт" });
+  }
+  const rows = await txRes.json();
+  const tx = Array.isArray(rows) ? rows[0] : rows;
+  if (!tx) return json(res, 404, { error: "Счёт не найден" });
+  if (tx.student_id && tx.student_id !== user.id) {
+    return json(res, 403, { error: "Это не ваш счёт" });
+  }
+
+  if (tx.status === "confirmed") {
+    return json(res, 200, { status: "confirmed", paid: true, invoiceNo });
+  }
+  if (tx.status === "failed" || tx.status === "cancelled") {
+    return json(res, 200, { status: "failed", paid: false, invoiceNo });
+  }
+
+  try {
+    const result = await syncYookassaPayment(tx);
+    return json(res, 200, { ...result, invoiceNo });
+  } catch (error) {
+    return json(res, 502, {
+      error:
+        error instanceof Error ? error.message : "Не удалось проверить оплату",
+    });
+  }
+}
+
 async function patchExternalId(txId, externalId) {
   if (!externalId) return;
   await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(txId)}`, {
@@ -406,39 +537,48 @@ async function handleYookassaWebhook(req, res) {
 
   const event = String(notification.event || "");
   const paymentId = String(notification?.object?.id || "");
+  console.log("yookassa webhook", event || "unknown", paymentId || "no-id");
   if (!paymentId) return json(res, 400, { error: "missing payment id" });
-  if (event !== "payment.succeeded") {
+  if (event !== "payment.succeeded" && event !== "payment.canceled") {
     return json(res, 200, { ok: true, ignored: event || "unknown" });
   }
 
-  let payment;
-  try {
-    payment = await yookassa.fetchPayment(paymentId);
-  } catch (error) {
-    console.error("yookassa fetch payment failed", paymentId, error);
-    return json(res, 502, { error: "verify failed" });
-  }
-
-  if (payment.status !== "succeeded") {
-    return json(res, 400, { error: "payment not succeeded" });
-  }
-
   const invoiceNo = Number(
-    payment?.metadata?.invoice_no || notification?.object?.metadata?.invoice_no
+    notification?.object?.metadata?.invoice_no || ""
   );
-  const outSum = Number(payment?.amount?.value || 0);
-  if (!invoiceNo || !(outSum > 0)) {
-    console.error("yookassa webhook missing invoice", { paymentId, invoiceNo });
-    return json(res, 400, { error: "missing invoice metadata" });
+  let tx = null;
+  if (invoiceNo) {
+    const txRes = await sb(
+      `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,external_id,status&limit=1`
+    );
+    const rows = txRes.ok ? await txRes.json() : [];
+    tx = Array.isArray(rows) ? rows[0] : rows;
+  }
+  if (!tx) {
+    const txRes = await sb(
+      `/rest/v1/payment_transactions?external_id=eq.${encodeURIComponent(paymentId)}&select=id,invoice_no,amount_rub,external_id,status&limit=1`
+    );
+    const rows = txRes.ok ? await txRes.json() : [];
+    tx = Array.isArray(rows) ? rows[0] : rows;
+  }
+  if (!tx) {
+    tx = {
+      invoice_no: invoiceNo,
+      amount_rub: Number(notification?.object?.amount?.value || 0),
+      external_id: paymentId,
+      status: "pending",
+    };
+  } else if (!tx.external_id) {
+    tx.external_id = paymentId;
   }
 
-  const confirm = await confirmPayment(invoiceNo, outSum, paymentId);
-  if (!confirm.ok) {
-    console.error("yookassa confirm failed", confirm.status, await confirm.text());
+  try {
+    const result = await syncYookassaPayment(tx);
+    return json(res, 200, { ok: true, ...result });
+  } catch (error) {
+    console.error("yookassa webhook sync failed", paymentId, error);
     return json(res, 500, { error: "confirm failed" });
   }
-
-  return json(res, 200, { ok: true });
 }
 
 function ready() {
@@ -481,6 +621,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (path === "/api/payments/init") return handleInit(req, res);
+    if (path === "/api/payments/status") return handleStatus(req, res);
     if (path === "/api/payments/init-gift") return handleInitGift(req, res);
     if (path === "/api/yookassa/webhook") return handleYookassaWebhook(req, res);
 
@@ -495,4 +636,6 @@ server.listen(PORT, BIND, () => {
   console.log(
     `pay-api listening on ${BIND}:${PORT} provider=yookassa test=${yookassa.isTest}`
   );
+  void syncPendingPayments();
+  setInterval(() => void syncPendingPayments(), 4000);
 });

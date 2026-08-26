@@ -580,6 +580,10 @@ export default function UpcomingLessons() {
           open
           purpose={payment}
           onClose={() => setPayment(null)}
+          onSuccess={() => {
+            void refreshProfile();
+            void loadLessons();
+          }}
         />
       ) : null}
 
