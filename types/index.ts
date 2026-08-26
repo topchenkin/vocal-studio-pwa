@@ -53,6 +53,11 @@ export interface StudentProfile {
   app_sub_variant: AppSubscriptionVariant;
   app_sub_expires_at?: string | null;
   cat_level: CatLevel;
+  cat_xp?: number;
+  cat_exam_ready?: boolean;
+  cat_exam_notified_at?: string | null;
+  cat_streak_days?: number;
+  cat_last_checkin_on?: string | null;
   is_active_student: boolean;
   lesson_pay_type: LessonPayType;
   custom_lesson_price: number;
@@ -432,6 +437,7 @@ export interface VocalTestResult {
   breath_control: number;
   too_quiet: boolean;
   payload: Record<string, unknown>;
+  review_status?: "none" | "pending" | "approved" | "rejected";
   created_at: string;
 }
 
@@ -884,6 +890,18 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      award_cat_xp: {
+        Args: { p_kind: string; p_source_id?: string | null };
+        Returns: Record<string, unknown>;
+      };
+      submit_vocal_test_for_review: {
+        Args: { p_result_id: string };
+        Returns: undefined;
+      };
+      review_vocal_test: {
+        Args: { p_result_id: string; p_approve: boolean };
+        Returns: undefined;
+      };
       request_lesson_reschedule: {
         Args: {
           lesson_id: string;

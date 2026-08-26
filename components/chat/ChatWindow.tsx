@@ -38,6 +38,7 @@ import {
   parseVocalReportPayload,
 } from "@/lib/vocal-report-payload";
 import { isExerciseResultText } from "@/lib/exercise-result-payload";
+import VocalTestReviewActions from "@/components/chat/VocalTestReviewActions";
 
 const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
@@ -483,7 +484,10 @@ export default function ChatWindow({
                       ) : null}
                     </div>
                   ) : vocalReport ? (
-                    <VocalReportCard payload={vocalReport} compact />
+                    <div className="space-y-3">
+                      <VocalReportCard payload={vocalReport} compact />
+                      <VocalTestReviewActions resultId={vocalReport.resultId} />
+                    </div>
                   ) : msg.messageType === "vocal_report" ||
                     isVocalReportText(msg.text || "") ? (
                     <p className="text-sm">Отчет от ученика</p>

@@ -19,26 +19,31 @@ export type VocalTestResultRow = {
   breath_control: number;
   too_quiet: boolean;
   payload: VocalReportPayload;
+  review_status?: "none" | "pending" | "approved" | "rejected";
   created_at: string;
 };
 
 export async function saveVocalTestResult(
   userId: string,
   report: VocalReport
-): Promise<void> {
+): Promise<string | null> {
   const payload = toVocalReportPayload(report);
-  const { error } = await supabase.from("vocal_test_results").insert({
-    user_id: userId,
-    mode: report.mode,
-    target_label: report.targetLabel,
-    duration_sec: report.durationSec,
-    overall_score: report.overallScore,
-    pitch_accuracy: report.pitchAccuracy,
-    tone_stability: report.toneStability,
-    breath_control: report.breathControl,
-    too_quiet: report.tooQuiet,
-    payload,
-  });
+  const { data, error } = await supabase
+    .from("vocal_test_results")
+    .insert({
+      user_id: userId,
+      mode: report.mode,
+      target_label: report.targetLabel,
+      duration_sec: report.durationSec,
+      overall_score: report.overallScore,
+      pitch_accuracy: report.pitchAccuracy,
+      tone_stability: report.toneStability,
+      breath_control: report.breathControl,
+      too_quiet: report.tooQuiet,
+      payload,
+    })
+    .select("id")
+    .single();
   if (error) {
     if (
       error.message.includes("vocal_test_results") ||
@@ -50,6 +55,7 @@ export async function saveVocalTestResult(
     }
     throw new Error(error.message);
   }
+  return data?.id ?? null;
 }
 
 export async function listVocalTestResults(
@@ -85,8 +91,11 @@ export async function sendVocalReportToChat(input: {
   senderId: string;
   senderName: string;
   report: VocalReport;
+  resultId?: string;
 }): Promise<void> {
-  const message = vocalReportChatText(toVocalReportPayload(input.report));
+  const message = vocalReportChatText(
+    toVocalReportPayload(input.report, input.resultId)
+  );
   const row = {
     student_id: input.studentId,
     sender_id: input.senderId,

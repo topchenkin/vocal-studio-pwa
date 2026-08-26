@@ -37,6 +37,7 @@ import {
   saveVocalTestResult,
   sendVocalReportToChat,
 } from "@/lib/vocal-test-results";
+import { awardCatXp, submitVocalTestForReview } from "@/lib/cat-xp";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
@@ -45,8 +46,14 @@ const TEST_MS = 10_000;
 const IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
 const SCALE_STEPS = ["C4", "E4", "G4"] as const;
 
-export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) {
-  const { user, profile, isAdmin } = useAuth();
+export default function PitchAnalyzer({
+  locked = false,
+  variant = "live",
+}: {
+  locked?: boolean;
+  variant?: "live" | "exam";
+}) {
+  const { user, profile, isAdmin, refreshProfile } = useAuth();
   const analyzer = useVocalAnalyzer();
 
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
@@ -56,6 +63,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const [sendingReport, setSendingReport] = useState(false);
   const [sentOk, setSentOk] = useState(false);
   const [sendNote, setSendNote] = useState("");
+  const [savedResultId, setSavedResultId] = useState<string | null>(null);
 
   const { listening, testing, testProgress, error, live } = analyzer;
 
@@ -81,6 +89,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const startProfessionalTest = async () => {
     setSendNote("");
     setSentOk(false);
+    setSavedResultId(null);
     setReport(null);
     const modeAtStart = testMode;
     const targetAtStart = targetNote;
@@ -96,7 +105,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
       setReport(built);
       setReportOpen(true);
       if (!built.tooQuiet && user && !isAdmin) {
-        void saveResult(built);
+        await saveResult(built);
       }
     } catch {
       // analyzer surfaces a user-facing error via `analyzer.error`
@@ -106,7 +115,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
   const saveResult = async (built: VocalReport) => {
     if (!user || isAdmin || built.tooQuiet) return;
     try {
-      await saveVocalTestResult(user.id, built);
+      const id = await saveVocalTestResult(user.id, built);
+      setSavedResultId(id);
       window.dispatchEvent(new Event("uvs-vocal-test-saved"));
     } catch (err) {
       setSendNote(
@@ -122,14 +132,21 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
     setSendingReport(true);
     if (!sendNote.includes("Таблиц")) setSendNote("");
     try {
+      const resultId = savedResultId;
       await sendVocalReportToChat({
         studentId: user.id,
         senderId: user.id,
         senderName: profile?.full_name || "Ученик",
         report: built,
+        resultId: resultId ?? undefined,
       });
+      if (resultId) {
+        await submitVocalTestForReview(resultId);
+      }
       setSentOk(true);
-      setSendNote("Отчёт отправлен преподавателю.");
+      setSendNote(
+        "Отчёт у преподавателя. Лапки за тест появятся, когда он его засчитает."
+      );
     } catch (err) {
       setSentOk(false);
       setSendNote(
@@ -164,7 +181,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
             <Lock className="h-7 w-7 text-amber-300" />
           </div>
           <h2 className="mt-4 font-display text-2xl font-semibold">
-            Нейроанализатор нот
+            {variant === "exam" ? "Профессиональный тест" : "Нейроанализатор нот"}
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу, заданному администратором.
@@ -187,7 +204,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            Нейроанализатор нот
+            {variant === "exam" ? "Профессиональный тест" : "Нейроанализатор нот"}
           </h2>
         </div>
       </div>
@@ -266,7 +283,16 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
 
       <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         {!listening ? (
-          <Button fullWidth size="lg" onClick={() => void analyzer.startListening()}>
+          <Button
+            fullWidth
+            size="lg"
+            onClick={() => {
+              void awardCatXp("analyzer").then((result) => {
+                if (result?.awarded) void refreshProfile();
+              });
+              void analyzer.startListening();
+            }}
+          >
             <Mic className="h-5 w-5" />
             Включить микрофон
           </Button>
@@ -284,6 +310,19 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
         )}
       </div>
 
+      {variant === "live" && (
+        <p className="mt-4 text-center text-sm text-studio-muted">
+          Нужна оценка как на прослушивании?{" "}
+          <Link
+            href="/dashboard/student/pro-test"
+            className="text-studio-accent-light underline-offset-2 hover:underline"
+          >
+            Профессиональный тест
+          </Link>
+        </p>
+      )}
+
+      {variant === "exam" && (
       <div className="mt-6 rounded-2xl bg-studio-bg/70 p-4 ring-1 ring-studio-border">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10">
@@ -468,6 +507,7 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
               : "Начать тест · гамма C–E–G"}
         </Button>
       </div>
+      )}
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
@@ -504,7 +544,8 @@ export default function PitchAnalyzer({ locked = false }: { locked?: boolean }) 
               <>
                 {sentOk ? (
                   <p className="text-center text-sm text-emerald-400">
-                    {sendNote || "Отчёт отправлен преподавателю."}
+                    {sendNote ||
+                      "Отчёт у преподавателя. Лапки за тест появятся, когда он его засчитает."}
                   </p>
                 ) : (
                   <Button

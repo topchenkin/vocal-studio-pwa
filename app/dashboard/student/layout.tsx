@@ -4,13 +4,14 @@ import { Suspense, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import StudentBottomNav from "@/components/student/StudentBottomNav";
+import { awardCatXp } from "@/lib/cat-xp";
 
 export default function StudentProtectedLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { isAuthenticated, isAdmin, loading, user } = useAuth();
+  const { isAuthenticated, isAdmin, loading, user, refreshProfile } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -18,6 +19,18 @@ export default function StudentProtectedLayout({
     if (!isAuthenticated) router.replace("/");
     else if (isAdmin) router.replace("/dashboard/admin");
   }, [isAdmin, isAuthenticated, loading, router]);
+
+  useEffect(() => {
+    if (loading || !isAuthenticated || isAdmin) return;
+    let cancelled = false;
+    void awardCatXp("checkin").then((result) => {
+      if (cancelled || !result) return;
+      void refreshProfile();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, isAuthenticated, loading, refreshProfile]);
 
   if (loading && !user) {
     return (

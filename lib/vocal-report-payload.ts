@@ -10,6 +10,7 @@ export type VocalReportPayload = {
   targetLabel: string;
   durationSec: number;
   cents: number[];
+  resultId?: string;
 };
 
 const CHART_POINTS = 40;
@@ -30,10 +31,17 @@ function normalizePayload(
     cents: Array.isArray(parsed.cents)
       ? parsed.cents.map((value) => Number(value) || 0)
       : [],
+    resultId:
+      typeof parsed.resultId === "string" && parsed.resultId
+        ? parsed.resultId
+        : undefined,
   };
 }
 
-export function toVocalReportPayload(report: VocalReport): VocalReportPayload {
+export function toVocalReportPayload(
+  report: VocalReport,
+  resultId?: string
+): VocalReportPayload {
   const voiced = report.samples.filter((sample) => sample.centsToTarget !== null);
   const cents: number[] = [];
   if (voiced.length > 0) {
@@ -54,6 +62,7 @@ export function toVocalReportPayload(report: VocalReport): VocalReportPayload {
     targetLabel: report.targetLabel,
     durationSec: report.durationSec,
     cents,
+    resultId,
   };
 }
 

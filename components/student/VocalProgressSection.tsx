@@ -41,18 +41,18 @@ export default function VocalProgressSection() {
 
   return (
     <section>
-      <h3 className="font-display text-lg font-semibold">Прогресс по тестам</h3>
+      <h3 className="font-display text-lg font-semibold">История тестов</h3>
       <p className="mb-3 text-xs text-studio-muted">
-        Результаты профессионального теста нот сохраняются здесь, чтобы видеть
-        динамику.
+        Здесь копятся ваши зачёты. Баллы к уровню котика преподаватель ставит
+        после просмотра.
       </p>
       {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
       {items.length === 0 ? (
         <div className="rounded-2xl bg-studio-surface p-6 text-center ring-1 ring-studio-border">
           <TrendingUp className="mx-auto h-7 w-7 text-studio-muted" />
           <p className="mt-2 text-sm text-studio-muted">
-            Пока нет тестов. Пройдите профессиональный тест в нейроанализаторе
-            нот — оценка появится здесь и уйдёт преподавателю в чат.
+            Пока нет тестов. Пройдите зачёт выше — оценка останется на этой
+            странице и уйдёт преподавателю в чат, когда отправите.
           </p>
         </div>
       ) : (
@@ -108,6 +108,13 @@ export default function VocalProgressSection() {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
+                        {item.review_status === "approved"
+                          ? " · засчитан"
+                          : item.review_status === "pending"
+                            ? " · у преподавателя"
+                            : item.review_status === "rejected"
+                              ? " · не засчитан"
+                              : ""}
                       </span>
                     </span>
                     <span className="font-display text-lg font-semibold text-studio-accent-light">

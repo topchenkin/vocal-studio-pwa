@@ -835,6 +835,7 @@ export default function StudentsTable() {
                         )?.label ?? ""
                       }
                     />
+                    {student.cat_exam_ready ? " · готов к экзамену" : ""}
                   </p>
                 </div>
               </div>

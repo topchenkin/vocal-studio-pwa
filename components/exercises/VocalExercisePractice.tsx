@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { awardCatXp } from "@/lib/cat-xp";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
 import { renderExerciseResultPng } from "@/lib/exercise-result-card";
 import {
@@ -48,7 +49,7 @@ export default function VocalExercisePractice({
   exercise: Exercise;
   phrases: ExercisePhrase[];
 }) {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const audioRef = useRef<HTMLAudioElement>(null);
   const captureRef = useRef<PcmCaptureSession | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -375,6 +376,9 @@ export default function VocalExercisePractice({
       if (shared.status !== "shared") {
         throw new Error(shared.error || "Не удалось сохранить запись в чате");
       }
+      void awardCatXp("exercise_share", attempt.id).then((result) => {
+        if (result?.awarded) void refreshProfile();
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось отправить в чат");
     } finally {

@@ -12,36 +12,15 @@ import { useAuth } from "@/context/AuthContext";
 import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
 import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
+import {
+  catNextLabel,
+  catProgressPercent,
+  catProgressPhrase,
+} from "@/lib/cat-progress";
 import CatLevelText from "@/components/ui/CatLevelText";
 import { APP_TIER_PRICES, subscriptionTotal } from "@/lib/constants";
 import type { CatLevel } from "@/types";
 import Link from "next/link";
-
-const catLevels: Record<
-  CatLevel,
-  { title: string; progress: number; next: string }
-> = {
-  beginner: {
-    title: CAT_LEVEL_LABELS.beginner,
-    progress: 25,
-    next: CAT_LEVEL_LABELS.basic,
-  },
-  basic: {
-    title: CAT_LEVEL_LABELS.basic,
-    progress: 50,
-    next: CAT_LEVEL_LABELS.pro,
-  },
-  pro: {
-    title: CAT_LEVEL_LABELS.pro,
-    progress: 75,
-    next: CAT_LEVEL_LABELS.star,
-  },
-  star: {
-    title: CAT_LEVEL_LABELS.star,
-    progress: 100,
-    next: "Максимальный уровень",
-  },
-};
 
 export default function SubscriptionStatus() {
   const { profile, tier } = useAuth();
@@ -49,7 +28,13 @@ export default function SubscriptionStatus() {
 
   if (!profile) return null;
 
-  const cat = catLevels[profile.cat_level] ?? catLevels.beginner;
+  const level = (profile.cat_level ?? "beginner") as CatLevel;
+  const title = CAT_LEVEL_LABELS[level] ?? CAT_LEVEL_LABELS.beginner;
+  const xp = Number(profile.cat_xp) || 0;
+  const examReady = Boolean(profile.cat_exam_ready);
+  const percent = examReady ? 100 : catProgressPercent(level, xp);
+  const streak = Number(profile.cat_streak_days) || 0;
+  const nextLabel = catNextLabel(level);
   const tierName =
     tier === "none"
       ? "Без подписки"
@@ -84,7 +69,7 @@ export default function SubscriptionStatus() {
                 </p>
                 <CatLevelText
                   as="h2"
-                  label={cat.title}
+                  label={title}
                   className="whitespace-nowrap font-display text-2xl font-semibold"
                 />
               </div>
@@ -106,23 +91,50 @@ export default function SubscriptionStatus() {
                   : "Нет активной подписки"}
           </div>
 
-          <div className="mt-6">
-            <div className="mb-2 flex justify-between text-xs">
-              <span className="text-studio-muted">Прогресс уровня</span>
-              <span className="text-studio-accent-light">{cat.progress}%</span>
+          {examReady && level !== "star" ? (
+            <div className="mt-5 rounded-2xl bg-amber-500/15 p-4 ring-1 ring-amber-400/35">
+              <p className="font-display text-lg font-semibold text-amber-100">
+                Готов перейти на следующий уровень
+              </p>
+              <p className="mt-1 text-sm text-amber-100/80">
+                Преподаватель уже видит это в чате. Договоритесь о живом
+                экзамене на занятии — в приложении сдавать не нужно.
+              </p>
+              <Link
+                href="/dashboard/student?tab=chat"
+                className="mt-3 inline-block text-sm font-medium text-amber-200 underline-offset-2 hover:underline"
+              >
+                Открыть чат
+              </Link>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-studio-bg">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${cat.progress}%` }}
-                transition={{ duration: 1, ease: "easeOut" }}
-                className="h-full rounded-full bg-gradient-to-r from-studio-accent to-studio-gold"
-              />
+          ) : (
+            <div className="mt-6">
+              <div className="mb-2 flex justify-between text-xs">
+                <span className="text-studio-muted">Настроение котика</span>
+                {streak > 1 ? (
+                  <span className="text-studio-accent-light">Серия {streak} дн.</span>
+                ) : (
+                  <span className="text-studio-accent-light">{percent}%</span>
+                )}
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-studio-bg">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${percent}%` }}
+                  transition={{ duration: 1, ease: "easeOut" }}
+                  className="h-full rounded-full bg-gradient-to-r from-studio-accent to-studio-gold"
+                />
+              </div>
+              <p className="mt-2 text-[11px] text-studio-muted">
+                {catProgressPhrase(level, percent, examReady)}
+              </p>
+              {level !== "star" && (
+                <p className="mt-1 text-[11px] text-studio-muted">
+                  Дальше: {nextLabel}
+                </p>
+              )}
             </div>
-            <p className="mt-2 text-[11px] text-studio-muted">
-              Следующий уровень: {cat.next}
-            </p>
-          </div>
+          )}
 
           <div className="mt-5 grid grid-cols-2 gap-3">
             <div className="rounded-2xl bg-studio-bg/50 p-4">
