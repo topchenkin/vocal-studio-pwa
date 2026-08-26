@@ -7,8 +7,8 @@ const CORS: Record<string, string> = {
 
 const MUSICGEN_SPACE = "https://sanchit-gandhi-musicgen-streaming.hf.space";
 const MUSICGEN_ENDPOINT = "generate_audio";
-const MUSICGEN_DURATION_SEC = 12;
 const MAX_PROMPT = 400;
+const DURATIONS = [10, 15, 20, 25, 30] as const;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -63,6 +63,25 @@ async function loadProfile(userId: string) {
     app_sub_expires_at?: string | null;
   }>;
   return rows[0] ?? null;
+}
+
+function clampDuration(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 15;
+  let best = 15;
+  let dist = Infinity;
+  for (const option of DURATIONS) {
+    const gap = Math.abs(option - n);
+    if (gap < dist) {
+      dist = gap;
+      best = option;
+    }
+  }
+  return best;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function canGenerate(profile: {
@@ -125,14 +144,19 @@ async function bytesFromHls(
   playlistUrl: string,
   hfKey: string
 ): Promise<SpaceResult> {
-  const playlistRes = await fetch(playlistUrl, {
-    headers: authHeaders(hfKey),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!playlistRes.ok) {
-    return { error: `space_download_${playlistRes.status}`, status: 502 };
+  let playlist = "";
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const playlistRes = await fetch(playlistUrl, {
+      headers: authHeaders(hfKey),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!playlistRes.ok) {
+      return { error: `space_download_${playlistRes.status}`, status: 502 };
+    }
+    playlist = await playlistRes.text();
+    if (/#EXT-X-ENDLIST/i.test(playlist)) break;
+    await sleep(1500);
   }
-  const playlist = await playlistRes.text();
   const base = playlistUrl.replace(/[^/]+(?:\?.*)?$/, "");
   const names = playlist
     .split(/\r?\n/)
@@ -163,9 +187,23 @@ async function bytesFromHls(
   return { bytes: out, mime: "audio/aac" };
 }
 
+function isRetryable(result: SpaceResult): boolean {
+  if ("bytes" in result) return false;
+  return (
+    result.error === "loading" ||
+    result.error === "busy" ||
+    result.error === "space_gpu" ||
+    result.error === "space_empty" ||
+    result.error === "space_no_event" ||
+    /^space_(429|5\d\d)/.test(result.error) ||
+    /^space_queue_/.test(result.error)
+  );
+}
+
 async function bytesFromMusicGenSpace(
   prompt: string,
-  hfKey: string
+  hfKey: string,
+  durationSec: number
 ): Promise<SpaceResult> {
   try {
     const woke = await fetch(`${MUSICGEN_SPACE}/gradio_api/info`, {
@@ -173,12 +211,14 @@ async function bytesFromMusicGenSpace(
       signal: AbortSignal.timeout(20_000),
     });
     if (woke.status >= 500) {
-      return { error: "loading", estimated_time: 30, status: 200 };
+      return { error: "loading", estimated_time: 20, status: 200 };
     }
   } catch {
-    return { error: "loading", estimated_time: 25, status: 200 };
+    return { error: "loading", estimated_time: 20, status: 200 };
   }
 
+  const seed = Math.floor(Math.random() * 11);
+  const sseMs = Math.min(165_000, 45_000 + durationSec * 4_000);
   const start = await fetch(
     `${MUSICGEN_SPACE}/gradio_api/call/${MUSICGEN_ENDPOINT}`,
     {
@@ -188,19 +228,19 @@ async function bytesFromMusicGenSpace(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        data: [prompt, MUSICGEN_DURATION_SEC, 2.5, 5],
+        data: [prompt, durationSec, 2.5, seed],
       }),
       signal: AbortSignal.timeout(30_000),
     }
   );
   if (start.status === 429) return { error: "busy", status: 429 };
   if (start.status >= 500) {
-    return { error: "loading", estimated_time: 30, status: 200 };
+    return { error: "loading", estimated_time: 20, status: 200 };
   }
   if (!start.ok) {
     const text = await start.text().catch(() => "");
-    if (/load|sleep|start|queue/i.test(text)) {
-      return { error: "loading", estimated_time: 30, status: 200 };
+    if (/load|sleep|start|queue|gpu/i.test(text)) {
+      return { error: "loading", estimated_time: 20, status: 200 };
     }
     return { error: `space_${start.status}`, status: 502 };
   }
@@ -211,7 +251,7 @@ async function bytesFromMusicGenSpace(
     `${MUSICGEN_SPACE}/gradio_api/call/${MUSICGEN_ENDPOINT}/${started.event_id}`,
     {
       headers: authHeaders(hfKey),
-      signal: AbortSignal.timeout(150_000),
+      signal: AbortSignal.timeout(sseMs),
     }
   );
   if (!stream.ok) return { error: `space_queue_${stream.status}`, status: 502 };
@@ -219,6 +259,7 @@ async function bytesFromMusicGenSpace(
 
   const blocks = body.split(/\n\n+/);
   let completePayload: string | null = null;
+  let errorPayload: string | null = null;
   for (const block of blocks) {
     const lines = block.split("\n");
     let eventName = "message";
@@ -229,15 +270,7 @@ async function bytesFromMusicGenSpace(
     }
     if (dataLines.length === 0) continue;
     const data = dataLines.join("\n");
-    if (eventName === "error") {
-      if (/load|sleep|start/i.test(data)) {
-        return { error: "loading", estimated_time: 30, status: 200 };
-      }
-      if (/quota|gpu|busy|congest/i.test(data)) {
-        return { error: "busy", status: 503 };
-      }
-      return { error: "space_gpu", status: 503 };
-    }
+    if (eventName === "error") errorPayload = data;
     if (eventName === "complete") completePayload = data;
   }
   if (!completePayload) {
@@ -247,7 +280,13 @@ async function bytesFromMusicGenSpace(
       .map((line) => line.slice(5).trim());
     completePayload = dataLines.at(-1) ?? null;
   }
-  if (!completePayload) return { error: "space_empty", status: 502 };
+  if (!completePayload) {
+    if (errorPayload && /load|sleep|start|gpu|quota|busy|congest|null/i.test(errorPayload)) {
+      return { error: "loading", estimated_time: 20, status: 200 };
+    }
+    if (errorPayload) return { error: "space_gpu", status: 503 };
+    return { error: "space_empty", status: 502 };
+  }
 
   let parsed: unknown;
   try {
@@ -289,20 +328,29 @@ Deno.serve(async (req) => {
     const profile = await loadProfile(userId);
     if (!canGenerate(profile)) return json({ error: "premium_required" }, 403);
 
-    const payload = (await req.json().catch(() => null)) as { prompt?: unknown } | null;
+    const payload = (await req.json().catch(() => null)) as {
+      prompt?: unknown;
+      duration?: unknown;
+    } | null;
     const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
     if (prompt.length < 3) return json({ error: "empty_prompt" }, 400);
     if (prompt.length > MAX_PROMPT) return json({ error: "prompt_too_long" }, 400);
+    const durationSec = clampDuration(payload?.duration);
 
     const hfKey = Deno.env.get("HUGGINGFACE_API_KEY")?.trim();
     if (!hfKey) return json({ error: "missing_hf_key" }, 500);
 
-    const spaced = await bytesFromMusicGenSpace(prompt, hfKey);
+    const startedAt = Date.now();
+    let spaced = await bytesFromMusicGenSpace(prompt, hfKey, durationSec);
+    if (isRetryable(spaced) && Date.now() - startedAt < 35_000) {
+      await sleep(10_000);
+      spaced = await bytesFromMusicGenSpace(prompt, hfKey, durationSec);
+    }
     if ("bytes" in spaced) {
       return json({ audioBase64: toBase64(spaced.bytes), mime: spaced.mime });
     }
-    if (spaced.error === "loading") {
-      return json({ error: "loading", estimated_time: spaced.estimated_time ?? 30 });
+    if (spaced.error === "loading" || spaced.error === "busy" || spaced.error === "space_gpu") {
+      return json({ error: "loading", estimated_time: spaced.estimated_time ?? 25 });
     }
     return json({ error: spaced.error || "failed" }, spaced.status || 502);
   } catch (error) {

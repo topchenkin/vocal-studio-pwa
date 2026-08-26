@@ -10,8 +10,10 @@ const fn = readFileSync(
 assert.ok(fn.includes("sanchit-gandhi-musicgen-streaming.hf.space"));
 assert.ok(fn.includes("generate_audio"));
 assert.ok(!fn.includes("api-inference.huggingface.co"));
-assert.ok(fn.includes("playlist.m3u8") || fn.includes("isHlsUrl"));
-assert.ok(fn.includes("audio/aac"));
+assert.ok(fn.includes("clampDuration"));
+assert.ok(fn.includes("durationSec"));
+assert.ok(fn.includes("isRetryable"));
+assert.ok(fn.includes("EXT-X-ENDLIST"));
 assert.ok(fn.includes('Deno.env.get("HUGGINGFACE_API_KEY")'));
 assert.ok(fn.includes('error: "loading"'));
 assert.ok(fn.includes("estimated_time"));
@@ -44,7 +46,10 @@ assert.ok(ui.includes("Медленный джазовый бит с саксо�
 assert.ok(ui.includes("Lo-Fi Hip Hop"));
 assert.ok(ui.includes("Pop Acoustic Guitar"));
 assert.ok(ui.includes("Dark Synthwave"));
-assert.ok(ui.includes("Сгенерировать трек"));
+assert.ok(ui.includes("Сгенерировать"));
+assert.ok(ui.includes("Длительность"));
+assert.ok(ui.includes("duration"));
+assert.ok(ui.includes("25 сек") || ui.includes("25"));
 assert.ok(ui.includes("Скачать минусовку"));
 assert.ok(ui.includes("Создание авторских треков с помощью нейросетей доступно в Premium"));
 assert.ok(ui.includes("URL.createObjectURL"));

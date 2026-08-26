@@ -20,10 +20,12 @@ const CHIPS = [
   { label: "Dark Synthwave", prompt: "Dark Synthwave" },
 ] as const;
 
+const DURATIONS = [10, 15, 20, 25, 30] as const;
+
 const WAIT_STEPS = [
   "Отправляем запрос...",
   "Нейросеть сочиняет ноты...",
-  "Сводим трек... Это может занять до 90 секунд",
+  "Сводим трек... Длиннее клип — дольше ожидание",
 ] as const;
 
 type GenerateOk = { audioBase64: string; mime?: string };
@@ -63,7 +65,7 @@ function humanizeError(code: string | undefined) {
       return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
     case "busy":
     case "space_gpu":
-      return "Нейросеть сейчас занята. Подождите минуту и повторите.";
+      return "Нейросеть остывает после прошлого трека. Подождите полминуты и нажмите ещё раз.";
     case "missing_hf_key":
       return "Сервер генерации не настроен. Напишите преподавателю.";
     default:
@@ -86,11 +88,13 @@ export default function AiMusicComposer({ locked }: Props) {
   const blocked =
     locked ?? !(isAdmin || tier === "premium" || tier === "vip");
   const [prompt, setPrompt] = useState("");
+  const [duration, setDuration] = useState<(typeof DURATIONS)[number]>(15);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioMime, setAudioMime] = useState("audio/flac");
+  const [clipDuration, setClipDuration] = useState<number | null>(null);
   const urlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -120,11 +124,10 @@ export default function AiMusicComposer({ locked }: Props) {
     setBusy(true);
     setError("");
     setStep(0);
-    setResultUrl(null);
     try {
       const { data, error: invokeError } = await supabase.functions.invoke<
         GenerateOk & GenerateErr
-      >("generate-music", { body: { prompt: text } });
+      >("generate-music", { body: { prompt: text, duration } });
 
       if (data?.error === "loading") {
         setError(loadingMessage(data.estimated_time));
@@ -162,6 +165,7 @@ export default function AiMusicComposer({ locked }: Props) {
       const mime = data.mime || "audio/flac";
       const blob = decodeAudio(data.audioBase64, mime);
       setAudioMime(mime);
+      setClipDuration(duration);
       setResultUrl(URL.createObjectURL(blob));
     } catch {
       setError("Не удалось связаться с нейросетью. Проверьте интернет и повторите.");
@@ -209,7 +213,8 @@ export default function AiMusicComposer({ locked }: Props) {
           <div>
             <h2 className="font-display text-2xl font-semibold">ИИ-композитор</h2>
             <p className="mt-1 text-sm text-studio-muted">
-              Опишите минусовку своими словами — MusicGen соберёт авторский трек.
+              Опишите минусовку своими словами — MusicGen соберёт авторский трек
+              на 10–30 секунд.
             </p>
           </div>
         </div>
@@ -225,6 +230,27 @@ export default function AiMusicComposer({ locked }: Props) {
             className="w-full resize-y rounded-2xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border placeholder:text-studio-muted/70 focus:outline-none focus:ring-studio-accent"
           />
         </label>
+
+        <div className="mt-4">
+          <p className="mb-2 text-sm text-studio-muted">Длительность</p>
+          <div className="flex flex-wrap gap-2">
+            {DURATIONS.map((sec) => (
+              <button
+                key={sec}
+                type="button"
+                disabled={busy}
+                onClick={() => setDuration(sec)}
+                className={`rounded-full px-3 py-1.5 text-xs transition ring-1 ${
+                  duration === sec
+                    ? "bg-violet-500/25 text-violet-50 ring-violet-300/50"
+                    : "bg-studio-surface text-violet-100 ring-violet-400/30 hover:bg-violet-500/15"
+                }`}
+              >
+                {sec} сек
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
           {CHIPS.map((chip) => (
@@ -247,7 +273,7 @@ export default function AiMusicComposer({ locked }: Props) {
         >
           <span className="inline-flex items-center justify-center gap-2">
             <Sparkles className="h-5 w-5" />
-            Сгенерировать трек
+            Сгенерировать {duration} сек
           </span>
         </button>
 
@@ -261,7 +287,9 @@ export default function AiMusicComposer({ locked }: Props) {
 
         {!busy && audioUrl && (
           <div className="mt-6 space-y-3 rounded-2xl bg-studio-bg/50 p-4 ring-1 ring-violet-400/20">
-            <p className="text-sm font-medium text-violet-100">Готовая минусовка</p>
+            <p className="text-sm font-medium text-violet-100">
+              Готовая минусовка · {clipDuration ?? duration} сек
+            </p>
             <MediaAudio src={audioUrl} controls className="w-full" preload="metadata" />
             <div className="flex flex-wrap justify-center gap-2">
               <Button
