@@ -8,7 +8,9 @@ from pathlib import Path
 import numpy as np
 
 from analyzer import (
-    GREEN_CENTS,
+    karaoke_frame_points,
+    midi_to_hz,
+    pitch_class_distance,
     quantize_note_blocks,
     score_features,
     score_with_anchors,
@@ -63,27 +65,28 @@ class HitboxScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertEqual(result["overall"], 100)
 
-    def test_vibrato_inside_green_zone_is_perfect(self) -> None:
+    def test_vibrato_inside_same_midi_class_is_perfect(self) -> None:
         wobble = [
-            value + (GREEN_CENTS / 100.0) * (0.5 if index % 2 else -0.5)
+            value + (0.4 if index % 2 else -0.4)
             for index, value in enumerate(MELODY)
         ]
         result = score_features(self.reference, features(wobble))
         self.assertTrue(result["evaluable"], result)
         self.assertEqual(result["overall"], 100)
 
-    def test_near_zone_gets_half_points(self) -> None:
+    def test_one_semitone_off_gets_rhythm_plus_near_pitch(self) -> None:
         near = [value + 0.9 for value in MELODY]
         result = score_features(self.reference, features(near))
         self.assertTrue(result["evaluable"], result)
-        self.assertGreaterEqual(result["overall"], 40)
-        self.assertLessEqual(result["overall"], 60)
+        self.assertGreaterEqual(result["overall"], 70)
+        self.assertLessEqual(result["overall"], 80)
 
-    def test_wrong_notes_score_low(self) -> None:
+    def test_wrong_notes_still_get_rhythm_credit(self) -> None:
         wrong = [value + 4 for value in MELODY]
         result = score_features(self.reference, features(wrong))
         self.assertTrue(result["evaluable"], result)
-        self.assertLess(result["overall"], 20)
+        self.assertGreaterEqual(result["overall"], 45)
+        self.assertLessEqual(result["overall"], 55)
 
     def test_silence_between_blocks_is_not_penalized(self) -> None:
         rest = [None] * 8
@@ -93,20 +96,21 @@ class HitboxScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 90)
 
-    def test_two_semitone_shift_is_not_auto_keyed(self) -> None:
+    def test_two_semitone_shift_is_rhythm_only(self) -> None:
         shifted = features([value + 2 for value in MELODY])
         result = score_features(self.reference, shifted)
         self.assertTrue(result["evaluable"], result)
-        self.assertLess(result["overall"], 40)
+        self.assertGreaterEqual(result["overall"], 45)
+        self.assertLessEqual(result["overall"], 55)
 
-    def test_pitch_class_mirrors_near_octave(self) -> None:
-        from analyzer import midi_to_hz, pitch_class_cents
-
-        c4 = midi_to_hz(60)
-        almost_octave = c4 * (2.0 ** (1190.0 / 1200.0))
-        self.assertAlmostEqual(pitch_class_cents(almost_octave, c4), 10.0, delta=0.2)
-        self.assertAlmostEqual(pitch_class_cents(c4 / 2.0, c4), 0.0, delta=0.2)
-        self.assertAlmostEqual(pitch_class_cents(c4 * 4.0, c4), 0.0, delta=0.2)
+    def test_karaoke_pitch_class_is_octave_blind(self) -> None:
+        self.assertEqual(pitch_class_distance(60, 72), 0)
+        self.assertEqual(pitch_class_distance(61, 60), 1)
+        self.assertEqual(pitch_class_distance(71, 60), 1)
+        self.assertEqual(karaoke_frame_points(midi_to_hz(60), midi_to_hz(60)), (50, 50))
+        self.assertEqual(karaoke_frame_points(midi_to_hz(61), midi_to_hz(60)), (50, 25))
+        self.assertEqual(karaoke_frame_points(midi_to_hz(64), midi_to_hz(60)), (50, 0))
+        self.assertEqual(karaoke_frame_points(None, midi_to_hz(60)), (0, 0))
 
     def test_octave_down_scores_as_perfect_hit(self) -> None:
         octave = features([value - 12 for value in MELODY])

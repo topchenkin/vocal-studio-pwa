@@ -1,32 +1,55 @@
-import { frequencyFromMidi, midiFromFrequency, noteLabelFromMidi } from "@/lib/pitch";
+import { frequencyFromMidi, noteLabelFromMidi } from "@/lib/pitch";
 import type { NoteBlock, PhrasePitchFeatures } from "@/types";
 
-export const HITBOX_GREEN_CENTS = 80;
-export const HITBOX_NEAR_CENTS = 150;
-export const HITBOX_TIMING_SLACK_SEC = 0.2;
+export const HITBOX_GREEN_CENTS = 100;
+export const HITBOX_NEAR_CENTS = 200;
+export const HITBOX_TIMING_SLACK_SEC = 0.3;
 export const HITBOX_FRAME_SEC = 0.1;
 export const SCORE_FPS = 10;
+export const KARAOKE_RHYTHM_POINTS = 50;
+export const KARAOKE_PITCH_POINTS = 50;
+export const KARAOKE_NEAR_PITCH_POINTS = 25;
 
 const MIN_BLOCK_SEC = 0.08;
 const VIBRATO_CENTS = 80;
 const GAP_MERGE_SEC = 0.12;
 
-export function hzToCents(userHz: number, targetHz: number): number {
-  if (userHz <= 0 || targetHz <= 0) return 9999;
-  return 1200 * Math.log2(userHz / targetHz);
+export function hzToMidiNote(hz: number): number {
+  if (hz <= 0 || !Number.isFinite(hz)) return -1;
+  return Math.round(69 + 12 * Math.log2(hz / 440));
 }
 
-/**
- * Octave-blind pitch-class distance in [0, 600].
- * 1200¢ / 2400¢ → 0; 1190¢ → 10 (mirror around the octave).
- */
-export function pitchClassCents(userHz: number, targetHz: number): number {
-  if (userHz <= 0 || targetHz <= 0) return 9999;
-  const userCents = 1200 * Math.log2(userHz);
-  const targetCents = 1200 * Math.log2(targetHz);
-  let diff = Math.abs(userCents - targetCents) % 1200;
-  if (diff > 600) diff = 1200 - diff;
-  return diff;
+export function pitchClass(midi: number): number {
+  return ((Math.round(midi) % 12) + 12) % 12;
+}
+
+export function pitchClassDistance(userMidi: number, targetMidi: number): number {
+  const diff = Math.abs(pitchClass(userMidi) - pitchClass(targetMidi)) % 12;
+  return Math.min(diff, 12 - diff);
+}
+
+export function karaokeFrameScore(
+  userHz: number | null,
+  targetHz: number,
+  voiced: boolean
+): { rhythm: number; pitch: number; total: number } {
+  if (!voiced || userHz == null || userHz <= 0 || targetHz <= 0) {
+    return { rhythm: 0, pitch: 0, total: 0 };
+  }
+  const rhythm = KARAOKE_RHYTHM_POINTS;
+  const dist = pitchClassDistance(hzToMidiNote(userHz), hzToMidiNote(targetHz));
+  const pitch =
+    dist === 0 ? KARAOKE_PITCH_POINTS : dist === 1 ? KARAOKE_NEAR_PITCH_POINTS : 0;
+  return { rhythm, pitch, total: rhythm + pitch };
+}
+
+export function finalizeKaraokeScore(earned: number, maxPoints: number): number {
+  if (!maxPoints || maxPoints === 0 || !Number.isFinite(earned) || !Number.isFinite(maxPoints)) {
+    return 0;
+  }
+  const score = (earned / maxPoints) * 100;
+  if (!Number.isFinite(score)) return 0;
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 export function shiftNoteBlocks(blocks: NoteBlock[], semitones: number): NoteBlock[] {
@@ -74,17 +97,6 @@ export function framePoints(cents: number | null): 0 | 50 | 100 {
   if (error <= HITBOX_GREEN_CENTS) return 100;
   if (error <= HITBOX_NEAR_CENTS) return 50;
   return 0;
-}
-
-export function totalTargetDuration(blocks: NoteBlock[]): number {
-  return blocks.reduce((sum, block) => sum + Math.max(0, block.endTime - block.startTime), 0);
-}
-
-export function clampExerciseScore(earned: number, targetDurationSec: number, fps = SCORE_FPS): number {
-  const maxPoints = Math.max(1, targetDurationSec * fps) * 100;
-  const finalScore = (earned / maxPoints) * 100;
-  if (!Number.isFinite(finalScore)) return 0;
-  return Math.max(0, Math.min(100, Math.round(finalScore)));
 }
 
 export function quantizeNoteBlocks(features: PhrasePitchFeatures | null | undefined): NoteBlock[] {
@@ -182,19 +194,19 @@ export function displayMidiForLive(
   liveHz: number | null,
   time: number,
   blocks: NoteBlock[]
-): { midi: number; snapped: boolean; cents: number | null; block: NoteBlock | null } | null {
+): { midi: number; snapped: boolean; pitchScore: number; block: NoteBlock | null } | null {
   if (liveHz == null || liveHz <= 0) return null;
-  const block = blockAtTime(blocks, time);
-  const liveMidi = midiFromFrequency(liveHz);
-  if (!block) return { midi: liveMidi, snapped: false, cents: null, block: null };
-  const cents = pitchClassCents(liveHz, block.startHz);
-  if (cents <= HITBOX_GREEN_CENTS) {
-    return { midi: block.midi, snapped: true, cents, block };
+  const block = blockAtTime(blocks, time, HITBOX_TIMING_SLACK_SEC);
+  const liveMidi = hzToMidiNote(liveHz);
+  if (!block) return { midi: liveMidi, snapped: false, pitchScore: 0, block: null };
+  const scored = karaokeFrameScore(liveHz, block.startHz, true);
+  if (scored.pitch > 0) {
+    return { midi: block.midi, snapped: true, pitchScore: scored.pitch, block };
   }
   return {
     midi: foldMidiToward(liveMidi, block.midi),
     snapped: false,
-    cents,
+    pitchScore: 0,
     block,
   };
 }

@@ -13,7 +13,7 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import {
-  HITBOX_GREEN_CENTS,
+  HITBOX_TIMING_SLACK_SEC,
   blockAtTime,
   displayMidiForLive,
   quantizeNoteBlocks,
@@ -23,14 +23,15 @@ import type { PhrasePitchFeatures } from "@/types";
 export type MelodyGuidePhase = "idle" | "listening" | "armed" | "live";
 
 const FFT_SIZE = 4096;
-const HINT = "Серые блоки — ноты. Зелёный шар в блоке = попадание. Красный — фальшь.";
+const HINT = "Пойте в серые блоки. Зелёный — попадание в ноту, жёлтый — вы в ритме.";
 const STATUS_CLASS =
   "flex h-7 min-w-0 max-w-full shrink items-center justify-center truncate rounded-full bg-white/5 px-2 text-center text-[11px] font-medium leading-none ring-1 ring-white/10 ";
 const PIXELS_PER_SEC = 100;
-const PLAYHEAD_FRAC = 0.3;
-const VAD_RMS = 0.01;
+const PLAYHEAD_FRAC = 0.2;
+const VAD_RMS = 0.02;
+const SMOOTH = 0.2;
 
-type LivePoint = { t: number; hz: number | null };
+type LivePoint = { t: number; midi: number; snapped: boolean };
 
 function midiRange(midis: number[]): { min: number; max: number } {
   if (midis.length === 0) return { min: 50, max: 74 };
@@ -75,8 +76,9 @@ export default function LiveMelodyGuide({
   const liveRef = useRef<LivePoint[]>([]);
   const liveHzRef = useRef<number | null>(null);
   const liveNoteRef = useRef("—");
-  const centsRef = useRef<number | null>(null);
+  const pitchScoreRef = useRef(0);
   const snappedRef = useRef(false);
+  const smoothMidiRef = useRef<number | null>(null);
   const rmsRef = useRef(0);
   const playheadRef = useRef(playheadSec);
   const phaseRef = useRef(phase);
@@ -105,6 +107,7 @@ export default function LiveMelodyGuide({
     if (phase === "live" || phase === "armed") {
       liveRef.current = [];
       liveHzRef.current = null;
+      smoothMidiRef.current = null;
     }
   }, [phase]);
 
@@ -151,6 +154,7 @@ export default function LiveMelodyGuide({
       const xAt = (time: number) => nowX + (time - tNow) * PIXELS_PER_SEC;
       const yAt = (midi: number) => yFromMidi(midi, range, padT, padT + innerH);
       const pulse = 0.45 + 0.55 * Math.sin(now / 420);
+      const active = blockAtTime(blocks, tNow, HITBOX_TIMING_SLACK_SEC);
 
       drawing.clearRect(0, 0, width, height);
       drawing.fillStyle = "#111827";
@@ -165,13 +169,24 @@ export default function LiveMelodyGuide({
         const x = xAt(block.startTime);
         const w = Math.max(4, xAt(block.endTime) - x);
         if (x + w < -8 || x > width + 8) continue;
-        const yTop = yAt(block.midi + HITBOX_GREEN_CENTS / 100);
-        const yBot = yAt(block.midi - HITBOX_GREEN_CENTS / 100);
-        const h = Math.max(10, yBot - yTop);
-        const active = tNow >= block.startTime && tNow <= block.endTime;
-        drawing.fillStyle = active ? "rgba(52,211,153,0.28)" : "rgba(148,163,184,0.2)";
-        drawing.strokeStyle = active ? "rgba(52,211,153,0.9)" : "rgba(203,213,225,0.35)";
-        drawing.lineWidth = 1.4;
+        const yTop = yAt(block.midi + 1);
+        const yBot = yAt(block.midi - 1);
+        const h = Math.max(12, yBot - yTop);
+        const lit = active?.startTime === block.startTime && snappedRef.current;
+        const inWindow = active?.startTime === block.startTime;
+        drawing.shadowColor = lit ? "#4ade80" : "transparent";
+        drawing.shadowBlur = lit ? 22 : 0;
+        drawing.fillStyle = lit
+          ? "rgba(74,222,128,0.45)"
+          : inWindow
+            ? "rgba(250,204,21,0.22)"
+            : "rgba(148,163,184,0.2)";
+        drawing.strokeStyle = lit
+          ? "rgba(74,222,128,1)"
+          : inWindow
+            ? "rgba(250,204,21,0.85)"
+            : "rgba(203,213,225,0.35)";
+        drawing.lineWidth = lit ? 2.4 : 1.4;
         drawing.beginPath();
         if (typeof drawing.roundRect === "function") {
           drawing.roundRect(x, yTop, w, h, 6);
@@ -180,7 +195,8 @@ export default function LiveMelodyGuide({
         }
         drawing.fill();
         drawing.stroke();
-        drawing.fillStyle = "rgba(226,232,240,0.75)";
+        drawing.shadowBlur = 0;
+        drawing.fillStyle = "rgba(226,232,240,0.85)";
         drawing.font = "10px ui-sans-serif, system-ui";
         drawing.textAlign = "left";
         drawing.textBaseline = "middle";
@@ -191,29 +207,30 @@ export default function LiveMelodyGuide({
       if (live.length > 1) {
         drawing.lineJoin = "round";
         drawing.lineCap = "round";
-        drawing.lineWidth = 3;
-        let prev: { x: number; y: number; color: string } | null = null;
-        for (const point of live) {
-          if (point.hz == null) {
-            prev = null;
+        drawing.lineWidth = 3.4;
+        drawing.beginPath();
+        let started = false;
+        for (let i = 0; i < live.length; i += 1) {
+          const point = live[i];
+          if (!point) continue;
+          const x = xAt(point.t);
+          const y = yAt(point.midi);
+          if (!started) {
+            drawing.moveTo(x, y);
+            started = true;
             continue;
           }
-          const shown = displayMidiForLive(point.hz, point.t, blocks);
-          if (!shown) {
-            prev = null;
+          const prev = live[i - 1];
+          if (!prev) {
+            drawing.moveTo(x, y);
             continue;
           }
-          const color = shown.snapped ? "#4ade80" : "#fb7185";
-          const next = { x: xAt(point.t), y: yAt(shown.midi), color };
-          if (prev && prev.color === color) {
-            drawing.strokeStyle = color;
-            drawing.beginPath();
-            drawing.moveTo(prev.x, prev.y);
-            drawing.lineTo(next.x, next.y);
-            drawing.stroke();
-          }
-          prev = next;
+          const cx = (xAt(prev.t) + x) / 2;
+          const cy = (yAt(prev.midi) + y) / 2;
+          drawing.quadraticCurveTo(xAt(prev.t), yAt(prev.midi), cx, cy);
         }
+        drawing.strokeStyle = snappedRef.current ? "#4ade80" : "#fbbf24";
+        drawing.stroke();
       }
 
       drawing.strokeStyle = `rgba(251,191,36,${0.55 + pulse * 0.35})`;
@@ -223,29 +240,17 @@ export default function LiveMelodyGuide({
       drawing.lineTo(nowX, padT + innerH);
       drawing.stroke();
 
-      const liveHz = liveHzRef.current;
-      const active = blockAtTime(blocks, tNow, 0);
-      if (phaseRef.current === "live" || phaseRef.current === "armed") {
-        const shown = liveHz ? displayMidiForLive(liveHz, tNow, blocks) : null;
+      const smooth = smoothMidiRef.current;
+      if (smooth != null && (phaseRef.current === "live" || phaseRef.current === "armed")) {
         const orbX = phaseRef.current === "armed" ? width * 0.12 : nowX;
-        if (shown?.snapped && active) {
-          const orbY = yAt(active.midi);
-          drawing.shadowColor = "#4ade80";
-          drawing.shadowBlur = 18;
-          drawing.fillStyle = "#4ade80";
-          drawing.beginPath();
-          drawing.arc(orbX, orbY, 7 + pulse * 3, 0, Math.PI * 2);
-          drawing.fill();
-          drawing.shadowBlur = 0;
-        } else if (shown) {
-          drawing.shadowColor = "#fb7185";
-          drawing.shadowBlur = 14;
-          drawing.fillStyle = "#fb7185";
-          drawing.beginPath();
-          drawing.arc(orbX, yAt(shown.midi), 7 + pulse * 3, 0, Math.PI * 2);
-          drawing.fill();
-          drawing.shadowBlur = 0;
-        }
+        const color = snappedRef.current ? "#4ade80" : pitchScoreRef.current > 0 ? "#facc15" : "#fb7185";
+        drawing.shadowColor = color;
+        drawing.shadowBlur = 18;
+        drawing.fillStyle = color;
+        drawing.beginPath();
+        drawing.arc(orbX, yAt(smooth), 7 + pulse * 3, 0, Math.PI * 2);
+        drawing.fill();
+        drawing.shadowBlur = 0;
       }
       drawing.restore();
 
@@ -278,14 +283,23 @@ export default function LiveMelodyGuide({
         liveHzRef.current = hz;
         const shown = hz ? displayMidiForLive(hz, tNow, blocks) : null;
         liveNoteRef.current = shown ? noteLabelFromMidi(shown.midi) : "—";
-        centsRef.current = shown?.cents ?? null;
+        pitchScoreRef.current = shown?.pitchScore ?? 0;
         snappedRef.current = Boolean(shown?.snapped);
-        if (phaseRef.current === "live") {
-          liveRef.current.push({ t: Math.max(0, tNow), hz });
-          if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
+        if (shown) {
+          const current = smoothMidiRef.current;
+          smoothMidiRef.current =
+            current == null ? shown.midi : current + (shown.midi - current) * SMOOTH;
+          if (phaseRef.current === "live") {
+            liveRef.current.push({
+              t: Math.max(0, tNow),
+              midi: smoothMidiRef.current,
+              snapped: shown.snapped,
+            });
+            if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
+          }
         }
 
-        const activeBlock = blockAtTime(blocks, tNow, 0);
+        const activeBlock = blockAtTime(blocks, tNow, HITBOX_TIMING_SLACK_SEC);
         if (phaseRef.current === "live" && now - lastSyncLog > 250) {
           lastSyncLog = now;
           const audio = backingAudioRef?.current;
@@ -297,14 +311,14 @@ export default function LiveMelodyGuide({
             activeBlock: activeBlock
               ? { note: activeBlock.note, start: activeBlock.startTime, end: activeBlock.endTime }
               : null,
-            pitchClassCents: shown?.cents ?? null,
+            pitchScore: pitchScoreRef.current,
           });
         }
       }
       paint(now);
       if (now - lastHud > 80) {
         lastHud = now;
-        const current = blockAtTime(blocks, tNow, 0);
+        const current = blockAtTime(blocks, tNow, HITBOX_TIMING_SLACK_SEC);
         if (targetEl.current) targetEl.current.textContent = current?.note ?? "—";
         if (yoursEl.current) yoursEl.current.textContent = liveNoteRef.current;
         if (statusEl.current) {
@@ -312,14 +326,12 @@ export default function LiveMelodyGuide({
           statusEl.current.textContent = !live
             ? phaseRef.current === "listening"
               ? "Слушайте"
-              : "Эталон"
-            : liveHzRef.current == null
+              : "Караоке"
+            : rmsRef.current <= VAD_RMS
               ? "Спойте"
               : snappedRef.current
-                ? "В зоне"
-                : centsRef.current == null
-                  ? "Спойте"
-                  : "Фальшь";
+                ? "В ноте"
+                : "В ритме";
           statusEl.current.className =
             STATUS_CLASS + (snappedRef.current ? "text-emerald-300" : "text-white");
         }
@@ -337,7 +349,7 @@ export default function LiveMelodyGuide({
         source = ctx.createMediaStreamSource(stream);
         analyser = ctx.createAnalyser();
         analyser.fftSize = FFT_SIZE;
-        analyser.smoothingTimeConstant = 0.12;
+        analyser.smoothingTimeConstant = 0.18;
         const inputGain = ctx.createGain();
         inputGain.gain.value = singingInputGainValue();
         source.connect(inputGain);
@@ -364,8 +376,8 @@ export default function LiveMelodyGuide({
   }, [backingAudioRef, features, phraseDurationSec, stream]);
 
   return (
-    <div className="relative mt-3 flex w-full min-w-0 max-w-full flex-col overflow-hidden">
-      <div className="relative grid h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 px-1 sm:gap-2 sm:px-2">
+    <div className="relative mt-3 flex h-full w-full max-w-[100vw] flex-col overflow-hidden">
+      <div className="relative grid h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 px-2">
         <div className="min-w-0">
           <p className="truncate text-[10px] uppercase leading-none tracking-[0.18em] text-violet-200/70">
             Эталон
@@ -378,7 +390,7 @@ export default function LiveMelodyGuide({
           </span>
         </div>
         <span ref={statusEl} className={`${STATUS_CLASS} text-white`}>
-          Эталон
+          Караоке
         </span>
         <div className="min-w-0 text-right">
           <p className="truncate text-[10px] uppercase leading-none tracking-[0.18em] text-emerald-300/80">
@@ -394,12 +406,14 @@ export default function LiveMelodyGuide({
       </div>
       <div
         ref={canvasContainerRef}
-        className="relative h-64 w-full shrink-0 overflow-hidden rounded-lg bg-gray-900"
+        className="relative w-full shrink-0 overflow-hidden rounded-lg bg-gray-900"
+        style={{ height: 250 }}
       >
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 block h-full w-full"
-          aria-label="Хитбоксы нот и живой голос"
+          className="block"
+          style={{ width: "100%", height: 250, objectFit: "contain" }}
+          aria-label="Караоке-хитбоксы"
         />
       </div>
       <p className="h-8 truncate px-2 text-center text-[10px] leading-8 text-zinc-400">{HINT}</p>

@@ -392,8 +392,8 @@ export default function VocalExercisePractice({
     selected?.feature_status === "ready" && ["idle", "listening", "failed"].includes(stage);
 
   return (
-    <div className="mt-3 flex w-full max-w-[100vw] flex-col box-border overflow-x-hidden px-2 sm:px-4">
-      <div className="min-w-0 w-full max-w-full overflow-x-hidden rounded-2xl bg-studio-card p-3 ring-1 ring-studio-accent/25 sm:p-4">
+    <div className="mt-3 flex h-full w-full max-w-[100vw] flex-col overflow-hidden">
+      <div className="min-w-0 w-full max-w-full overflow-hidden rounded-2xl bg-studio-card p-3 ring-1 ring-studio-accent/25 sm:p-4">
       <audio
         ref={audioRef}
         src={exercise.media_url}
@@ -516,7 +516,7 @@ export default function VocalExercisePractice({
 
       {!resultReaction && attempt?.status !== "rejected" && (
         <>
-          <div className="mt-4 flex w-full flex-col flex-wrap gap-3 sm:flex-row">
+          <div className="mt-4 flex w-full flex-wrap justify-center gap-2 px-2">
             <Button
               variant="secondary"
               className="w-full text-sm sm:w-auto sm:text-base"
@@ -597,8 +597,8 @@ export default function VocalExercisePractice({
           </div>
           <div className="grid grid-cols-2 gap-2">
             {[
-              ["Попадание", attempt.overall_score],
-              ["Полнота", attempt.completeness_score],
+              ["Ритм", attempt.rhythm_score],
+              ["Ноты", attempt.intonation_score],
             ].map(([label, value]) => (
               <div key={String(label)} className="rounded-xl bg-studio-surface p-3 text-center">
                 <p className="text-[10px] text-studio-muted">{label}</p>
@@ -611,7 +611,7 @@ export default function VocalExercisePractice({
               Карточка и запись отправлены преподавателю в чат.
             </p>
           ) : (
-            <div className="mt-4 flex w-full flex-col flex-wrap gap-3 sm:flex-row">
+            <div className="mt-4 flex w-full flex-wrap justify-center gap-2 px-2">
               <Button
                 variant="secondary"
                 className="w-full text-sm sm:w-auto sm:text-base"

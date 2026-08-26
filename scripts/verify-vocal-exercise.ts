@@ -22,6 +22,12 @@ import {
   progressLabel,
 } from "../lib/exercise-progress";
 import {
+  finalizeKaraokeScore,
+  hzToMidiNote,
+  karaokeFrameScore,
+  pitchClassDistance,
+} from "../lib/note-blocks";
+import {
   exerciseResultChatText,
   exerciseResultNotificationText,
   isExerciseResultText,
@@ -29,11 +35,14 @@ import {
 } from "../lib/exercise-result-payload";
 import { resolveNotificationHref } from "../lib/notification-href";
 
-assert.equal(teacherReaction(80, "intonation").mood, "joyful");
+assert.equal(teacherReaction(81, "intonation").mood, "joyful");
+assert.equal(teacherReaction(81, "intonation").title, "Великолепно! Настоящая звезда!");
 assert.equal(teacherReaction(100, "rhythm").avatar, "/teacher-score-high.webp");
-assert.equal(teacherReaction(79, "rhythm").mood, "satisfied");
+assert.equal(teacherReaction(80, "rhythm").mood, "satisfied");
+assert.equal(teacherReaction(80, "rhythm").title, "Неплохо! Ты в ритме!");
 assert.equal(teacherReaction(50, "completeness").avatar, "/teacher-score-medium.webp");
 assert.equal(teacherReaction(49, "intonation").mood, "supportive");
+assert.equal(teacherReaction(49, "intonation").title, "Хорошая попытка! Попробуем еще?");
 assert.equal(teacherReaction(0, "rhythm").avatar, "/teacher-score-low.webp");
 assert.equal(sanitizeAttemptFeedback("??????????????????????"), "Не удалось распознать");
 assert.equal(sanitizeAttemptFeedback("Не удалось распознать вокальную мелодию."), "Не удалось распознать вокальную мелодию.");
@@ -186,26 +195,46 @@ const guide = readFileSync(
   "utf8"
 );
 assert.ok(guide.includes("createYinDetector"));
-assert.ok(guide.includes("HITBOX_GREEN_CENTS") || guide.includes("quantizeNoteBlocks"));
+assert.ok(guide.includes("quantizeNoteBlocks"));
 assert.ok(guide.includes("ResizeObserver"));
 assert.ok(guide.includes("canvasContainerRef"));
-assert.ok(guide.includes("clientWidth"));
-assert.ok(guide.includes("clientHeight"));
+assert.ok(guide.includes("PLAYHEAD_FRAC"));
+assert.ok(guide.includes("quadraticCurveTo"));
+assert.ok(guide.includes("shadowBlur"));
+assert.ok(guide.includes("height: 250"));
+assert.ok(guide.includes('objectFit: "contain"'));
 assert.ok(guide.includes("[SYNC DEBUG]"));
 assert.ok(guide.includes("currentTime"));
 assert.ok(guide.includes("PIXELS_PER_SEC"));
 assert.ok(!guide.includes("estimateAutoKeyCents"));
 assert.ok(!guide.includes("autoShift"));
 assert.ok(practice.includes("LiveMelodyGuide"));
-assert.ok(practice.includes("flex-col sm:flex-row") || practice.includes("sm:flex-row"));
+assert.ok(practice.includes("flex-wrap justify-center gap-2 px-2"));
+assert.ok(practice.includes("max-w-[100vw]"));
+assert.ok(practice.includes("overflow-hidden"));
 assert.ok(practice.includes("w-full sm:w-auto") || practice.includes("sm:w-auto"));
 assert.ok(practice.includes("/ 100"));
 assert.ok(!practice.includes("onAutoKey"));
 assert.ok(!practice.includes("EXERCISE_TRANSPOSE_OPTIONS"));
 assert.ok(practice.includes("sanitizeAttemptFeedback"));
 const noteBlocks = readFileSync(path.join(process.cwd(), "lib", "note-blocks.ts"), "utf8");
-assert.ok(noteBlocks.includes("pitchClassCents"));
-assert.ok(noteBlocks.includes("if (diff > 600) diff = 1200 - diff"));
+assert.ok(noteBlocks.includes("karaokeFrameScore"));
+assert.ok(noteBlocks.includes("HITBOX_TIMING_SLACK_SEC = 0.3"));
+assert.ok(noteBlocks.includes("userNote") || noteBlocks.includes("pitchClassDistance"));
+assert.ok(noteBlocks.includes("finalizeKaraokeScore"));
+const micAudio = readFileSync(path.join(process.cwd(), "lib", "mic-audio.ts"), "utf8");
+assert.ok(micAudio.includes("echoCancellation: false"));
+assert.ok(micAudio.includes("autoGainControl: false"));
+assert.ok(micAudio.includes("noiseSuppression: false"));
 assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
+
+assert.equal(hzToMidiNote(440), 69);
+assert.equal(pitchClassDistance(60, 72), 0);
+assert.equal(karaokeFrameScore(440, 440, true).total, 100);
+assert.equal(karaokeFrameScore(466.16, 440, true).pitch, 25);
+assert.equal(karaokeFrameScore(523.25, 440, true).pitch, 0);
+assert.equal(karaokeFrameScore(null, 440, true).total, 0);
+assert.equal(finalizeKaraokeScore(0, 0), 0);
+assert.equal(finalizeKaraokeScore(50, 100), 50);
 
 console.log("vocal exercise UI, progress, notifications, accept, TLS: ok");

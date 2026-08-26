@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Rhythm-game hitbox scoring for vocal exercises.
+"""Karaoke hitbox scoring for vocal exercises.
 
-Teacher F0 is quantized into MIDI NoteBlocks. Student takes are scored by
-100 ms frames against those hitboxes (Yousician / SingStar), not DTW.
-The denominator is always target-note duration * FPS, so silence scores 0
-instead of NaN / unevaluable.
+Forgiving SingStar-style windows (+/-300 ms). Each original-note frame:
+50 points for energy/rhythm if the student is voiced nearby, plus up to 50
+for octave-blind pitch class. Silence scores 0, never NaN.
 """
 from __future__ import annotations
 
@@ -17,15 +16,13 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "hitbox-4"
+ANALYZER_VERSION = "karaoke-1"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
 SCORE_FPS = 10
 FRAME_SEC = 1.0 / SCORE_FPS
-TIMING_SLACK_SEC = 0.20
-GREEN_CENTS = 80.0
-NEAR_CENTS = 150.0
+TIMING_SLACK_SEC = 0.30
 MIN_BLOCK_SEC = 0.08
 VIBRATO_CENTS = 80.0
 GAP_MERGE_SEC = 0.12
@@ -103,22 +100,28 @@ def midi_to_hz(midi: float) -> float:
     return 440.0 * (2.0 ** ((float(midi) - 69.0) / 12.0))
 
 
-def hz_to_cents(user_hz: float, target_hz: float) -> float:
-    if user_hz <= 0 or target_hz <= 0:
-        return 9999.0
-    return 1200.0 * math.log2(user_hz / target_hz)
+def hz_to_midi_note(hz: float) -> int:
+    if hz <= 0:
+        return -1
+    return int(round(69.0 + 12.0 * math.log2(hz / 440.0)))
 
 
-def pitch_class_cents(user_hz: float, target_hz: float) -> float:
-    """Octave-blind distance in [0, 600]. 1190? folds to 10?."""
-    if user_hz <= 0 or target_hz <= 0:
-        return 9999.0
-    user_cents = 1200.0 * math.log2(user_hz)
-    target_cents = 1200.0 * math.log2(target_hz)
-    diff = abs(user_cents - target_cents) % 1200.0
-    if diff > 600.0:
-        diff = 1200.0 - diff
-    return diff
+def pitch_class(midi: int) -> int:
+    return ((int(round(midi)) % 12) + 12) % 12
+
+
+def pitch_class_distance(user_midi: int, target_midi: int) -> int:
+    diff = abs(pitch_class(user_midi) - pitch_class(target_midi)) % 12
+    return min(diff, 12 - diff)
+
+
+def karaoke_frame_points(user_hz: float | None, target_hz: float) -> tuple[int, int]:
+    """Rhythm 50 if voiced, pitch 50/25/0 by octave-blind pitch class."""
+    if user_hz is None or user_hz <= 0 or target_hz <= 0:
+        return 0, 0
+    dist = pitch_class_distance(hz_to_midi_note(user_hz), hz_to_midi_note(target_hz))
+    pitch = 50 if dist == 0 else 25 if dist == 1 else 0
+    return 50, pitch
 
 
 def extract_features(
@@ -440,8 +443,8 @@ FEEDBACK = {
         "\u0437\u0435\u043b\u0451\u043d\u044b\u0445 \u0431\u043b\u043e\u043a\u043e\u0432 \u043d\u043e\u0442."
     ),
     "rhythm": (
-        "\u0412\u0445\u043e\u0434\u0438\u0442\u0435 \u0432 \u0431\u043b\u043e\u043a \u0432\u043e\u0432\u0440\u0435\u043c\u044f. "
-        "\u0414\u043e\u043f\u0443\u0441\u043a \u043d\u0430 \u0440\u0435\u0430\u043a\u0446\u0438\u044e 200 \u043c\u0441."
+        "\u041f\u043e\u0439\u0442\u0435 \u0432 \u0440\u0438\u0442\u043c \u0431\u043b\u043e\u043a\u043e\u0432. "
+        "\u0414\u043e\u043f\u0443\u0441\u043a \u043d\u0430 Bluetooth 300 \u043c\u0441."
     ),
     "completeness": (
         "\u041f\u0440\u043e\u043f\u043e\u0439\u0442\u0435 \u0432\u0441\u0435 \u0437\u0435\u043b\u0451\u043d\u044b\u0435 "
@@ -450,35 +453,10 @@ FEEDBACK = {
 }
 
 
-def _unevaluable(reason: str, **confidence: Any) -> dict[str, Any]:
-    return {
-        "evaluable": False,
-        "reason": reason,
-        "confidence": confidence,
-    }
-
-
-def frame_points(cents: float | None) -> int:
-    """Hitbox points for one scoring frame. Silence inside a block is a miss."""
-    if cents is None:
+def clamp_score(earned: float, max_points: float) -> int:
+    if not max_points or max_points == 0:
         return 0
-    error = abs(cents)
-    if error <= GREEN_CENTS:
-        return 100
-    if error <= NEAR_CENTS:
-        return 50
-    return 0
-
-
-def total_target_duration(blocks: list[dict[str, Any]]) -> float:
-    return sum(max(0.0, float(block["endTime"]) - float(block["startTime"])) for block in blocks)
-
-
-def clamp_score(earned: float, target_duration: float) -> int:
-    max_points = max(1.0, float(target_duration) * SCORE_FPS) * 100.0
-    if max_points <= 0:
-        return 0
-    final = (float(earned) / max_points) * 100.0
+    final = (float(earned) / float(max_points)) * 100.0
     if not math.isfinite(final):
         return 0
     return int(np.clip(round(final), 0, 100))
@@ -488,7 +466,7 @@ def score_features(
     reference: dict[str, Any],
     student: dict[str, Any],
 ) -> dict[str, Any]:
-    """Score against hitboxes. Always 0?100; silence is 0, never NaN."""
+    """Karaoke score. Always 0?100; silence is 0, never NaN."""
     raw_blocks = reference.get("blocks")
     blocks = list(raw_blocks) if isinstance(raw_blocks, list) and raw_blocks else quantize_note_blocks(reference)
     if len(blocks) < 1:
@@ -500,7 +478,7 @@ def score_features(
             "completeness": 0,
             "global_shift_semitones": 0,
             "feedback": FEEDBACK["completeness"],
-            "confidence": {"blocks": 0, "earned": 0, "possible": 100, "voiced_hits": 0},
+            "confidence": {"blocks": 0, "earned": 0, "possible": 0, "voiced_hits": 0},
         }
 
     times = [float(value) for value in student.get("times") or []]
@@ -509,64 +487,55 @@ def score_features(
     for midi in midis:
         student_hz.append(None if midi is None else midi_to_hz(float(midi)))
 
-    target_duration = total_target_duration(blocks)
     end = max((float(block["endTime"]) for block in blocks), default=0.0)
 
-    earned = 0
-    green = 0
-    near = 0
-    miss = 0
+    earned = 0.0
+    max_points = 0.0
+    rhythm_earned = 0.0
+    pitch_earned = 0.0
     voiced_hits = 0
     t = 0.0
     while t <= end + 1e-9:
+        # Denominator is original note time. +/-300 ms only searches the take.
         block = block_at(blocks, t, slack=0)
         if block is None:
             t += FRAME_SEC
             continue
+        max_points += 100.0
         hz = _student_hz_at(times, student_hz, t)
-        if hz is None or hz <= 0:
-            miss += 1
-            t += FRAME_SEC
-            continue
-        voiced_hits += 1
-        cents = pitch_class_cents(hz, float(block["startHz"]))
-        points = frame_points(cents)
-        earned += points
-        if points >= 100:
-            green += 1
-        elif points >= 50:
-            near += 1
-        else:
-            miss += 1
+        rhythm, pitch = karaoke_frame_points(hz, float(block["startHz"]))
+        if rhythm:
+            voiced_hits += 1
+        earned += rhythm + pitch
+        rhythm_earned += rhythm
+        pitch_earned += pitch
         t += FRAME_SEC
 
-    overall = clamp_score(earned, target_duration)
-    expected_frames = max(1.0, target_duration * SCORE_FPS)
-    completeness = int(np.clip(round(100.0 * voiced_hits / expected_frames), 0, 100))
-    intonation = overall
-    rhythm = 100
+    overall = clamp_score(earned, max_points)
+    half = max_points / 2.0 if max_points else 0.0
+    rhythm_score = clamp_score(rhythm_earned, half) if half else 0
+    intonation = clamp_score(pitch_earned, half) if half else 0
+    completeness = rhythm_score
     weakest = min(
         ("intonation", intonation),
-        ("completeness", completeness),
+        ("rhythm", rhythm_score),
         key=lambda item: item[1],
     )[0]
     return {
         "evaluable": True,
         "overall": overall,
-        "intonation": int(np.clip(intonation, 0, 100)),
-        "rhythm": rhythm,
+        "intonation": intonation,
+        "rhythm": rhythm_score,
         "completeness": completeness,
         "global_shift_semitones": 0,
         "feedback": FEEDBACK[weakest],
         "confidence": {
             "blocks": len(blocks),
             "earned": earned,
-            "possible": max(1.0, target_duration * SCORE_FPS) * 100.0,
-            "green_frames": green,
-            "near_frames": near,
-            "miss_frames": miss,
+            "possible": max_points,
             "voiced_hits": voiced_hits,
-            "target_duration": target_duration,
+            "rhythm_earned": rhythm_earned,
+            "pitch_earned": pitch_earned,
         },
     }
 

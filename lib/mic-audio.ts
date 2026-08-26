@@ -26,14 +26,11 @@ export function isAppleWebKit(): boolean {
 }
 
 export function singingMicConstraints(): MediaTrackConstraints {
-  const ios = isAppleWebKit();
   return {
     channelCount: 1,
     echoCancellation: false,
+    autoGainControl: false,
     noiseSuppression: false,
-    // Android already has usable levels with AGC off. iOS without AGC
-    // forces the student to shout before YIN crosses the voicing gate.
-    autoGainControl: ios,
   };
 }
 
@@ -89,6 +86,13 @@ export async function getSingingMicStream(): Promise<MediaStream> {
       }
     }
     holdIosCapture(stream);
+    stream.getAudioTracks().forEach((track) => {
+      void track.applyConstraints({
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+      }).catch(() => undefined);
+    });
     return stream;
   } catch (error) {
     cancelArmedIosCapture();

@@ -32,30 +32,30 @@ export function weakestDimension(
 
 export function teacherReaction(
   score: number,
-  weakest: ScoreDimension
+  _weakest: ScoreDimension
 ): { mood: TeacherMood; avatar: string; title: string; message: string } {
   const safe = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
-  if (safe >= 80) {
+  if (safe > 80) {
     return {
       mood: "joyful",
       avatar: TEACHER_AVATARS.joyful,
-      title: "Сильный результат!",
-      message: `Мелодия уже звучит уверенно — можно шлифовать детали. ${focusText[weakest]}`,
+      title: "Великолепно! Настоящая звезда!",
+      message: "Вы попали в ритм и в ноты — так держат сцену.",
     };
   }
   if (safe >= 50) {
     return {
       mood: "satisfied",
       avatar: TEACHER_AVATARS.satisfied,
-      title: "Хорошая основа",
-      message: `Фраза узнаваема, и прогресс слышен. ${focusText[weakest]}`,
+      title: "Неплохо! Ты в ритме!",
+      message: "Опора уже есть. Теперь ловите высоту ноты чуть точнее.",
     };
   }
   return {
     mood: "supportive",
     avatar: TEACHER_AVATARS.supportive,
-    title: "Давайте ещё раз — получится",
-    message: `Возьмите один короткий фрагмент и повторите спокойно. ${focusText[weakest]}`,
+    title: "Хорошая попытка! Попробуем еще?",
+    message: "Пойте смелее на фоне минусовки — ритм засчитывается даже без идеального строя.",
   };
 }
 
