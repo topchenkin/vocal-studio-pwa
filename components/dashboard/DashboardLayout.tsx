@@ -21,7 +21,7 @@ export default function DashboardLayout({
   return (
     <div
       className={cn(
-        "relative",
+        "relative max-w-[100vw] overflow-x-hidden",
         compact ? "flex min-h-0 flex-col" : "min-h-screen",
         compact && bottomInset
           ? "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))]"
@@ -40,7 +40,7 @@ export default function DashboardLayout({
 
       <div
         className={cn(
-          "relative mx-auto flex w-full max-w-6xl flex-col overflow-visible px-4 sm:px-6",
+          "relative mx-auto flex w-full min-w-0 max-w-6xl flex-col overflow-x-hidden box-border px-2 sm:px-4",
           compact ? "min-h-0 flex-1 pb-3 pt-3" : "pb-10 pt-6"
         )}
       >

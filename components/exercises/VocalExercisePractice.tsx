@@ -288,11 +288,26 @@ export default function VocalExercisePractice({
       if (evaluated.status === "failed") {
         throw new Error(evaluated.error || "Не удалось обработать запись");
       }
+      const rawScore = Number(evaluated.overall_score);
+      const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 0;
+      if (evaluated.status === "rejected") {
+        setAttempt({
+          ...evaluated,
+          status: "evaluated",
+          overall_score: 0,
+          intonation_score: 0,
+          rhythm_score: 0,
+          completeness_score: 0,
+        });
+        setPracticeStage("result");
+        return;
+      }
       if (evaluated.overall_score != null) {
         setBestScores((current) => ({
           ...current,
-          [selected.id]: Math.max(current[selected.id] ?? 0, evaluated.overall_score ?? 0),
+          [selected.id]: Math.max(current[selected.id] ?? 0, score),
         }));
+        setAttempt({ ...evaluated, overall_score: score });
       }
       setPracticeStage("result");
     } catch (caught) {
@@ -377,7 +392,8 @@ export default function VocalExercisePractice({
     selected?.feature_status === "ready" && ["idle", "listening", "failed"].includes(stage);
 
   return (
-    <div className="mt-3 min-w-0 w-full max-w-full overflow-hidden rounded-2xl bg-studio-card p-4 ring-1 ring-studio-accent/25">
+    <div className="mt-3 flex w-full max-w-[100vw] flex-col box-border overflow-x-hidden px-2 sm:px-4">
+      <div className="min-w-0 w-full max-w-full overflow-x-hidden rounded-2xl bg-studio-card p-3 ring-1 ring-studio-accent/25 sm:p-4">
       <audio
         ref={audioRef}
         src={exercise.media_url}
@@ -427,7 +443,7 @@ export default function VocalExercisePractice({
         </div>
       </div>
 
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+      <div className="mt-3 flex w-full min-w-0 flex-wrap gap-2">
         {phrases.map((phrase, index) => {
           const passed = (bestScores[phrase.id] ?? 0) > 80;
           return (
@@ -441,7 +457,7 @@ export default function VocalExercisePractice({
                 setPlayheadSec(0);
                 setPracticeStage("idle");
               }}
-              className={`shrink-0 rounded-xl px-3 py-2 text-xs ring-1 ${
+              className={`max-w-full rounded-xl px-3 py-2 text-xs ring-1 ${
                 selected?.id === phrase.id
                   ? "bg-studio-accent/20 text-white ring-studio-accent"
                   : "bg-studio-surface text-studio-muted ring-studio-border"
@@ -490,7 +506,7 @@ export default function VocalExercisePractice({
           {stage === "counting" && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200/80">Приготовьтесь</p>
-              <p className="font-display text-7xl font-semibold text-white drop-shadow-[0_0_28px_rgba(167,139,250,0.85)]">
+              <p className="font-display text-5xl font-semibold text-white drop-shadow-[0_0_28px_rgba(167,139,250,0.85)] sm:text-7xl">
                 {count}
               </p>
             </div>
@@ -500,7 +516,7 @@ export default function VocalExercisePractice({
 
       {!resultReaction && attempt?.status !== "rejected" && (
         <>
-          <div className="mx-auto mt-3 flex w-full max-w-md flex-wrap justify-center gap-2 sm:gap-4">
+          <div className="mt-4 flex w-full flex-col flex-wrap gap-3 sm:flex-row">
             <Button
               variant="secondary"
               className="w-full text-sm sm:w-auto sm:text-base"
@@ -562,17 +578,19 @@ export default function VocalExercisePractice({
       )}
 
       {resultReaction && attempt && (
-        <div className="mt-4 space-y-4">
-          <div className="flex items-center gap-4 rounded-2xl bg-studio-surface p-4">
+        <div className="mt-4 min-w-0 space-y-4">
+          <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-studio-surface p-3 sm:gap-4 sm:p-4">
             <img
               src={resultReaction.avatar}
               alt=""
               width={112}
               height={112}
-              className="h-24 w-24 shrink-0 object-contain"
+              className="h-16 w-16 shrink-0 object-contain sm:h-24 sm:w-24"
             />
-            <div>
-              <p className="font-display text-4xl font-semibold">{attempt.overall_score}</p>
+            <div className="min-w-0">
+              <p className="font-display text-3xl font-semibold sm:text-4xl">
+                {Number.isFinite(Number(attempt.overall_score)) ? attempt.overall_score : 0} / 100
+              </p>
               <h5 className="mt-1 font-medium">{resultReaction.title}</h5>
               <p className="mt-1 text-xs text-studio-muted">{resultReaction.message}</p>
             </div>
@@ -593,7 +611,7 @@ export default function VocalExercisePractice({
               Карточка и запись отправлены преподавателю в чат.
             </p>
           ) : (
-            <div className="mx-auto flex w-full max-w-md flex-wrap justify-center gap-2 sm:gap-4">
+            <div className="mt-4 flex w-full flex-col flex-wrap gap-3 sm:flex-row">
               <Button
                 variant="secondary"
                 className="w-full text-sm sm:w-auto sm:text-base"
@@ -625,11 +643,15 @@ export default function VocalExercisePractice({
         </div>
       )}
 
-      {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
-      <p className="mt-4 flex items-center gap-2 text-[11px] text-studio-muted">
+      {error && <p className="mt-3 break-words text-sm text-red-300">{error}</p>}
+      <p className="mt-4 flex items-start gap-2 text-[11px] text-studio-muted">
         <Headphones className="h-4 w-4 shrink-0" />
-        Лучше использовать наушники: так фонограмма не попадёт в микрофон и не завысит оценку. Неотправленная запись удалится максимум через час.
+        <span>
+          Лучше использовать наушники: так фонограмма не попадёт в микрофон и не завысит оценку.
+          Неотправленная запись удалится максимум через час.
+        </span>
       </p>
+      </div>
     </div>
   );
 }

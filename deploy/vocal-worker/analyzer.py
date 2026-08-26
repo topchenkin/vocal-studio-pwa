@@ -2,7 +2,9 @@
 """Rhythm-game hitbox scoring for vocal exercises.
 
 Teacher F0 is quantized into MIDI NoteBlocks. Student takes are scored by
-50 ms frames against those hitboxes (SingStar / Guitar Hero), not DTW.
+100 ms frames against those hitboxes (Yousician / SingStar), not DTW.
+The denominator is always target-note duration * FPS, so silence scores 0
+instead of NaN / unevaluable.
 """
 from __future__ import annotations
 
@@ -15,14 +17,15 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "hitbox-3"
+ANALYZER_VERSION = "hitbox-4"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
-FRAME_SEC = 0.05
+SCORE_FPS = 10
+FRAME_SEC = 1.0 / SCORE_FPS
 TIMING_SLACK_SEC = 0.20
-GREEN_CENTS = 60.0
-NEAR_CENTS = 120.0
+GREEN_CENTS = 80.0
+NEAR_CENTS = 150.0
 MIN_BLOCK_SEC = 0.08
 VIBRATO_CENTS = 80.0
 GAP_MERGE_SEC = 0.12
@@ -456,7 +459,7 @@ def _unevaluable(reason: str, **confidence: Any) -> dict[str, Any]:
 
 
 def frame_points(cents: float | None) -> int:
-    """Hitbox points for one 50 ms frame. Silence inside a block is a miss."""
+    """Hitbox points for one scoring frame. Silence inside a block is a miss."""
     if cents is None:
         return 0
     error = abs(cents)
@@ -467,30 +470,38 @@ def frame_points(cents: float | None) -> int:
     return 0
 
 
+def total_target_duration(blocks: list[dict[str, Any]]) -> float:
+    return sum(max(0.0, float(block["endTime"]) - float(block["startTime"])) for block in blocks)
+
+
+def clamp_score(earned: float, target_duration: float) -> int:
+    max_points = max(1.0, float(target_duration) * SCORE_FPS) * 100.0
+    if max_points <= 0:
+        return 0
+    final = (float(earned) / max_points) * 100.0
+    if not math.isfinite(final):
+        return 0
+    return int(np.clip(round(final), 0, 100))
+
+
 def score_features(
     reference: dict[str, Any],
     student: dict[str, Any],
 ) -> dict[str, Any]:
-    """Score a take against quantized teacher hitboxes. Octave-blind, no auto-key."""
-    coverage = float(student.get("voiced_coverage", 0))
-    rms_db = float(student.get("rms_db", -120))
-    clipping = float(student.get("clipping_ratio", 0))
-    flatness = float(student.get("spectral_flatness", 0))
-    duration = float(student.get("duration") or reference.get("duration") or 0)
-    voiced_seconds = coverage * max(0.0, duration)
-    if rms_db < -48:
-        return _unevaluable(TOO_QUIET, voiced_coverage=coverage, rms_db=rms_db)
-    if voiced_seconds < 0.35 and coverage < 0.06:
-        return _unevaluable(UNRECOGNIZED, voiced_coverage=coverage, rms_db=rms_db)
-    if clipping > 0.015:
-        return _unevaluable(CLIPPED, clipping_ratio=clipping)
-    if flatness > 0.55 and coverage < 0.3:
-        return _unevaluable(NOISY, spectral_flatness=flatness)
-
+    """Score against hitboxes. Always 0?100; silence is 0, never NaN."""
     raw_blocks = reference.get("blocks")
     blocks = list(raw_blocks) if isinstance(raw_blocks, list) and raw_blocks else quantize_note_blocks(reference)
     if len(blocks) < 1:
-        return _unevaluable(WEAK_REFERENCE, blocks=0)
+        return {
+            "evaluable": True,
+            "overall": 0,
+            "intonation": 0,
+            "rhythm": 0,
+            "completeness": 0,
+            "global_shift_semitones": 0,
+            "feedback": FEEDBACK["completeness"],
+            "confidence": {"blocks": 0, "earned": 0, "possible": 100, "voiced_hits": 0},
+        }
 
     times = [float(value) for value in student.get("times") or []]
     midis = list(student.get("pitch_midi") or [])
@@ -498,13 +509,10 @@ def score_features(
     for midi in midis:
         student_hz.append(None if midi is None else midi_to_hz(float(midi)))
 
-    end = max(
-        duration,
-        max((float(block["endTime"]) for block in blocks), default=0.0),
-    )
+    target_duration = total_target_duration(blocks)
+    end = max((float(block["endTime"]) for block in blocks), default=0.0)
 
     earned = 0
-    possible = 0
     green = 0
     near = 0
     miss = 0
@@ -515,9 +523,8 @@ def score_features(
         if block is None:
             t += FRAME_SEC
             continue
-        possible += 100
         hz = _student_hz_at(times, student_hz, t)
-        if hz is None:
+        if hz is None or hz <= 0:
             miss += 1
             t += FRAME_SEC
             continue
@@ -533,14 +540,10 @@ def score_features(
             miss += 1
         t += FRAME_SEC
 
-    if possible <= 0:
-        return _unevaluable(WEAK_REFERENCE, blocks=len(blocks))
-    if voiced_hits < 3 or voiced_hits < 0.25 * max(1, possible // 100):
-        return _unevaluable(ABORTED, voiced_hits=voiced_hits, possible=possible)
-
-    overall = int(round(100.0 * earned / possible))
+    overall = clamp_score(earned, target_duration)
+    expected_frames = max(1.0, target_duration * SCORE_FPS)
+    completeness = int(np.clip(round(100.0 * voiced_hits / expected_frames), 0, 100))
     intonation = overall
-    completeness = int(round(100.0 * voiced_hits / max(1, possible // 100)))
     rhythm = 100
     weakest = min(
         ("intonation", intonation),
@@ -549,20 +552,21 @@ def score_features(
     )[0]
     return {
         "evaluable": True,
-        "overall": int(np.clip(overall, 0, 100)),
+        "overall": overall,
         "intonation": int(np.clip(intonation, 0, 100)),
         "rhythm": rhythm,
-        "completeness": int(np.clip(completeness, 0, 100)),
+        "completeness": completeness,
         "global_shift_semitones": 0,
         "feedback": FEEDBACK[weakest],
         "confidence": {
             "blocks": len(blocks),
             "earned": earned,
-            "possible": possible,
+            "possible": max(1.0, target_duration * SCORE_FPS) * 100.0,
             "green_frames": green,
             "near_frames": near,
             "miss_frames": miss,
             "voiced_hits": voiced_hits,
+            "target_duration": target_duration,
         },
     }
 

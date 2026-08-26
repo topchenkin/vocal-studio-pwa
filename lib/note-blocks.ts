@@ -1,10 +1,11 @@
 import { frequencyFromMidi, midiFromFrequency, noteLabelFromMidi } from "@/lib/pitch";
 import type { NoteBlock, PhrasePitchFeatures } from "@/types";
 
-export const HITBOX_GREEN_CENTS = 60;
-export const HITBOX_NEAR_CENTS = 120;
+export const HITBOX_GREEN_CENTS = 80;
+export const HITBOX_NEAR_CENTS = 150;
 export const HITBOX_TIMING_SLACK_SEC = 0.2;
-export const HITBOX_FRAME_SEC = 0.05;
+export const HITBOX_FRAME_SEC = 0.1;
+export const SCORE_FPS = 10;
 
 const MIN_BLOCK_SEC = 0.08;
 const VIBRATO_CENTS = 80;
@@ -73,6 +74,17 @@ export function framePoints(cents: number | null): 0 | 50 | 100 {
   if (error <= HITBOX_GREEN_CENTS) return 100;
   if (error <= HITBOX_NEAR_CENTS) return 50;
   return 0;
+}
+
+export function totalTargetDuration(blocks: NoteBlock[]): number {
+  return blocks.reduce((sum, block) => sum + Math.max(0, block.endTime - block.startTime), 0);
+}
+
+export function clampExerciseScore(earned: number, targetDurationSec: number, fps = SCORE_FPS): number {
+  const maxPoints = Math.max(1, targetDurationSec * fps) * 100;
+  const finalScore = (earned / maxPoints) * 100;
+  if (!Number.isFinite(finalScore)) return 0;
+  return Math.max(0, Math.min(100, Math.round(finalScore)));
 }
 
 export function quantizeNoteBlocks(features: PhrasePitchFeatures | null | undefined): NoteBlock[] {

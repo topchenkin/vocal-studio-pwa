@@ -4,13 +4,11 @@ import { useEffect, useRef, type RefObject } from "react";
 import {
   computeRms,
   createYinDetector,
-  dbFromRms,
   detectPitchHzOctaveSafe,
   noteLabelFromMidi,
 } from "@/lib/pitch";
 import {
   connectAnalyserToDestination,
-  isAppleWebKit,
   readAnalyserTimeDomain,
   singingInputGainValue,
 } from "@/lib/mic-audio";
@@ -27,13 +25,10 @@ export type MelodyGuidePhase = "idle" | "listening" | "armed" | "live";
 const FFT_SIZE = 4096;
 const HINT = "Серые блоки — ноты. Зелёный шар в блоке = попадание. Красный — фальшь.";
 const STATUS_CLASS =
-  "flex h-7 w-[7.5rem] shrink-0 items-center justify-center truncate rounded-full bg-white/5 px-2 text-center text-[11px] font-medium leading-none ring-1 ring-white/10 ";
-const WINDOW_PAST_SEC = 1.2;
-const WINDOW_FUTURE_SEC = 2.8;
-const MIN_VOLUME_DB = -72;
-const MIN_VOLUME_DB_IOS = -76;
-const MIN_PEAK = 0.008;
-const FALLBACK_PEAK = 0.012;
+  "flex h-7 min-w-0 max-w-full shrink items-center justify-center truncate rounded-full bg-white/5 px-2 text-center text-[11px] font-medium leading-none ring-1 ring-white/10 ";
+const PIXELS_PER_SEC = 100;
+const PLAYHEAD_FRAC = 0.3;
+const VAD_RMS = 0.01;
 
 type LivePoint = { t: number; hz: number | null };
 
@@ -50,26 +45,12 @@ function yFromMidi(midi: number, range: { min: number; max: number }, top: numbe
   return bottom - ((midi - range.min) / span) * (bottom - top);
 }
 
-function fitCanvas(canvas: HTMLCanvasElement, host: HTMLElement | null) {
-  const dpr = Math.min(2.5, window.devicePixelRatio || 1);
-  const cssW = Math.max(1, host?.clientWidth || canvas.getBoundingClientRect().width);
-  const cssH = Math.max(1, canvas.getBoundingClientRect().height || host?.clientHeight || 208);
-  const width = Math.max(1, Math.round(cssW * dpr));
-  const height = Math.max(1, Math.round(cssH * dpr));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  return { width, height, dpr };
-}
-
-function peakOf(buffer: Float32Array) {
-  let peak = 0;
-  for (let i = 0; i < buffer.length; i += 1) {
-    const value = Math.abs(buffer[i] ?? 0);
-    if (value > peak) peak = value;
-  }
-  return peak;
+function fitCanvas(canvas: HTMLCanvasElement, host: HTMLElement) {
+  const width = Math.max(1, Math.floor(host.clientWidth));
+  const height = Math.max(1, Math.floor(host.clientHeight));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  return { width, height };
 }
 
 export default function LiveMelodyGuide({
@@ -90,15 +71,13 @@ export default function LiveMelodyGuide({
   phraseStartSec?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const hostRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<LivePoint[]>([]);
   const liveHzRef = useRef<number | null>(null);
   const liveNoteRef = useRef("—");
   const centsRef = useRef<number | null>(null);
   const snappedRef = useRef(false);
   const rmsRef = useRef(0);
-  const waveRef = useRef<Float32Array<ArrayBuffer> | null>(null);
-  const startedAtRef = useRef(0);
   const playheadRef = useRef(playheadSec);
   const phaseRef = useRef(phase);
   const phraseStartRef = useRef(phraseStartSec);
@@ -111,7 +90,7 @@ export default function LiveMelodyGuide({
   phraseStartRef.current = phraseStartSec;
 
   useEffect(() => {
-    const host = hostRef.current;
+    const host = canvasContainerRef.current;
     const canvas = canvasRef.current;
     if (!host || !canvas) return;
     const observer = new ResizeObserver(() => {
@@ -126,19 +105,19 @@ export default function LiveMelodyGuide({
     if (phase === "live" || phase === "armed") {
       liveRef.current = [];
       liveHzRef.current = null;
-      startedAtRef.current = performance.now();
     }
   }, [phase]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const baseBlocks = quantizeNoteBlocks(features);
+    const host = canvasContainerRef.current;
+    if (!canvas || !host) return;
+    const blocks = quantizeNoteBlocks(features);
     const duration = Math.max(
       0.9,
-      phraseDurationSec || Number(features?.duration) || (baseBlocks[baseBlocks.length - 1]?.endTime ?? 4)
+      phraseDurationSec || Number(features?.duration) || (blocks[blocks.length - 1]?.endTime ?? 4)
     );
-    const windowSec = WINDOW_PAST_SEC + WINDOW_FUTURE_SEC;
+    const range = midiRange(blocks.map((block) => block.midi));
 
     let raf = 0;
     let ctx: AudioContext | null = null;
@@ -162,76 +141,64 @@ export default function LiveMelodyGuide({
     const paint = (now: number) => {
       const drawing = canvas.getContext("2d");
       if (!drawing) return;
-      const { width, height, dpr } = fitCanvas(canvas, hostRef.current);
-      const padL = 42 * dpr;
-      const padR = 16 * dpr;
-      const padT = 18 * dpr;
-      const padB = 28 * dpr;
-      const innerW = width - padL - padR;
+      const { width, height } = fitCanvas(canvas, host);
+      const padL = 36;
+      const padT = 12;
+      const padB = 16;
       const innerH = height - padT - padB;
       const tNow = readPhraseTime();
-      const nowX = padL + innerW * (WINDOW_PAST_SEC / windowSec);
-      const pps = innerW / windowSec;
-      const xAt = (time: number) => nowX + (time - tNow) * pps;
-      const blocks = baseBlocks;
-      const range = midiRange(blocks.map((block) => block.midi));
+      const nowX = width * PLAYHEAD_FRAC;
+      const xAt = (time: number) => nowX + (time - tNow) * PIXELS_PER_SEC;
       const yAt = (midi: number) => yFromMidi(midi, range, padT, padT + innerH);
       const pulse = 0.45 + 0.55 * Math.sin(now / 420);
 
       drawing.clearRect(0, 0, width, height);
-      const bg = drawing.createLinearGradient(0, 0, width, height);
-      bg.addColorStop(0, "#07060f");
-      bg.addColorStop(1, "#120b1c");
-      drawing.fillStyle = bg;
+      drawing.fillStyle = "#111827";
       drawing.fillRect(0, 0, width, height);
 
       drawing.save();
       drawing.beginPath();
-      drawing.rect(padL, padT, innerW, innerH);
+      drawing.rect(0, padT, width, innerH);
       drawing.clip();
 
       for (const block of blocks) {
         const x = xAt(block.startTime);
-        const w = Math.max(4 * dpr, xAt(block.endTime) - x);
-        if (x + w < padL - 8 * dpr || x > padL + innerW + 8 * dpr) continue;
+        const w = Math.max(4, xAt(block.endTime) - x);
+        if (x + w < -8 || x > width + 8) continue;
         const yTop = yAt(block.midi + HITBOX_GREEN_CENTS / 100);
         const yBot = yAt(block.midi - HITBOX_GREEN_CENTS / 100);
-        const h = Math.max(10 * dpr, yBot - yTop);
-        const active = tNow >= block.startTime - 0.05 && tNow <= block.endTime + 0.05;
-        drawing.fillStyle = active ? "rgba(52,211,153,0.22)" : "rgba(148,163,184,0.18)";
-        drawing.strokeStyle = active ? "rgba(52,211,153,0.85)" : "rgba(203,213,225,0.35)";
-        drawing.lineWidth = 1.4 * dpr;
+        const h = Math.max(10, yBot - yTop);
+        const active = tNow >= block.startTime && tNow <= block.endTime;
+        drawing.fillStyle = active ? "rgba(52,211,153,0.28)" : "rgba(148,163,184,0.2)";
+        drawing.strokeStyle = active ? "rgba(52,211,153,0.9)" : "rgba(203,213,225,0.35)";
+        drawing.lineWidth = 1.4;
         drawing.beginPath();
         if (typeof drawing.roundRect === "function") {
-          drawing.roundRect(x, yTop, w, h, 6 * dpr);
+          drawing.roundRect(x, yTop, w, h, 6);
         } else {
           drawing.rect(x, yTop, w, h);
         }
         drawing.fill();
         drawing.stroke();
-        drawing.fillStyle = "rgba(226,232,240,0.7)";
-        drawing.font = `${10 * dpr}px ui-sans-serif, system-ui`;
+        drawing.fillStyle = "rgba(226,232,240,0.75)";
+        drawing.font = "10px ui-sans-serif, system-ui";
         drawing.textAlign = "left";
         drawing.textBaseline = "middle";
-        drawing.fillText(block.note, x + 6 * dpr, yTop + h / 2);
+        drawing.fillText(block.note, x + 6, yTop + h / 2);
       }
 
       const live = liveRef.current;
       if (live.length > 1) {
         drawing.lineJoin = "round";
         drawing.lineCap = "round";
-        drawing.lineWidth = 3.2 * dpr;
+        drawing.lineWidth = 3;
         let prev: { x: number; y: number; color: string } | null = null;
         for (const point of live) {
-          if (point.t < tNow - WINDOW_PAST_SEC - 0.05 || point.t > tNow + 0.08) {
-            prev = null;
-            continue;
-          }
           if (point.hz == null) {
             prev = null;
             continue;
           }
-          const shown = displayMidiForLive(point.hz, point.t, baseBlocks);
+          const shown = displayMidiForLive(point.hz, point.t, blocks);
           if (!shown) {
             prev = null;
             continue;
@@ -240,8 +207,6 @@ export default function LiveMelodyGuide({
           const next = { x: xAt(point.t), y: yAt(shown.midi), color };
           if (prev && prev.color === color) {
             drawing.strokeStyle = color;
-            drawing.shadowColor = color;
-            drawing.shadowBlur = shown.snapped ? 16 * dpr : 8 * dpr;
             drawing.beginPath();
             drawing.moveTo(prev.x, prev.y);
             drawing.lineTo(next.x, next.y);
@@ -249,53 +214,42 @@ export default function LiveMelodyGuide({
           }
           prev = next;
         }
-        drawing.shadowBlur = 0;
       }
 
       drawing.strokeStyle = `rgba(251,191,36,${0.55 + pulse * 0.35})`;
-      drawing.lineWidth = 2 * dpr;
+      drawing.lineWidth = 2;
       drawing.beginPath();
       drawing.moveTo(nowX, padT);
       drawing.lineTo(nowX, padT + innerH);
       drawing.stroke();
 
       const liveHz = liveHzRef.current;
-      if (liveHz && (phaseRef.current === "live" || phaseRef.current === "armed")) {
-        const shown = displayMidiForLive(liveHz, tNow, baseBlocks);
-        if (shown) {
-          const orbX = phaseRef.current === "armed" ? padL + innerW * 0.12 : nowX;
-          const orbY = yAt(shown.midi);
-          const color = shown.snapped ? "#4ade80" : shown.block ? "#fb7185" : "#e5e7eb";
-          drawing.shadowColor = color;
-          drawing.shadowBlur = 22 * dpr;
-          drawing.fillStyle = color;
+      const active = blockAtTime(blocks, tNow, 0);
+      if (phaseRef.current === "live" || phaseRef.current === "armed") {
+        const shown = liveHz ? displayMidiForLive(liveHz, tNow, blocks) : null;
+        const orbX = phaseRef.current === "armed" ? width * 0.12 : nowX;
+        if (shown?.snapped && active) {
+          const orbY = yAt(active.midi);
+          drawing.shadowColor = "#4ade80";
+          drawing.shadowBlur = 18;
+          drawing.fillStyle = "#4ade80";
           drawing.beginPath();
-          drawing.arc(orbX, orbY, (7 + pulse * 3) * dpr, 0, Math.PI * 2);
+          drawing.arc(orbX, orbY, 7 + pulse * 3, 0, Math.PI * 2);
+          drawing.fill();
+          drawing.shadowBlur = 0;
+        } else if (shown) {
+          drawing.shadowColor = "#fb7185";
+          drawing.shadowBlur = 14;
+          drawing.fillStyle = "#fb7185";
+          drawing.beginPath();
+          drawing.arc(orbX, yAt(shown.midi), 7 + pulse * 3, 0, Math.PI * 2);
           drawing.fill();
           drawing.shadowBlur = 0;
         }
       }
-
-      const wave = waveRef.current;
-      if (wave && wave.length > 8) {
-        const energy = Math.min(1, rmsRef.current * 14);
-        drawing.strokeStyle = `rgba(52,211,153,${0.2 + energy * 0.5})`;
-        drawing.lineWidth = 1.3 * dpr;
-        drawing.beginPath();
-        const stride = Math.max(1, Math.floor(wave.length / 180));
-        let p = 0;
-        for (let i = 0; i < wave.length; i += stride) {
-          const x = padL + (p / 180) * innerW;
-          const y = padT + innerH + 8 * dpr - (wave[i] ?? 0) * 10 * dpr;
-          if (p === 0) drawing.moveTo(x, y);
-          else drawing.lineTo(x, y);
-          p += 1;
-        }
-        drawing.stroke();
-      }
       drawing.restore();
 
-      drawing.font = `${11 * dpr}px ui-sans-serif, system-ui`;
+      drawing.font = "11px ui-sans-serif, system-ui";
       drawing.textAlign = "right";
       drawing.textBaseline = "middle";
       drawing.fillStyle = "rgba(228,228,231,0.55)";
@@ -303,14 +257,8 @@ export default function LiveMelodyGuide({
       const midiEnd = Math.ceil(range.max);
       for (let midi = midiStart; midi <= midiEnd; midi += 1) {
         if (midi % 12 !== 0 && midi % 12 !== 7) continue;
-        drawing.fillText(noteLabelFromMidi(midi), padL - 6 * dpr, yAt(midi));
+        drawing.fillText(noteLabelFromMidi(midi), Math.max(4, padL - 6), yAt(midi));
       }
-    };
-
-    const pushLive = (hz: number | null, time: number) => {
-      if (phaseRef.current !== "live") return;
-      liveRef.current.push({ t: Math.max(0, time), hz });
-      if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
     };
 
     const tick = (now: number) => {
@@ -318,27 +266,26 @@ export default function LiveMelodyGuide({
       let hz: number | null = null;
       if (analyser && detector && buffer && stream) {
         readAnalyserTimeDomain(analyser, buffer);
-        waveRef.current = buffer;
         const rms = computeRms(buffer);
-        const db = dbFromRms(rms);
-        const peak = peakOf(buffer);
         rmsRef.current = rms;
-        const minVolumeDb = isAppleWebKit() ? MIN_VOLUME_DB_IOS : MIN_VOLUME_DB;
-        const hasVoice = db > minVolumeDb || peak > MIN_PEAK;
-        hz = hasVoice ? detector(buffer) : null;
-        if (!hz && peak > FALLBACK_PEAK) {
-          const fallback = detectPitchHzOctaveSafe(buffer, ctx?.sampleRate ?? 44100);
-          hz = fallback > 0 ? fallback : null;
+        if (rms > VAD_RMS) {
+          hz = detector(buffer);
+          if (!hz) {
+            const fallback = detectPitchHzOctaveSafe(buffer, ctx?.sampleRate ?? 44100);
+            hz = fallback > 0 ? fallback : null;
+          }
         }
         liveHzRef.current = hz;
-        const shown = hz ? displayMidiForLive(hz, tNow, baseBlocks) : null;
+        const shown = hz ? displayMidiForLive(hz, tNow, blocks) : null;
         liveNoteRef.current = shown ? noteLabelFromMidi(shown.midi) : "—";
         centsRef.current = shown?.cents ?? null;
         snappedRef.current = Boolean(shown?.snapped);
-        pushLive(hz, tNow);
+        if (phaseRef.current === "live") {
+          liveRef.current.push({ t: Math.max(0, tNow), hz });
+          if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
+        }
 
-        const activeBlock = blockAtTime(baseBlocks, tNow, 0);
-
+        const activeBlock = blockAtTime(blocks, tNow, 0);
         if (phaseRef.current === "live" && now - lastSyncLog > 250) {
           lastSyncLog = now;
           const audio = backingAudioRef?.current;
@@ -346,6 +293,7 @@ export default function LiveMelodyGuide({
             audioTime: tNow,
             currentTime: audio?.currentTime ?? null,
             userHz: hz,
+            rms,
             activeBlock: activeBlock
               ? { note: activeBlock.note, start: activeBlock.startTime, end: activeBlock.endTime }
               : null,
@@ -356,7 +304,7 @@ export default function LiveMelodyGuide({
       paint(now);
       if (now - lastHud > 80) {
         lastHud = now;
-        const current = blockAtTime(baseBlocks, tNow, 0);
+        const current = blockAtTime(blocks, tNow, 0);
         if (targetEl.current) targetEl.current.textContent = current?.note ?? "—";
         if (yoursEl.current) yoursEl.current.textContent = liveNoteRef.current;
         if (statusEl.current) {
@@ -416,15 +364,15 @@ export default function LiveMelodyGuide({
   }, [backingAudioRef, features, phraseDurationSec, stream]);
 
   return (
-    <div className="relative mt-3 min-w-0 overflow-hidden rounded-2xl bg-[#07060f] ring-1 ring-violet-400/30">
-      <div className="pointer-events-none absolute -left-10 top-0 h-32 w-32 rounded-full bg-violet-600/25 blur-3xl" />
-      <div className="pointer-events-none absolute -right-8 bottom-0 h-28 w-28 rounded-full bg-emerald-400/15 blur-3xl" />
-      <div className="relative grid h-14 grid-cols-[minmax(4.75rem,1fr)_auto_minmax(4.75rem,1fr)] items-center gap-2 px-3">
+    <div className="relative mt-3 flex w-full min-w-0 max-w-full flex-col overflow-hidden">
+      <div className="relative grid h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 px-1 sm:gap-2 sm:px-2">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase leading-none tracking-[0.18em] text-violet-200/70">Эталон</p>
+          <p className="truncate text-[10px] uppercase leading-none tracking-[0.18em] text-violet-200/70">
+            Эталон
+          </p>
           <span
             ref={targetEl}
-            className="mt-1 block h-6 truncate font-display text-lg font-semibold leading-6 text-violet-100"
+            className="mt-1 block h-6 truncate font-display text-base font-semibold leading-6 text-violet-100 sm:text-lg"
           >
             —
           </span>
@@ -433,23 +381,28 @@ export default function LiveMelodyGuide({
           Эталон
         </span>
         <div className="min-w-0 text-right">
-          <p className="text-[10px] uppercase leading-none tracking-[0.18em] text-emerald-300/80">Ваш голос</p>
+          <p className="truncate text-[10px] uppercase leading-none tracking-[0.18em] text-emerald-300/80">
+            Ваш голос
+          </p>
           <span
             ref={yoursEl}
-            className="mt-1 block h-6 truncate font-display text-lg font-semibold leading-6 text-emerald-200"
+            className="mt-1 block h-6 truncate font-display text-base font-semibold leading-6 text-emerald-200 sm:text-lg"
           >
             —
           </span>
         </div>
       </div>
-      <div ref={hostRef} className="relative w-full min-w-0 overflow-x-auto">
+      <div
+        ref={canvasContainerRef}
+        className="relative h-64 w-full shrink-0 overflow-hidden rounded-lg bg-gray-900"
+      >
         <canvas
           ref={canvasRef}
-          className="relative block h-52 w-full max-w-full sm:h-60"
+          className="absolute inset-0 block h-full w-full"
           aria-label="Хитбоксы нот и живой голос"
         />
       </div>
-      <p className="h-8 truncate px-3 text-center text-[10px] leading-8 text-zinc-400">{HINT}</p>
+      <p className="h-8 truncate px-2 text-center text-[10px] leading-8 text-zinc-400">{HINT}</p>
     </div>
   );
 }

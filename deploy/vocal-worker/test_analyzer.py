@@ -120,16 +120,22 @@ class HitboxScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 90)
 
-    def test_silence_and_noise_are_rejected(self) -> None:
+    def test_silence_scores_zero_not_error(self) -> None:
         silence = features([None] * 24, coverage=0.0, rms_db=-80)
         noise = features([None] * 24, coverage=0.08, rms_db=-18, flatness=0.8)
-        self.assertFalse(score_features(self.reference, silence)["evaluable"])
-        self.assertFalse(score_features(self.reference, noise)["evaluable"])
+        quiet = score_features(self.reference, silence)
+        noisy = score_features(self.reference, noise)
+        self.assertTrue(quiet["evaluable"], quiet)
+        self.assertEqual(quiet["overall"], 0)
+        self.assertTrue(noisy["evaluable"], noisy)
+        self.assertEqual(noisy["overall"], 0)
 
-    def test_abort_mid_phrase_is_not_scored(self) -> None:
+    def test_abort_mid_phrase_scores_low(self) -> None:
         abort = features(MELODY[:2] + [None] * 22, coverage=0.1)
         result = score_features(self.reference, abort)
-        self.assertFalse(result["evaluable"])
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["overall"], 0)
+        self.assertLess(result["overall"], 40)
 
     def test_russian_strings_are_cyrillic_not_question_marks(self) -> None:
         from analyzer import UNRECOGNIZED

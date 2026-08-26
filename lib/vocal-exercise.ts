@@ -34,7 +34,8 @@ export function teacherReaction(
   score: number,
   weakest: ScoreDimension
 ): { mood: TeacherMood; avatar: string; title: string; message: string } {
-  if (score >= 80) {
+  const safe = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
+  if (safe >= 80) {
     return {
       mood: "joyful",
       avatar: TEACHER_AVATARS.joyful,
@@ -42,7 +43,7 @@ export function teacherReaction(
       message: `Мелодия уже звучит уверенно — можно шлифовать детали. ${focusText[weakest]}`,
     };
   }
-  if (score >= 50) {
+  if (safe >= 50) {
     return {
       mood: "satisfied",
       avatar: TEACHER_AVATARS.satisfied,
@@ -58,10 +59,10 @@ export function teacherReaction(
   };
 }
 
-/** Hit window for karaoke blocks (±60¢). Vibrato inside this is a perfect hit. */
-export const EXERCISE_IN_TUNE_CENTS = 60;
+/** Hit window for karaoke blocks (±80¢). Vibrato inside this is a perfect hit. */
+export const EXERCISE_IN_TUNE_CENTS = 80;
 /** Neighbouring-note band used for half-points. */
-export const EXERCISE_NEAR_CENTS = 120;
+export const EXERCISE_NEAR_CENTS = 150;
 
 /** Practical upper bound (upload/size), not a 45s product hard stop. */
 export const EXERCISE_PHRASE_MAX_SEC = 600;
