@@ -36,7 +36,7 @@ export const VIBES: Array<{ id: ChordVibe; label: string }> = [
 
 export const INSTRUMENTS: Array<{ id: ChordInstrument; label: string; hint: string }> = [
   { id: "piano", label: "Фортепиано", hint: "Живой рояль" },
-  { id: "guitar", label: "Гитара", hint: "Акустическая стальная гитара" },
+  { id: "guitar", label: "Гитара", hint: "Живая акустическая гитара" },
   { id: "rock-guitar", label: "Рок-гитара", hint: "Перегруженная электрогитара" },
   { id: "bass", label: "Бас", hint: "Низкая линия под вокал" },
   { id: "organ", label: "Орган", hint: "Церковный и соул-орган" },

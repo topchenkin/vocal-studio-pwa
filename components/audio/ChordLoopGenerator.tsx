@@ -231,7 +231,11 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         playTone(ctx, dest, chord.midi[0], when, barSec * 0.35, 0, "bass");
       } else {
         const notes =
-          currentInstrument === "bass" ? [chord.midi[0]] : chord.midi;
+          currentInstrument === "bass"
+            ? [chord.midi[0]]
+            : currentInstrument === "guitar"
+              ? chord.midi.slice(0, 4)
+              : chord.midi;
         if (grooveRef.current === "arpeggio") {
           const step = barSec / Math.max(4, notes.length * 2);
           notes.forEach((midi, i) => {
@@ -249,7 +253,10 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         } else {
           notes.forEach((midi, i) => {
             const pan = (i / Math.max(1, notes.length - 1)) * 1.1 - 0.55;
-            playTone(ctx, dest, midi, when, barSec * 0.92, pan, currentInstrument);
+            const strum = currentInstrument === "guitar" ? i * 0.024 : 0;
+            const hold =
+              currentInstrument === "guitar" ? barSec * 0.5 : barSec * 0.92;
+            playTone(ctx, dest, midi, when + strum, hold, pan, currentInstrument);
           });
         }
       }
@@ -705,7 +712,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         </Button>
       </div>
       <p className="mt-3 text-[11px] leading-relaxed text-studio-muted">
-        Фортепиано и гитары — сэмплы FluidR3 GM (Frank Wen), CC BY 3.0.
+        Фортепиано и рок-гитара — FluidR3 GM (Frank Wen), CC BY 3.0.
+        Акустическая гитара — University of Iowa MIS.
       </p>
 
       <Modal

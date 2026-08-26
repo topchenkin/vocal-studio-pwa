@@ -1,3 +1,6 @@
-FluidR3 GM samples (Frank Wen), Creative Commons Attribution 3.0.
+Piano and rock guitar: FluidR3 GM (Frank Wen), Creative Commons Attribution 3.0.
 Source: https://github.com/gleitz/midi-js-soundfonts
-Instruments: acoustic_grand_piano, acoustic_guitar_steel, overdriven_guitar.
+
+Acoustic guitar: University of Iowa Musical Instrument Samples (no restrictions).
+Edited copies via https://github.com/nbrosowsky/tonejs-instruments
+Source: https://theremin.music.uiowa.edu/MIS.html

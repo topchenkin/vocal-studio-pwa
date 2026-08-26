@@ -200,7 +200,7 @@ export function playDrumHit(
 
 export const INSTRUMENT_MIX: Record<ChordInstrument, { dry: number; wet: number }> = {
   piano: { dry: 0.86, wet: 0.14 },
-  guitar: { dry: 0.92, wet: 0.08 },
+  guitar: { dry: 0.98, wet: 0.02 },
   "rock-guitar": { dry: 0.95, wet: 0.05 },
   bass: { dry: 0.94, wet: 0.06 },
   organ: { dry: 0.62, wet: 0.34 },

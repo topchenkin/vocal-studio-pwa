@@ -57,7 +57,12 @@ assert.ok(
   readFileSync(path.join(root, "public", "samples", "piano", "C3.mp3")).length > 1000
 );
 assert.ok(
-  readFileSync(path.join(root, "public", "samples", "guitar", "C3.mp3")).length > 1000
+  readFileSync(path.join(root, "public", "samples", "guitar", "C3.mp3")).length > 80000
+);
+assert.ok(
+  readFileSync(path.join(root, "lib", "chord-sampler.ts"), "utf8").includes(
+    "highpass"
+  )
 );
 assert.ok(
   readFileSync(
