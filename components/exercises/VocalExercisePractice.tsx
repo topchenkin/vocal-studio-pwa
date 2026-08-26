@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
 import { renderExerciseResultPng } from "@/lib/exercise-result-card";
@@ -69,7 +68,6 @@ export default function VocalExercisePractice({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [phraseFeatures, setPhraseFeatures] = useState<PhrasePitchFeatures | null>(null);
   const [playheadSec, setPlayheadSec] = useState(0);
-  const [keyToast, setKeyToast] = useState(false);
 
   stageRef.current = stage;
   selectedRef.current = selected;
@@ -216,7 +214,6 @@ export default function VocalExercisePractice({
     stopCaptureOnly();
     setError("");
     setAttempt(null);
-    setKeyToast(false);
     try {
       const stream = await getSingingMicStream();
       streamRef.current = stream;
@@ -380,7 +377,7 @@ export default function VocalExercisePractice({
     selected?.feature_status === "ready" && ["idle", "listening", "failed"].includes(stage);
 
   return (
-    <div className="mt-3 rounded-2xl bg-studio-card p-4 ring-1 ring-studio-accent/25">
+    <div className="mt-3 min-w-0 w-full max-w-full overflow-hidden rounded-2xl bg-studio-card p-4 ring-1 ring-studio-accent/25">
       <audio
         ref={audioRef}
         src={exercise.media_url}
@@ -489,10 +486,6 @@ export default function VocalExercisePractice({
             }
             backingAudioRef={audioRef}
             phraseStartSec={selected ? Number(selected.start_sec) : 0}
-            onAutoKey={() => {
-              setKeyToast(true);
-              window.setTimeout(() => setKeyToast(false), 4200);
-            }}
           />
           {stage === "counting" && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -507,21 +500,30 @@ export default function VocalExercisePractice({
 
       {!resultReaction && attempt?.status !== "rejected" && (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mx-auto mt-3 flex w-full max-w-md flex-wrap justify-center gap-2 sm:gap-4">
             <Button
               variant="secondary"
+              className="w-full text-sm sm:w-auto sm:text-base"
               disabled={!canListen}
               onClick={() => void listen()}
             >
               {guideOn ? "Остановить фонограмму" : "Послушать"}
             </Button>
             {stage === "recording" ? (
-              <Button variant="danger" onClick={() => void stopRecording()}>
+              <Button
+                variant="danger"
+                className="w-full text-sm sm:w-auto sm:text-base"
+                onClick={() => void stopRecording()}
+              >
                 <Square className="h-4 w-4 fill-current" />
                 Стоп
               </Button>
             ) : (
-              <Button disabled={!canRecord} onClick={() => void record()}>
+              <Button
+                className="w-full text-sm sm:w-auto sm:text-base"
+                disabled={!canRecord}
+                onClick={() => void record()}
+              >
                 <Mic className="h-4 w-4" />
                 Записать
               </Button>
@@ -586,25 +588,27 @@ export default function VocalExercisePractice({
               </div>
             ))}
           </div>
-          {attempt.global_shift_semitones !== null && attempt.global_shift_semitones !== 0 && (
-            <p className="text-center text-xs text-studio-muted">
-              Тональность автоматически подстроена: {attempt.global_shift_semitones > 0 ? "+" : ""}
-              {attempt.global_shift_semitones} полутона
-            </p>
-          )}
           {attempt.status === "shared" ? (
             <p className="text-center text-sm text-emerald-300">
               Карточка и запись отправлены преподавателю в чат.
             </p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button variant="secondary" onClick={() => void discard()}>
+            <div className="mx-auto flex w-full max-w-md flex-wrap justify-center gap-2 sm:gap-4">
+              <Button
+                variant="secondary"
+                className="w-full text-sm sm:w-auto sm:text-base"
+                onClick={() => void discard()}
+              >
                 <RotateCcw className="h-4 w-4" />
                 Повторить
               </Button>
-              <Button disabled={sharing} onClick={() => void share()}>
+              <Button
+                className="w-full text-sm sm:w-auto sm:text-base"
+                disabled={sharing}
+                onClick={() => void share()}
+              >
                 <Send className="h-4 w-4" />
-                {sharing ? "Отправляем…" : "Отправить преподавателю в чат"}
+                {sharing ? "Отправляем…" : "Отправить преподавателю"}
               </Button>
             </div>
           )}
@@ -622,11 +626,6 @@ export default function VocalExercisePractice({
       )}
 
       {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
-      <Toast
-        open={keyToast}
-        message="Тональность автоматически подстроена под ваш голос!"
-        onClose={() => setKeyToast(false)}
-      />
       <p className="mt-4 flex items-center gap-2 text-[11px] text-studio-muted">
         <Headphones className="h-4 w-4 shrink-0" />
         Лучше использовать наушники: так фонограмма не попадёт в микрофон и не завысит оценку. Неотправленная запись удалится максимум через час.

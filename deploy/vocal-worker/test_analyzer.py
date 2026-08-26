@@ -74,14 +74,14 @@ class HitboxScoringTests(unittest.TestCase):
 
     def test_near_zone_gets_half_points(self) -> None:
         near = [value + 0.9 for value in MELODY]
-        result = score_features(self.reference, features(near), auto_key=False)
+        result = score_features(self.reference, features(near))
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 40)
         self.assertLessEqual(result["overall"], 60)
 
     def test_wrong_notes_score_low(self) -> None:
         wrong = [value + 4 for value in MELODY]
-        result = score_features(self.reference, features(wrong), auto_key=False)
+        result = score_features(self.reference, features(wrong))
         self.assertTrue(result["evaluable"], result)
         self.assertLess(result["overall"], 20)
 
@@ -93,20 +93,26 @@ class HitboxScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 90)
 
-    def test_auto_key_shifts_hitboxes(self) -> None:
+    def test_two_semitone_shift_is_not_auto_keyed(self) -> None:
         shifted = features([value + 2 for value in MELODY])
         result = score_features(self.reference, shifted)
         self.assertTrue(result["evaluable"], result)
-        self.assertGreaterEqual(result["overall"], 90)
-        self.assertEqual(result["global_shift_semitones"], 2)
-        self.assertEqual(result["confidence"]["auto_shift_cents"], 200)
+        self.assertLess(result["overall"], 40)
+
+    def test_pitch_class_mirrors_near_octave(self) -> None:
+        from analyzer import midi_to_hz, pitch_class_cents
+
+        c4 = midi_to_hz(60)
+        almost_octave = c4 * (2.0 ** (1190.0 / 1200.0))
+        self.assertAlmostEqual(pitch_class_cents(almost_octave, c4), 10.0, delta=0.2)
+        self.assertAlmostEqual(pitch_class_cents(c4 / 2.0, c4), 0.0, delta=0.2)
+        self.assertAlmostEqual(pitch_class_cents(c4 * 4.0, c4), 0.0, delta=0.2)
 
     def test_octave_down_scores_as_perfect_hit(self) -> None:
         octave = features([value - 12 for value in MELODY])
         result = score_features(self.reference, octave)
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 90)
-        self.assertEqual(result["global_shift_semitones"], 0)
 
     def test_octave_up_scores_as_perfect_hit(self) -> None:
         octave = features([value + 12 for value in MELODY])

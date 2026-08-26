@@ -15,14 +15,10 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import {
-  AUTO_KEY_WINDOW_SEC,
   HITBOX_GREEN_CENTS,
   blockAtTime,
   displayMidiForLive,
-  estimateAutoKeyCents,
-  hzToFoldedCents,
   quantizeNoteBlocks,
-  shiftNoteBlocksByCents,
 } from "@/lib/note-blocks";
 import type { PhrasePitchFeatures } from "@/types";
 
@@ -84,7 +80,6 @@ export default function LiveMelodyGuide({
   phraseDurationSec = 0,
   backingAudioRef,
   phraseStartSec = 0,
-  onAutoKey,
 }: {
   features: PhrasePitchFeatures | null;
   stream: MediaStream | null;
@@ -93,7 +88,6 @@ export default function LiveMelodyGuide({
   phraseDurationSec?: number;
   backingAudioRef?: RefObject<HTMLAudioElement | null>;
   phraseStartSec?: number;
-  onAutoKey?: (shiftCents: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -108,10 +102,6 @@ export default function LiveMelodyGuide({
   const playheadRef = useRef(playheadSec);
   const phaseRef = useRef(phase);
   const phraseStartRef = useRef(phraseStartSec);
-  const onAutoKeyRef = useRef(onAutoKey);
-  const autoShiftRef = useRef(0);
-  const autoLockedRef = useRef(false);
-  const calibRef = useRef<number[]>([]);
   const targetEl = useRef<HTMLSpanElement>(null);
   const yoursEl = useRef<HTMLSpanElement>(null);
   const statusEl = useRef<HTMLSpanElement>(null);
@@ -119,7 +109,6 @@ export default function LiveMelodyGuide({
   playheadRef.current = playheadSec;
   phaseRef.current = phase;
   phraseStartRef.current = phraseStartSec;
-  onAutoKeyRef.current = onAutoKey;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -138,9 +127,6 @@ export default function LiveMelodyGuide({
       liveRef.current = [];
       liveHzRef.current = null;
       startedAtRef.current = performance.now();
-      autoShiftRef.current = 0;
-      autoLockedRef.current = false;
-      calibRef.current = [];
     }
   }, [phase]);
 
@@ -187,7 +173,7 @@ export default function LiveMelodyGuide({
       const nowX = padL + innerW * (WINDOW_PAST_SEC / windowSec);
       const pps = innerW / windowSec;
       const xAt = (time: number) => nowX + (time - tNow) * pps;
-      const blocks = shiftNoteBlocksByCents(baseBlocks, autoShiftRef.current);
+      const blocks = baseBlocks;
       const range = midiRange(blocks.map((block) => block.midi));
       const yAt = (midi: number) => yFromMidi(midi, range, padT, padT + innerH);
       const pulse = 0.45 + 0.55 * Math.sin(now / 420);
@@ -245,7 +231,7 @@ export default function LiveMelodyGuide({
             prev = null;
             continue;
           }
-          const shown = displayMidiForLive(point.hz, point.t, baseBlocks, autoShiftRef.current);
+          const shown = displayMidiForLive(point.hz, point.t, baseBlocks);
           if (!shown) {
             prev = null;
             continue;
@@ -275,7 +261,7 @@ export default function LiveMelodyGuide({
 
       const liveHz = liveHzRef.current;
       if (liveHz && (phaseRef.current === "live" || phaseRef.current === "armed")) {
-        const shown = displayMidiForLive(liveHz, tNow, baseBlocks, autoShiftRef.current);
+        const shown = displayMidiForLive(liveHz, tNow, baseBlocks);
         if (shown) {
           const orbX = phaseRef.current === "armed" ? padL + innerW * 0.12 : nowX;
           const orbY = yAt(shown.midi);
@@ -327,14 +313,6 @@ export default function LiveMelodyGuide({
       if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
     };
 
-    const lockAutoKey = () => {
-      if (autoLockedRef.current) return;
-      const shift = estimateAutoKeyCents(calibRef.current);
-      autoShiftRef.current = shift;
-      autoLockedRef.current = true;
-      if (shift !== 0) onAutoKeyRef.current?.(shift);
-    };
-
     const tick = (now: number) => {
       const tNow = readPhraseTime();
       let hz: number | null = null;
@@ -353,21 +331,13 @@ export default function LiveMelodyGuide({
           hz = fallback > 0 ? fallback : null;
         }
         liveHzRef.current = hz;
-        const shown = hz ? displayMidiForLive(hz, tNow, baseBlocks, autoShiftRef.current) : null;
+        const shown = hz ? displayMidiForLive(hz, tNow, baseBlocks) : null;
         liveNoteRef.current = shown ? noteLabelFromMidi(shown.midi) : "—";
         centsRef.current = shown?.cents ?? null;
         snappedRef.current = Boolean(shown?.snapped);
         pushLive(hz, tNow);
 
         const activeBlock = blockAtTime(baseBlocks, tNow, 0);
-        if (phaseRef.current === "live" && !autoLockedRef.current && hz && activeBlock) {
-          if (tNow <= AUTO_KEY_WINDOW_SEC) {
-            calibRef.current.push(hzToFoldedCents(hz, activeBlock.startHz));
-          }
-        }
-        if (phaseRef.current === "live" && !autoLockedRef.current && tNow >= Math.min(AUTO_KEY_WINDOW_SEC, duration - 0.02)) {
-          lockAutoKey();
-        }
 
         if (phaseRef.current === "live" && now - lastSyncLog > 250) {
           lastSyncLog = now;
@@ -379,18 +349,14 @@ export default function LiveMelodyGuide({
             activeBlock: activeBlock
               ? { note: activeBlock.note, start: activeBlock.startTime, end: activeBlock.endTime }
               : null,
-            autoShift: autoShiftRef.current,
+            pitchClassCents: shown?.cents ?? null,
           });
         }
       }
       paint(now);
       if (now - lastHud > 80) {
         lastHud = now;
-        const current = blockAtTime(
-          shiftNoteBlocksByCents(baseBlocks, autoShiftRef.current),
-          tNow,
-          0
-        );
+        const current = blockAtTime(baseBlocks, tNow, 0);
         if (targetEl.current) targetEl.current.textContent = current?.note ?? "—";
         if (yoursEl.current) yoursEl.current.textContent = liveNoteRef.current;
         if (statusEl.current) {
