@@ -5,96 +5,152 @@ import {
   computeRms,
   createYinDetector,
   dbFromRms,
+  detectPitchHzOctaveSafe,
   midiFromFrequency,
+  noteLabelFromMidi,
+  snapToNearbyOctave,
 } from "@/lib/pitch";
-import { connectAnalyserToDestination, readAnalyserTimeDomain, singingInputGainValue } from "@/lib/mic-audio";
+import {
+  connectAnalyserToDestination,
+  isAppleWebKit,
+  readAnalyserTimeDomain,
+  singingInputGainValue,
+} from "@/lib/mic-audio";
 import type { PhrasePitchFeatures } from "@/types";
 
-const FFT_SIZE = 4096;
-const SKIP_DB = -58;
+export type MelodyGuidePhase = "idle" | "listening" | "armed" | "live";
 
-function midiRange(values: Array<number | null | undefined>): { min: number; max: number } {
-  const voiced = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (voiced.length === 0) return { min: 48, max: 72 };
-  const min = Math.min(...voiced);
-  const max = Math.max(...voiced);
-  const pad = Math.max(3, (max - min) * 0.2);
+const FFT_SIZE = 4096;
+const IN_TUNE = 0.55;
+const NEAR = 1.15;
+
+type Point = { t: number; midi: number };
+type LivePoint = { t: number; midi: number | null; rms: number };
+
+function voicedPoints(times: number[], pitches: Array<number | null | undefined>): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i < times.length; i += 1) {
+    const midi = pitches[i];
+    if (typeof midi === "number" && Number.isFinite(midi)) {
+      out.push({ t: Number(times[i]), midi });
+    }
+  }
+  return out;
+}
+
+function midiAtTime(points: Point[], time: number, maxGap = 0.32): number | null {
+  if (points.length === 0) return null;
+  let lo = 0;
+  let hi = points.length - 1;
+  if (time <= points[0].t) {
+    return points[0].t - time > maxGap ? null : points[0].midi;
+  }
+  if (time >= points[hi].t) {
+    return time - points[hi].t > maxGap ? null : points[hi].midi;
+  }
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].t <= time) lo = mid;
+    else hi = mid;
+  }
+  const a = points[lo];
+  const b = points[hi];
+  if (b.t - a.t > maxGap) return null;
+  const u = (time - a.t) / Math.max(1e-6, b.t - a.t);
+  return a.midi + (b.midi - a.midi) * u;
+}
+
+function midiRange(points: Point[], live: LivePoint[]): { min: number; max: number } {
+  const values = [
+    ...points.map((point) => point.midi),
+    ...live.map((point) => point.midi).filter((value): value is number => value != null),
+  ];
+  if (values.length === 0) return { min: 50, max: 74 };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const pad = Math.max(4, (max - min) * 0.28);
   return { min: min - pad, max: max + pad };
 }
 
-function drawContour(
-  ctx: CanvasRenderingContext2D,
-  points: Array<{ t: number; midi: number | null }>,
-  duration: number,
-  range: { min: number; max: number },
-  width: number,
-  height: number,
-  color: string,
-  widthPx: number
-) {
-  const span = Math.max(0.2, range.max - range.min);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = widthPx;
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  let drawing = false;
-  for (const point of points) {
-    if (point.midi == null || !Number.isFinite(point.midi)) {
-      drawing = false;
-      continue;
-    }
-    const x = (point.t / duration) * width;
-    const y = height - ((point.midi - range.min) / span) * height;
-    if (!drawing) {
-      ctx.moveTo(x, y);
-      drawing = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
+function yFromMidi(midi: number, range: { min: number; max: number }, top: number, bottom: number) {
+  const span = Math.max(0.8, range.max - range.min);
+  return bottom - ((midi - range.min) / span) * (bottom - top);
+}
+
+function fitCanvas(canvas: HTMLCanvasElement) {
+  const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width * dpr));
+  const height = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
   }
-  ctx.stroke();
+  return { width, height, dpr };
+}
+
+function peakOf(buffer: Float32Array) {
+  let peak = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const value = Math.abs(buffer[i] ?? 0);
+    if (value > peak) peak = value;
+  }
+  return peak;
 }
 
 export default function LiveMelodyGuide({
   features,
   stream,
-  active,
+  phase,
   playheadSec = 0,
+  phraseDurationSec = 0,
+  clockSynced = false,
 }: {
   features: PhrasePitchFeatures | null;
   stream: MediaStream | null;
-  active: boolean;
+  phase: MelodyGuidePhase;
   playheadSec?: number;
+  phraseDurationSec?: number;
+  clockSynced?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const liveRef = useRef<Array<{ t: number; midi: number | null }>>([]);
+  const liveRef = useRef<LivePoint[]>([]);
+  const liveMidiRef = useRef<number | null>(null);
+  const liveNoteRef = useRef<string>("—");
+  const centsRef = useRef<number | null>(null);
+  const rmsRef = useRef(0);
+  const waveRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const startedAtRef = useRef(0);
   const playheadRef = useRef(playheadSec);
+  const phaseRef = useRef(phase);
+  const clockRef = useRef(clockSynced);
+  const targetEl = useRef<HTMLSpanElement>(null);
+  const yoursEl = useRef<HTMLSpanElement>(null);
+  const statusEl = useRef<HTMLSpanElement>(null);
+  const hintEl = useRef<HTMLSpanElement>(null);
+
   playheadRef.current = playheadSec;
+  phaseRef.current = phase;
+  clockRef.current = clockSynced;
 
   useEffect(() => {
-    liveRef.current = [];
-    startedAtRef.current = performance.now();
-  }, [features, active, stream]);
+    if (phase === "live" || phase === "armed") {
+      liveRef.current = [];
+      liveMidiRef.current = null;
+      startedAtRef.current = performance.now();
+    }
+  }, [phase]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const times = features?.times ?? [];
     const pitches = features?.pitch_midi ?? [];
+    const reference = voicedPoints(times, pitches);
     const duration = Math.max(
-      0.8,
-      Number(features?.duration) || (times.length ? Number(times[times.length - 1]) : 4)
+      0.9,
+      phraseDurationSec || Number(features?.duration) || (times.length ? Number(times[times.length - 1]) : 4)
     );
-    const reference = times.map((time, index) => ({
-      t: Number(time),
-      midi: typeof pitches[index] === "number" ? Number(pitches[index]) : null,
-    }));
-    const range = midiRange([
-      ...pitches,
-      ...liveRef.current.map((point) => point.midi),
-    ]);
 
     let raf = 0;
     let ctx: AudioContext | null = null;
@@ -103,71 +159,367 @@ export default function LiveMelodyGuide({
     let mute: GainNode | null = null;
     let detector: ReturnType<typeof createYinDetector> | null = null;
     let buffer: Float32Array<ArrayBuffer> | null = null;
+    let lastHud = 0;
+    const sparks: Array<{ x: number; y: number; vx: number; vy: number; life: number; hue: number }> = [];
 
-    const paint = () => {
+    const paint = (now: number) => {
       const drawing = canvas.getContext("2d");
       if (!drawing) return;
-      const { width, height } = canvas;
-      drawing.clearRect(0, 0, width, height);
-      drawing.fillStyle = "#12101a";
-      drawing.fillRect(0, 0, width, height);
-      drawContour(drawing, reference, duration, range, width, height, "#c4b5fd", 2.4);
-      drawContour(drawing, liveRef.current, duration, range, width, height, "#34d399", 2.6);
-      const head = Math.min(duration, Math.max(0, playheadRef.current));
-      const x = (head / duration) * width;
-      drawing.strokeStyle = "rgba(251, 191, 36, 0.85)";
-      drawing.lineWidth = 1.5;
-      drawing.beginPath();
-      drawing.moveTo(x, 0);
-      drawing.lineTo(x, height);
-      drawing.stroke();
-    };
+      const { width, height, dpr } = fitCanvas(canvas);
+      const range = midiRange(reference, liveRef.current);
+      const padL = 42 * dpr;
+      const padR = 16 * dpr;
+      const padT = 18 * dpr;
+      const padB = 28 * dpr;
+      const innerW = width - padL - padR;
+      const innerH = height - padT - padB;
+      const tNow = Math.min(duration, Math.max(0, playheadRef.current));
+      const xAt = (time: number) => padL + (time / duration) * innerW;
+      const yAt = (midi: number) => yFromMidi(midi, range, padT, padT + innerH);
 
-    const tick = () => {
-      if (analyser && detector && buffer && active && stream) {
-        readAnalyserTimeDomain(analyser, buffer);
-        const db = dbFromRms(computeRms(buffer));
-        const elapsed = (performance.now() - startedAtRef.current) / 1000;
-        if (db > SKIP_DB) {
-          const hz = detector(buffer);
-          liveRef.current.push({
-            t: elapsed,
-            midi: hz ? midiFromFrequency(hz) : null,
-          });
-        } else {
-          liveRef.current.push({ t: elapsed, midi: null });
+      drawing.clearRect(0, 0, width, height);
+      const bg = drawing.createLinearGradient(0, 0, width, height);
+      bg.addColorStop(0, "#07060f");
+      bg.addColorStop(0.55, "#0c0a16");
+      bg.addColorStop(1, "#120b1c");
+      drawing.fillStyle = bg;
+      drawing.fillRect(0, 0, width, height);
+
+      const pulse = 0.45 + 0.55 * Math.sin(now / 420);
+      const aurora = drawing.createRadialGradient(
+        padL + innerW * (0.25 + 0.08 * Math.sin(now / 1400)),
+        padT + innerH * 0.35,
+        12 * dpr,
+        padL + innerW * 0.5,
+        padT + innerH * 0.5,
+        innerW * 0.85
+      );
+      aurora.addColorStop(0, `rgba(124, 58, 237, ${0.16 + pulse * 0.08})`);
+      aurora.addColorStop(0.45, `rgba(56, 189, 248, ${0.05 + pulse * 0.04})`);
+      aurora.addColorStop(1, "rgba(0,0,0,0)");
+      drawing.fillStyle = aurora;
+      drawing.fillRect(0, 0, width, height);
+
+      drawing.save();
+      drawing.beginPath();
+      drawing.rect(padL, padT, innerW, innerH);
+      drawing.clip();
+
+      drawing.lineWidth = 1;
+      const midiStart = Math.floor(range.min);
+      const midiEnd = Math.ceil(range.max);
+      for (let midi = midiStart; midi <= midiEnd; midi += 1) {
+        const y = yAt(midi);
+        const natural = midi % 12 === 0;
+        drawing.strokeStyle = natural ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)";
+        drawing.beginPath();
+        drawing.moveTo(padL, y);
+        drawing.lineTo(padL + innerW, y);
+        drawing.stroke();
+      }
+
+      const scan = ((now / 18) % innerW);
+      const scanGrad = drawing.createLinearGradient(padL + scan - 40 * dpr, 0, padL + scan + 40 * dpr, 0);
+      scanGrad.addColorStop(0, "rgba(192,132,252,0)");
+      scanGrad.addColorStop(0.5, "rgba(192,132,252,0.07)");
+      scanGrad.addColorStop(1, "rgba(192,132,252,0)");
+      drawing.fillStyle = scanGrad;
+      drawing.fillRect(padL, padT, innerW, innerH);
+
+      if (reference.length > 1) {
+        const step = duration / Math.max(160, innerW);
+        const band = drawing.createLinearGradient(0, padT, 0, padT + innerH);
+        band.addColorStop(0, "rgba(196,181,253,0.12)");
+        band.addColorStop(0.5, "rgba(124,58,237,0.28)");
+        band.addColorStop(1, "rgba(34,211,238,0.12)");
+        drawing.fillStyle = band;
+        let top: Array<{ x: number; y: number }> = [];
+        let bot: Array<{ x: number; y: number }> = [];
+        const flushBand = () => {
+          if (top.length < 2) {
+            top = [];
+            bot = [];
+            return;
+          }
+          drawing.beginPath();
+          drawing.moveTo(top[0].x, top[0].y);
+          for (let i = 1; i < top.length; i += 1) drawing.lineTo(top[i].x, top[i].y);
+          for (let i = bot.length - 1; i >= 0; i -= 1) drawing.lineTo(bot[i].x, bot[i].y);
+          drawing.closePath();
+          drawing.fill();
+          top = [];
+          bot = [];
+        };
+        for (let time = 0; time <= duration; time += step) {
+          const midi = midiAtTime(reference, time);
+          if (midi == null) {
+            flushBand();
+            continue;
+          }
+          top.push({ x: xAt(time), y: yAt(midi + NEAR) });
+          bot.push({ x: xAt(time), y: yAt(midi - NEAR) });
         }
-        if (liveRef.current.length > 800) {
-          liveRef.current.splice(0, liveRef.current.length - 800);
+        flushBand();
+
+        drawing.save();
+        drawing.shadowColor = "rgba(196,181,253,0.85)";
+        drawing.shadowBlur = 18 * dpr;
+        drawing.strokeStyle = "#e9d5ff";
+        drawing.lineWidth = 2.6 * dpr;
+        drawing.lineJoin = "round";
+        drawing.lineCap = "round";
+        drawing.beginPath();
+        let stroking = false;
+        for (let time = 0; time <= duration; time += step) {
+          const midi = midiAtTime(reference, time);
+          if (midi == null) {
+            stroking = false;
+            continue;
+          }
+          const x = xAt(time);
+          const y = yAt(midi);
+          if (!stroking) {
+            drawing.moveTo(x, y);
+            stroking = true;
+          } else {
+            drawing.lineTo(x, y);
+          }
+        }
+        drawing.stroke();
+        drawing.restore();
+
+        if (phaseRef.current === "listening" || phaseRef.current === "live") {
+          drawing.fillStyle = "rgba(7,6,15,0.35)";
+          drawing.fillRect(xAt(tNow), padT, padL + innerW - xAt(tNow), innerH);
         }
       }
-      paint();
+
+      const live = liveRef.current;
+      if (live.length > 1) {
+        drawing.save();
+        drawing.lineJoin = "round";
+        drawing.lineCap = "round";
+        drawing.lineWidth = 3.4 * dpr;
+        let prev: LivePoint | null = null;
+        for (const point of live) {
+          if (point.midi == null || prev?.midi == null) {
+            prev = point;
+            continue;
+          }
+          const target = midiAtTime(reference, point.t);
+          const err = target == null ? 99 : Math.abs(point.midi - target);
+          drawing.strokeStyle =
+            err <= IN_TUNE ? "#34d399" : err <= NEAR ? "#fbbf24" : "#fb7185";
+          drawing.shadowColor = drawing.strokeStyle;
+          drawing.shadowBlur = 14 * dpr;
+          drawing.beginPath();
+          drawing.moveTo(xAt(prev.t), yAt(prev.midi));
+          drawing.lineTo(xAt(point.t), yAt(point.midi));
+          drawing.stroke();
+          prev = point;
+        }
+        drawing.restore();
+      }
+
+      const headX = xAt(tNow);
+      const beam = drawing.createLinearGradient(headX, padT, headX, padT + innerH);
+      beam.addColorStop(0, "rgba(251,191,36,0)");
+      beam.addColorStop(0.5, "rgba(251,191,36,0.95)");
+      beam.addColorStop(1, "rgba(52,211,153,0)");
+      drawing.strokeStyle = beam;
+      drawing.lineWidth = 2 * dpr;
+      drawing.beginPath();
+      drawing.moveTo(headX, padT);
+      drawing.lineTo(headX, padT + innerH);
+      drawing.stroke();
+      drawing.fillStyle = `rgba(251,191,36,${0.12 + pulse * 0.08})`;
+      drawing.fillRect(headX - 10 * dpr, padT, 20 * dpr, innerH);
+
+      const liveMidi = liveMidiRef.current;
+      if (liveMidi != null && (phaseRef.current === "live" || phaseRef.current === "armed")) {
+        const orbX = phaseRef.current === "armed" ? padL + innerW * 0.12 : headX;
+        const orbY = yAt(liveMidi);
+        const target = midiAtTime(reference, tNow);
+        const err = target == null ? 0 : Math.abs(liveMidi - target);
+        const color = err <= IN_TUNE ? "#34d399" : err <= NEAR ? "#fbbf24" : "#fb7185";
+        drawing.save();
+        drawing.shadowColor = color;
+        drawing.shadowBlur = 24 * dpr;
+        drawing.fillStyle = color;
+        drawing.beginPath();
+        drawing.arc(orbX, orbY, (7 + pulse * 3) * dpr, 0, Math.PI * 2);
+        drawing.fill();
+        drawing.lineWidth = 2 * dpr;
+        drawing.strokeStyle = "rgba(255,255,255,0.85)";
+        drawing.beginPath();
+        drawing.arc(orbX, orbY, (14 + pulse * 6) * dpr, 0, Math.PI * 2);
+        drawing.stroke();
+        drawing.restore();
+        if (phaseRef.current === "live" && err <= IN_TUNE && Math.random() < 0.35) {
+          sparks.push({
+            x: orbX,
+            y: orbY,
+            vx: (Math.random() - 0.5) * 1.4 * dpr,
+            vy: (-0.6 - Math.random()) * dpr,
+            life: 1,
+            hue: 150,
+          });
+        }
+      }
+
+      for (let i = sparks.length - 1; i >= 0; i -= 1) {
+        const spark = sparks[i];
+        spark.x += spark.vx;
+        spark.y += spark.vy;
+        spark.life -= 0.02;
+        if (spark.life <= 0) {
+          sparks.splice(i, 1);
+          continue;
+        }
+        drawing.globalAlpha = spark.life;
+        drawing.fillStyle = `hsl(${spark.hue} 90% 65%)`;
+        drawing.beginPath();
+        drawing.arc(spark.x, spark.y, 2.2 * dpr, 0, Math.PI * 2);
+        drawing.fill();
+        drawing.globalAlpha = 1;
+      }
+
+      const wave = waveRef.current;
+      if (wave && wave.length > 8) {
+        const wy = padT + innerH + 6 * dpr;
+        const wh = padB - 10 * dpr;
+        const energy = Math.min(1, rmsRef.current * 14);
+        drawing.strokeStyle = `rgba(52,211,153,${0.25 + energy * 0.55})`;
+        drawing.lineWidth = 1.4 * dpr;
+        drawing.beginPath();
+        const stride = Math.max(1, Math.floor(wave.length / 180));
+        let p = 0;
+        for (let i = 0; i < wave.length; i += stride) {
+          const x = padL + (p / 180) * innerW;
+          const y = wy + wh / 2 - (wave[i] ?? 0) * wh * (0.7 + energy);
+          if (p === 0) drawing.moveTo(x, y);
+          else drawing.lineTo(x, y);
+          p += 1;
+        }
+        drawing.stroke();
+      }
+
+      drawing.restore();
+
+      drawing.font = `${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      drawing.textAlign = "right";
+      drawing.textBaseline = "middle";
+      for (let midi = midiStart; midi <= midiEnd; midi += 1) {
+        if (midi % 12 !== 0 && midi % 12 !== 7) continue;
+        drawing.fillStyle = "rgba(228,228,231,0.55)";
+        drawing.fillText(noteLabelFromMidi(midi), padL - 6 * dpr, yAt(midi));
+      }
+    };
+
+    const pushLive = (midi: number | null, rms: number) => {
+      if (phaseRef.current !== "live") return;
+      const elapsed = (performance.now() - startedAtRef.current) / 1000;
+      const time = clockRef.current ? playheadRef.current : elapsed;
+      liveRef.current.push({ t: Math.max(0, time), midi, rms });
+      if (liveRef.current.length > 2400) {
+        liveRef.current.splice(0, liveRef.current.length - 2400);
+      }
+    };
+
+    const tick = (now: number) => {
+      if (analyser && detector && buffer && stream) {
+        readAnalyserTimeDomain(analyser, buffer);
+        waveRef.current = buffer;
+        const rms = computeRms(buffer);
+        const db = dbFromRms(rms);
+        const peak = peakOf(buffer);
+        rmsRef.current = rms;
+        const skipDb = isAppleWebKit() ? -64 : -58;
+        const hasVoice = db > skipDb || peak > 0.018;
+        let hz = hasVoice ? detector(buffer) : null;
+        if (!hz && peak > 0.02) {
+          const fallback = detectPitchHzOctaveSafe(buffer, ctx?.sampleRate ?? 44100);
+          hz = fallback > 0 ? fallback : null;
+        }
+        const target = midiAtTime(reference, playheadRef.current);
+        if (hz && target != null) {
+          hz = snapToNearbyOctave(hz, 440 * Math.pow(2, (target - 69) / 12));
+        }
+        const midi = hz ? midiFromFrequency(hz) : null;
+        const smoothed =
+          midi != null && liveMidiRef.current != null
+            ? liveMidiRef.current * 0.55 + midi * 0.45
+            : midi;
+        liveMidiRef.current = smoothed;
+        liveNoteRef.current = smoothed != null ? noteLabelFromMidi(smoothed) : "—";
+        centsRef.current =
+          smoothed != null && target != null ? Math.round((smoothed - target) * 100) : null;
+        pushLive(smoothed, rms);
+      }
+      paint(now);
+      if (now - lastHud > 80) {
+        lastHud = now;
+        const targetMidi = midiAtTime(reference, playheadRef.current);
+        if (targetEl.current) {
+          targetEl.current.textContent = targetMidi != null ? noteLabelFromMidi(targetMidi) : "—";
+        }
+        if (yoursEl.current) {
+          yoursEl.current.textContent = liveNoteRef.current;
+        }
+        if (statusEl.current) {
+          const cents = centsRef.current;
+          const live = phaseRef.current === "live" || phaseRef.current === "armed";
+          statusEl.current.textContent = !live
+            ? phaseRef.current === "listening"
+              ? "Фонограмма"
+              : "Эталон"
+            : liveMidiRef.current == null
+              ? "Спойте — шар появится"
+              : cents == null
+                ? liveNoteRef.current
+                : Math.abs(cents) <= 55
+                  ? "В зоне"
+                  : cents > 0
+                    ? `Выше · +${cents} ¢`
+                    : `Ниже · ${cents} ¢`;
+          statusEl.current.className =
+            liveMidiRef.current != null && cents != null && Math.abs(cents) <= 55
+              ? "text-emerald-300"
+              : "text-white";
+        }
+        if (hintEl.current) {
+          hintEl.current.textContent =
+            phaseRef.current === "live"
+              ? "Зелёный — попадание, жёлтый — рядом, розовый — мимо"
+              : phaseRef.current === "armed"
+                ? "Микрофон живой. После отсчёта линия пойдёт по фразе"
+                : phaseRef.current === "listening"
+                  ? "Слушайте коридор эталона — ваш голос появится на записи"
+                  : "Нажмите «Записать»: эталон и ваш голос рисуются вместе";
+        }
+      }
       raf = window.requestAnimationFrame(tick);
     };
 
     const start = async () => {
-      if (!active || !stream) {
-        paint();
-        raf = window.requestAnimationFrame(tick);
-        return;
+      if (stream) {
+        const AudioCtx =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        ctx = new AudioCtx();
+        if (ctx.state === "suspended") await ctx.resume();
+        source = ctx.createMediaStreamSource(stream);
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = FFT_SIZE;
+        analyser.smoothingTimeConstant = 0.12;
+        const inputGain = ctx.createGain();
+        inputGain.gain.value = singingInputGainValue();
+        source.connect(inputGain);
+        inputGain.connect(analyser);
+        mute = connectAnalyserToDestination(ctx, analyser);
+        detector = createYinDetector(ctx.sampleRate);
+        buffer = new Float32Array(analyser.fftSize);
       }
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      ctx = new AudioCtx();
-      if (ctx.state === "suspended") await ctx.resume();
-      source = ctx.createMediaStreamSource(stream);
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = FFT_SIZE;
-      const inputGain = ctx.createGain();
-      inputGain.gain.value = singingInputGainValue();
-      source.connect(inputGain);
-      inputGain.connect(analyser);
-      mute = connectAnalyserToDestination(ctx, analyser);
-      detector = createYinDetector(ctx.sampleRate);
-      buffer = new Float32Array(analyser.fftSize);
-      startedAtRef.current = performance.now();
-      liveRef.current = [];
       raf = window.requestAnimationFrame(tick);
     };
 
@@ -183,15 +535,42 @@ export default function LiveMelodyGuide({
       }
       void ctx?.close().catch(() => undefined);
     };
-  }, [active, features, stream]);
+  }, [features, phraseDurationSec, stream]);
+
+  const recording = phase === "live" || phase === "armed";
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl bg-studio-bg ring-1 ring-studio-border">
-      <div className="flex items-center justify-between px-3 pt-2 text-[10px] uppercase tracking-wide text-studio-muted">
-        <span>Эталон</span>
-        <span className="text-emerald-300">Ваш голос</span>
+    <div className="relative mt-3 overflow-hidden rounded-2xl bg-[#07060f] ring-1 ring-violet-400/30">
+      <div className="pointer-events-none absolute -left-10 top-0 h-32 w-32 rounded-full bg-violet-600/25 blur-3xl" />
+      <div className="pointer-events-none absolute -right-8 bottom-0 h-28 w-28 rounded-full bg-emerald-400/15 blur-3xl" />
+      <div className="relative flex items-center justify-between gap-2 px-3 pt-2.5">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-violet-200/70">Эталон</p>
+          <span ref={targetEl} className="font-display text-lg font-semibold text-violet-100">
+            —
+          </span>
+        </div>
+        <span
+          ref={statusEl}
+          className="rounded-full bg-white/5 px-3 py-1 text-center text-[11px] font-medium text-white ring-1 ring-white/10"
+        >
+          {recording ? "Спойте" : "Эталон"}
+        </span>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">Ваш голос</p>
+          <span ref={yoursEl} className="font-display text-lg font-semibold text-emerald-200">
+            —
+          </span>
+        </div>
       </div>
-      <canvas ref={canvasRef} width={720} height={140} className="h-28 w-full" />
+      <canvas
+        ref={canvasRef}
+        className="relative h-52 w-full sm:h-60"
+        aria-label="Живой контур мелодии"
+      />
+      <p className="px-3 pb-2.5 text-center text-[10px] text-zinc-400">
+        <span ref={hintEl}>Нажмите «Записать»: эталон и ваш голос рисуются вместе</span>
+      </p>
     </div>
   );
 }

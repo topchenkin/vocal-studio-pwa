@@ -26,7 +26,7 @@ import {
   weakestDimension,
 } from "@/lib/vocal-exercise";
 import type { Exercise, ExercisePhrase, PhrasePitchFeatures, VocalExerciseAttempt } from "@/types";
-import LiveMelodyGuide from "@/components/exercises/LiveMelodyGuide";
+import LiveMelodyGuide, { type MelodyGuidePhase } from "@/components/exercises/LiveMelodyGuide";
 
 type PracticeStage =
   | "idle"
@@ -52,6 +52,7 @@ export default function VocalExercisePractice({
   const audioRef = useRef<HTMLAudioElement>(null);
   const captureRef = useRef<PcmCaptureSession | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const vizStreamRef = useRef<MediaStream | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
   const stageRef = useRef<PracticeStage>("idle");
   const selectedRef = useRef(phrases[0] ?? null);
@@ -143,6 +144,8 @@ export default function VocalExercisePractice({
     captureRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    vizStreamRef.current?.getTracks().forEach((track) => track.stop());
+    vizStreamRef.current = null;
     setLiveStream(null);
     stopRecordingRef.current?.();
     stopRecordingRef.current = null;
@@ -172,7 +175,10 @@ export default function VocalExercisePractice({
     const current = stageRef.current;
     if (!audio.paused && (current === "listening" || current === "recording")) {
       audio.pause();
-      if (current === "listening") setPracticeStage("idle");
+      if (current === "listening") {
+        setPlayheadSec(0);
+        setPracticeStage("idle");
+      }
       return;
     }
     await playSelectedPhrase();
@@ -211,7 +217,9 @@ export default function VocalExercisePractice({
     try {
       const stream = await getSingingMicStream();
       streamRef.current = stream;
-      setLiveStream(stream);
+      const visual = stream.clone();
+      vizStreamRef.current = visual;
+      setLiveStream(visual);
       setPlayheadSec(0);
       if (countIn) {
         setPracticeStage("counting");
@@ -244,6 +252,8 @@ export default function VocalExercisePractice({
       captureRef.current = null;
       stream.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      visual.getTracks().forEach((track) => track.stop());
+      vizStreamRef.current = null;
       setLiveStream(null);
       const blob = audioBufferToWavBlob(buffer);
       setPracticeStage("uploading");
@@ -381,11 +391,17 @@ export default function VocalExercisePractice({
           setPlayheadSec(Math.max(0, event.currentTarget.currentTime - Number(phrase.start_sec)));
           if (event.currentTarget.currentTime >= Number(phrase.end_sec)) {
             event.currentTarget.pause();
-            if (stageRef.current === "listening") setPracticeStage("idle");
+            if (stageRef.current === "listening") {
+              setPlayheadSec(0);
+              setPracticeStage("idle");
+            }
           }
         }}
         onEnded={() => {
-          if (stageRef.current === "listening") setPracticeStage("idle");
+          if (stageRef.current === "listening") {
+            setPlayheadSec(0);
+            setPracticeStage("idle");
+          }
         }}
       />
       <div className="flex items-start gap-3">
@@ -400,7 +416,7 @@ export default function VocalExercisePractice({
             </span>
           </div>
           <p className="mt-1 text-xs text-studio-muted">
-            Слушайте фразу и пойте вместе с ней — как караоке. Во время записи виден контур эталона и ваш голос.
+            Слушайте фразу и пойте вместе с ней — как караоке. На записи эталон светится коридором, ваш голос рисуется поверх вживую.
           </p>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
             <div
@@ -445,6 +461,42 @@ export default function VocalExercisePractice({
         })}
       </div>
 
+      {(stage === "idle" ||
+        stage === "listening" ||
+        stage === "counting" ||
+        stage === "recording" ||
+        stage === "failed") &&
+        (phraseFeatures || liveStream) && (
+        <div className="relative">
+          <LiveMelodyGuide
+            features={phraseFeatures}
+            stream={liveStream}
+            phase={
+              (
+                {
+                  recording: "live",
+                  counting: "armed",
+                  listening: "listening",
+                } as Partial<Record<PracticeStage, MelodyGuidePhase>>
+              )[stage] ?? "idle"
+            }
+            playheadSec={playheadSec}
+            phraseDurationSec={
+              selected ? Math.max(0.9, Number(selected.end_sec) - Number(selected.start_sec)) : 0
+            }
+            clockSynced={guideOn}
+          />
+          {stage === "counting" && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200/80">Приготовьтесь</p>
+              <p className="font-display text-7xl font-semibold text-white drop-shadow-[0_0_28px_rgba(167,139,250,0.85)]">
+                {count}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {!resultReaction && attempt?.status !== "rejected" && (
         <>
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -476,26 +528,6 @@ export default function VocalExercisePractice({
             Отсчёт 3–2–1 перед записью
           </label>
         </>
-      )}
-
-      {stage === "counting" && (
-        <div className="mt-4 rounded-2xl bg-studio-accent/10 p-5 text-center">
-          <p className="text-xs text-studio-muted">Приготовьтесь</p>
-          <p className="mt-1 font-display text-5xl font-semibold">{count}</p>
-        </div>
-      )}
-      {(stage === "idle" ||
-        stage === "listening" ||
-        stage === "counting" ||
-        stage === "recording" ||
-        stage === "failed") &&
-        (phraseFeatures || liveStream) && (
-        <LiveMelodyGuide
-          features={phraseFeatures}
-          stream={liveStream}
-          active={stage === "counting" || stage === "recording"}
-          playheadSec={playheadSec}
-        />
       )}
       {stage === "recording" && (
         <p className="mt-3 animate-pulse text-center text-sm text-red-300">
