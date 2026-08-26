@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, CreditCard, Home, Sparkles, WandSparkles } from "lucide-react";
+import { BookOpen, CreditCard, Home, Sparkles } from "lucide-react";
 
 const items = [
   { href: "/dashboard/student", label: "Кабинет", icon: Home },
@@ -10,11 +10,6 @@ const items = [
     href: "/dashboard/student/exercises",
     label: "Упражнения",
     icon: BookOpen,
-  },
-  {
-    href: "/dashboard/student/pocket-studio",
-    label: "Студия",
-    icon: WandSparkles,
   },
   {
     href: "/dashboard/student/ai-tools",
@@ -32,7 +27,7 @@ export default function StudentNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-4 grid shrink-0 grid-cols-5 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
+    <nav className="mb-4 grid shrink-0 grid-cols-4 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
       {items.map((item) => {
         const Icon = item.icon;
         const active =
@@ -40,7 +35,6 @@ export default function StudentNav() {
             ? pathname === item.href
             : item.href === "/dashboard/student/ai-tools"
               ? pathname.startsWith(item.href) ||
-                pathname.startsWith("/dashboard/student/ai-music") ||
                 pathname.startsWith("/dashboard/student/songwriter")
               : pathname.startsWith(item.href);
 

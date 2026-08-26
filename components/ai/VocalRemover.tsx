@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
-import { useAuth } from "@/context/AuthContext";
 import { getChatSessionToken } from "@/lib/chat-media";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import { splitStereoCenterCancel } from "@/lib/wav-client";
@@ -162,7 +161,6 @@ async function separateLocally(file: File): Promise<{
 }
 
 export default function VocalRemover({ locked = false }: Props) {
-  const { tier } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [processing, setProcessing] = useState(false);
@@ -292,14 +290,12 @@ export default function VocalRemover({ locked = false }: Props) {
             Удаление вокала
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
-            Инструмент доступен по тарифу, заданному администратором. Сейчас у
-            вас:{" "}
-            <span className="font-medium text-studio-text">{tier}</span>.
+            Удаление вокала доступно только администратору.
           </p>
           <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              Перейти на Premium
+              В кабинет
             </Button>
           </Link>
         </div>

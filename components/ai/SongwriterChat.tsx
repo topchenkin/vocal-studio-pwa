@@ -18,7 +18,7 @@ const CHIPS = [
 
 type ChatOk = { reply?: string; error?: string; code?: string };
 
-const API_TIMEOUT_MS = 240_000;
+const API_TIMEOUT_MS = 60_000;
 
 function abortAfter(ms: number) {
   const controller = new AbortController();
@@ -41,7 +41,7 @@ function humanizeError(code: string | undefined, fallback?: string) {
       return "Продюсер сейчас занят. Подождите несколько секунд и повторите.";
     case "timeout":
       return "Ответ занял слишком много времени. Попробуйте ещё раз.";
-    case "missing_hf_key":
+    case "missing_groq_key":
       return "Сервер автора песен не настроен. Напишите преподавателю.";
     default:
       if (fallback && /[А-Яа-яЁё]/.test(fallback)) return fallback;

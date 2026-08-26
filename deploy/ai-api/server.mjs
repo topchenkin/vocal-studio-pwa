@@ -1,19 +1,18 @@
 /**
- * Demucs vocal separator for the static site.
+ * AI API for the static site: Demucs (admin) + Groq songwriter.
  * Caddy proxies /api/ai/* here so Safari does not get index.html.
  */
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const PORT = Number(process.env.PORT) || 8788;
 const BIND = process.env.BIND || "127.0.0.1";
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const HF_TOKEN = process.env.HUGGINGFACE_API_KEY?.trim() || "";
+const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim() || "";
+const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
 const PROXY_PUBLIC_ORIGIN = (process.env.PROXY_PUBLIC_ORIGIN || "https://sb.uniquevocal.ru").replace(/\/$/, "");
 const MAX_BYTES = 10 * 1024 * 1024;
 const TIER_RANK = { none: 0, standard: 1, premium: 2, vip: 3 };
@@ -107,31 +106,9 @@ async function canUseTool(profile, toolId) {
 }
 
 function canUseRemover(profile) {
-  return canUseTool(profile, "remover");
+  return profile.role === "admin";
 }
 
-const MUSICGEN_SPACES = [
-  {
-    id: "sanchit-gandhi/musicgen-streaming",
-    host: spaceHost("sanchit-gandhi/musicgen-streaming"),
-    endpoint: "generate_audio",
-  },
-];
-
-const CHAT_SPACES = [
-  {
-    id: "huggingface-projects/llama-3.2-3B-Instruct",
-    host: "https://huggingface-projects-llama-3-2-3b-instruct.hf.space",
-    endpoint: "generate",
-  },
-  {
-    id: "huggingface-projects/gemma-2-2b-it",
-    host: "https://huggingface-projects-gemma-2-2b-it.hf.space",
-    endpoint: "generate",
-  },
-];
-
-const MUSICGEN_DURATIONS = [10, 15, 20, 25, 30];
 const SONGWRITER_SYSTEM =
   "Ты профессиональный музыкальный продюсер и автор хитов. Твоя задача — помогать вокалистам писать тексты песен, придумывать структуру (Куплет, Бридж, Припев) и рифмы. Давай советы по вокалу (где петь тише (субтон), где использовать бэлтинг, где добавить вибрато). Общайся вдохновляюще, как наставник. Отвечай кратко и структурировано. Пиши только по-русски. Текст песни тоже на русском, если ученик явно не попросил другой язык.";
 
@@ -265,58 +242,6 @@ async function callGradio(host, endpoint, data) {
   const parsed = JSON.parse(completePayload);
   if (!Array.isArray(parsed)) throw new Error("Gradio complete payload is not an array");
   return parsed;
-}
-
-async function callGradioPreferComplete(host, endpoint, data) {
-  const start = await fetch(`${host}/gradio_api/call/${endpoint}`, {
-    method: "POST",
-    headers: {
-      ...hfHeaders(),
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ data }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!start.ok) {
-    const text = await start.text().catch(() => "");
-    throw new Error(`Call failed (${start.status}): ${text.slice(0, 200)}`);
-  }
-  const started = await start.json();
-  if (!started.event_id) throw new Error("Gradio не вернул event_id");
-
-  const stream = await fetch(
-    `${host}/gradio_api/call/${endpoint}/${started.event_id}`,
-    {
-      headers: hfHeaders(),
-      signal: AbortSignal.timeout(240_000),
-    }
-  );
-  if (!stream.ok) {
-    const text = await stream.text().catch(() => "");
-    throw new Error(`Queue failed (${stream.status}): ${text.slice(0, 200)}`);
-  }
-  const body = await stream.text();
-  let completePayload = null;
-  let errorPayload = null;
-  for (const block of body.split(/\n\n+/)) {
-    const lines = block.split("\n");
-    let eventName = "message";
-    const dataLines = [];
-    for (const line of lines) {
-      if (line.startsWith("event:")) eventName = line.slice(6).trim();
-      if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-    }
-    if (dataLines.length === 0) continue;
-    const payload = dataLines.join("\n").trim();
-    if (eventName === "error") errorPayload = payload;
-    if (eventName === "complete" && payload && payload !== "null") completePayload = payload;
-  }
-  if (completePayload) {
-    const parsed = JSON.parse(completePayload);
-    if (!Array.isArray(parsed)) throw new Error("Gradio complete payload is not an array");
-    return parsed;
-  }
-  throw new Error(`Gradio error: ${(errorPayload || body).slice(0, 240)}`);
 }
 
 function unwrapOutputs(parsed) {
@@ -453,7 +378,10 @@ async function handleSeparate(req, res) {
     return json(res, 401, { error: "Authentication required" });
   }
   if (!(await canUseRemover(auth.profile))) {
-    return json(res, 403, { error: "Нет доступа к разделению вокала." });
+    return json(res, 403, {
+      error: "Удаление вокала доступно только администратору.",
+      code: "admin_required",
+    });
   }
 
   let request;
@@ -519,194 +447,90 @@ async function handleSeparate(req, res) {
   });
 }
 
-function clampDuration(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 15;
-  let best = 15;
-  let dist = Infinity;
-  for (const option of MUSICGEN_DURATIONS) {
-    const gap = Math.abs(option - n);
-    if (gap < dist) {
-      dist = gap;
-      best = option;
-    }
-  }
-  return best;
-}
-
-function isHlsUrl(url, file) {
-  if (!url) return false;
-  if (/\.m3u8(\?|$)/i.test(url) || url.includes("playlist.m3u8")) return true;
-  return Boolean(file && typeof file === "object" && file.is_stream);
-}
-
-function ffmpegRun(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    const errChunks = [];
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error("ffmpeg timeout"));
-    }, 90_000);
-    child.stderr.on("data", (chunk) => errChunks.push(chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(Buffer.concat(errChunks).toString("utf8").slice(0, 240) || `ffmpeg ${code}`));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-async function hlsToWav(playlistUrl) {
-  const dir = await mkdtemp(join(tmpdir(), "uvs-mg-"));
-  const out = join(dir, "out.wav");
-  try {
-    const headers = HF_TOKEN ? `Authorization: Bearer ${HF_TOKEN}\r\n` : "";
-    const args = ["-protocol_whitelist", "file,http,https,tcp,tls,crypto", "-allowed_extensions", "ALL"];
-    if (headers) args.push("-headers", headers);
-    args.push("-i", playlistUrl, "-acodec", "pcm_s16le", "-ar", "32000", "-ac", "2", out);
-    await ffmpegRun(args);
-    const wav = await readFile(out);
-    if (!sniffAudio(wav)) throw new Error("ffmpeg returned non-wav");
-    return wav;
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-function extractFile(parsed) {
-  if (Array.isArray(parsed)) {
-    for (const item of parsed) {
-      const found = extractFile(item);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (parsed && typeof parsed === "object" && (parsed.path || parsed.url)) {
-    return parsed;
-  }
-  return null;
-}
-
-function replyFromGradio(parsed) {
-  if (typeof parsed === "string" && parsed.trim()) return parsed.trim();
-  if (Array.isArray(parsed)) {
-    for (const item of parsed) {
-      if (typeof item === "string" && item.trim()) return item.trim();
-    }
-  }
-  return "";
-}
-
-async function generateOnSpace(space, prompt, durationSec) {
-  await wakeSpace(space.host);
-  const seed = Math.floor(Math.random() * 11);
-  const outputs = unwrapOutputs(
-    await callGradioPreferComplete(space.host, space.endpoint, [prompt, durationSec, 1.5, seed])
-  );
-  const file = extractFile(outputs);
-  const fileUrl = fileDataToUrl(space.host, file);
-  if (!fileUrl) throw new Error(`${space.id}: нет URL аудио`);
-  if (isHlsUrl(fileUrl, file)) {
-    const wav = await hlsToWav(fileUrl);
-    return { buf: wav, mime: "audio/wav", model: `MusicGen · ${space.id}` };
-  }
-  const buf = await downloadBinary(fileUrl);
-  return { buf, mime: sniffAudio(buf) || "audio/wav", model: `MusicGen · ${space.id}` };
-}
-
-async function chatOnSpace(space, prompt) {
-  await wakeSpace(space.host);
-  const outputs = unwrapOutputs(
-    await callGradioPreferComplete(space.host, space.endpoint, [prompt, 700, 0.8, 0.9, 50, 1.2])
-  );
-  const reply = replyFromGradio(outputs);
-  if (!reply) throw new Error(`${space.id}: пустой ответ`);
-  return reply;
-}
-
-function toChatPrompt(messages) {
-  const lines = [SONGWRITER_SYSTEM, ""];
-  for (const item of messages) {
-    if (!item || (item.role !== "user" && item.role !== "assistant")) continue;
-    const content = typeof item.content === "string" ? item.content.trim() : "";
-    if (!content) continue;
-    lines.push(item.role === "user" ? `Ученик: ${content.slice(0, 4000)}` : `Продюсер: ${content.slice(0, 4000)}`);
-  }
-  lines.push("Продюсер:");
-  return lines.join("\n").slice(-8000);
-}
-
 async function readJsonBody(req) {
   const request = await incomingRequest(req);
   return request.json();
 }
 
-async function handleGenerateMusic(req, res) {
-  if (!SUPABASE_URL || !SERVICE_KEY) {
-    return json(res, 503, { error: "Сервер нейросети ещё не настроен." });
+function sanitizeChatMessages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (!item || (item.role !== "user" && item.role !== "assistant")) continue;
+    const content = typeof item.content === "string" ? item.content.trim() : "";
+    if (!content) continue;
+    out.push({ role: item.role, content: content.slice(0, 4000) });
+    if (out.length >= 40) break;
   }
-  if (!HF_TOKEN) {
-    return json(res, 503, { error: "Сейчас обработка недоступна. Попробуйте позже.", code: "missing_hf_key" });
-  }
-  const auth = await getAuth(req.headers.authorization);
-  if (!auth) return json(res, 401, { error: "Сессия истекла. Обновите страницу и войдите снова.", code: "unauthorized" });
-  if (!(await canUseTool(auth.profile, "musicgen"))) {
-    return json(res, 403, {
-      error: "Создание авторских треков с помощью нейросетей доступно в Premium.",
-      code: "premium_required",
-    });
-  }
-  const payload = await readJsonBody(req).catch(() => null);
-  const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
-  if (prompt.length < 3) return json(res, 400, { error: "Опишите трек чуть подробнее.", code: "empty_prompt" });
-  if (prompt.length > 400) return json(res, 400, { error: "Описание слишком длинное. Сократите текст.", code: "prompt_too_long" });
-  const duration = clampDuration(payload?.duration);
+  return out;
+}
+
+async function chatOnGroq(history) {
+  const messages = [{ role: "system", content: SONGWRITER_SYSTEM }, ...history];
   const attempts = [];
-  let lastError = null;
-  for (const space of MUSICGEN_SPACES) {
-    try {
-      console.info(`[musicgen] trying ${space.id}`);
-      const generated = await generateOnSpace(space, prompt, duration);
-      return json(res, 200, {
-        audioBase64: generated.buf.toString("base64"),
-        mime: generated.mime,
-        model: generated.model,
-        space: space.id,
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      lastError = error;
-      attempts.push(`${space.id}: ${msg.slice(0, 160)}`);
-      console.error(`[musicgen] ${space.id} failed:`, msg);
+  let lastError = "failed";
+  for (const model of GROQ_MODELS) {
+    console.info(`[songwriter] trying groq ${model}`);
+    const response = await fetch(GROQ_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.8,
+        max_tokens: 900,
+        messages,
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) {
+      const reply = body?.choices?.[0]?.message?.content?.trim() || "";
+      if (reply) return { reply, model };
+      lastError = "empty_reply";
+      attempts.push(`${model}: empty_reply`);
+      continue;
+    }
+    lastError = body?.error?.message || `groq_${response.status}`;
+    attempts.push(`${model}: ${String(lastError).slice(0, 160)}`);
+    console.error(`[songwriter] ${model} failed:`, lastError);
+    if (response.status === 429) {
+      const error = new Error("busy");
+      error.code = "busy";
+      error.attempts = attempts;
+      throw error;
+    }
+    if (response.status === 401 || response.status === 403) {
+      const error = new Error("llm_forbidden");
+      error.code = "llm_forbidden";
+      error.attempts = attempts;
+      throw error;
     }
   }
-  return json(res, 503, {
-    code: "failed",
-    error: "Сейчас нейросеть недоступна. Попробуйте через пару минут.",
-    detail: lastError instanceof Error ? lastError.message : String(lastError ?? ""),
-    attempts,
-  });
+  const error = new Error(lastError);
+  error.attempts = attempts;
+  throw error;
 }
 
 async function handleSongwriter(req, res) {
   if (!SUPABASE_URL || !SERVICE_KEY) {
     return json(res, 503, { error: "Сервер нейросети ещё не настроен." });
   }
-  if (!HF_TOKEN) {
-    return json(res, 503, { error: "Сейчас обработка недоступна. Попробуйте позже.", code: "missing_hf_key" });
+  if (!GROQ_API_KEY) {
+    return json(res, 503, {
+      error: "Сервер автора песен не настроен. Напишите преподавателю.",
+      code: "missing_groq_key",
+    });
   }
   const auth = await getAuth(req.headers.authorization);
-  if (!auth) return json(res, 401, { error: "Сессия истекла. Обновите страницу и войдите снова.", code: "unauthorized" });
+  if (!auth) {
+    return json(res, 401, {
+      error: "Сессия истекла. Обновите страницу и войдите снова.",
+      code: "unauthorized",
+    });
+  }
   if (!(await canUseTool(auth.profile, "songwriter"))) {
     return json(res, 403, {
       error: "Твой личный ИИ-продюсер доступен в Premium.",
@@ -714,34 +538,32 @@ async function handleSongwriter(req, res) {
     });
   }
   const payload = await readJsonBody(req).catch(() => null);
-  const raw = Array.isArray(payload?.messages) ? payload.messages : [];
-  const history = raw
-    .filter((item) => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string")
-    .slice(0, 40);
+  const history = sanitizeChatMessages(payload?.messages);
   if (!history.length || history[history.length - 1].role !== "user") {
-    return json(res, 400, { error: "Напишите, с чем помочь — тема, строка или рифма.", code: "empty_prompt" });
+    return json(res, 400, {
+      error: "Напишите, с чем помочь — тема, строка или рифма.",
+      code: "empty_prompt",
+    });
   }
-  const prompt = toChatPrompt(history);
-  const attempts = [];
-  let lastError = null;
-  for (const space of CHAT_SPACES) {
-    try {
-      console.info(`[songwriter] trying ${space.id}`);
-      const reply = await chatOnSpace(space, prompt);
-      return json(res, 200, { reply, space: space.id });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      lastError = error;
-      attempts.push(`${space.id}: ${msg.slice(0, 160)}`);
-      console.error(`[songwriter] ${space.id} failed:`, msg);
+  try {
+    const generated = await chatOnGroq(history);
+    return json(res, 200, { reply: generated.reply, model: generated.model });
+  } catch (error) {
+    const code = error?.code || "failed";
+    if (code === "busy") {
+      return json(res, 429, {
+        code,
+        error: "Продюсер сейчас занят. Подождите несколько секунд и повторите.",
+        attempts: error.attempts || [],
+      });
     }
+    return json(res, 503, {
+      code,
+      error: "Сейчас продюсер недоступен. Попробуйте через пару минут.",
+      detail: error instanceof Error ? error.message : String(error ?? ""),
+      attempts: error?.attempts || [],
+    });
   }
-  return json(res, 503, {
-    code: "failed",
-    error: "Сейчас продюсер недоступен. Попробуйте через пару минут.",
-    detail: lastError instanceof Error ? lastError.message : String(lastError ?? ""),
-    attempts,
-  });
 }
 
 const server = createServer((req, res) => {
@@ -784,13 +606,6 @@ const server = createServer((req, res) => {
     });
     return;
   }
-  if (req.method === "POST" && path === "/api/ai/generate-music") {
-    handleGenerateMusic(req, res).catch((error) => {
-      console.error("[ai-api:musicgen]", error);
-      json(res, 503, { error: "Сейчас нейросеть недоступна. Попробуйте через пару минут." });
-    });
-    return;
-  }
   if (req.method === "POST" && path === "/api/ai/songwriter-chat") {
     handleSongwriter(req, res).catch((error) => {
       console.error("[ai-api:songwriter]", error);
@@ -804,5 +619,5 @@ const server = createServer((req, res) => {
 server.requestTimeout = 300_000;
 server.headersTimeout = 300_000;
 server.listen(PORT, BIND, () => {
-  console.log(`[ai-api] ${BIND}:${PORT} supabase=${SUPABASE_URL || "(unset)"} hf=${HF_TOKEN ? "yes" : "no"}`);
+  console.log(`[ai-api] ${BIND}:${PORT} supabase=${SUPABASE_URL || "(unset)"} hf=${HF_TOKEN ? "yes" : "no"} groq=${GROQ_API_KEY ? "yes" : "no"}`);
 });

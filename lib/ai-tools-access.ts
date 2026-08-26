@@ -21,7 +21,6 @@ export const AI_TOOL_IDS: AiToolId[] = [
   "timbre",
   "mixer",
   "pitchshift",
-  "musicgen",
   "songwriter",
 ];
 
@@ -39,7 +38,6 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
     enabled: true,
     title: "Изменение тональности",
   },
-  musicgen: { min_tier: "premium", enabled: true, title: "ИИ-композитор" },
   songwriter: {
     min_tier: "premium",
     enabled: true,
@@ -59,7 +57,6 @@ export function defaultAiToolAccessMap(): AiToolAccessMap {
     timbre: { ...DEFAULT_AI_TOOL_ACCESS.timbre },
     mixer: { ...DEFAULT_AI_TOOL_ACCESS.mixer },
     pitchshift: { ...DEFAULT_AI_TOOL_ACCESS.pitchshift },
-    musicgen: { ...DEFAULT_AI_TOOL_ACCESS.musicgen },
     songwriter: { ...DEFAULT_AI_TOOL_ACCESS.songwriter },
   };
 }
@@ -80,7 +77,6 @@ function isToolId(value: string): value is AiToolId {
     value === "timbre" ||
     value === "mixer" ||
     value === "pitchshift" ||
-    value === "musicgen" ||
     value === "songwriter"
   );
 }
@@ -132,6 +128,7 @@ export function canAccessAiTool(
   isAdmin = false,
   access: AiToolAccessMap = defaultAiToolAccessMap()
 ): boolean {
+  if (tool === "remover") return isAdmin;
   if (isAdmin) return true;
   const cfg = access[tool] ?? DEFAULT_AI_TOOL_ACCESS[tool];
   if (!cfg.enabled) return false;
@@ -153,6 +150,9 @@ export function aiToolDeniedMessage(
   access: AiToolAccessMap = defaultAiToolAccessMap()
 ): string {
   const cfg = access[tool] ?? DEFAULT_AI_TOOL_ACCESS[tool];
+  if (tool === "remover") {
+    return "Удаление вокала доступно только администратору";
+  }
   if (!cfg.enabled) {
     return `${cfg.title} временно отключён`;
   }

@@ -23,6 +23,8 @@
 	header Permissions-Policy "microphone=(self), camera=(self)"
 	root * /var/www/uniquevocal
 	encode gzip
+	redir /dashboard/student/pocket-studio /dashboard/student 302
+	redir /dashboard/student/ai-music /dashboard/student/ai-tools 302
 	handle /_next/* {
 		header Cache-Control "public, max-age=31536000, immutable"
 		file_server

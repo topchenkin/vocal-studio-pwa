@@ -2414,7 +2414,7 @@ values
   ('timbre', 'premium', true, 'Звёздный двойник'),
   ('mixer', 'standard', true, 'Сведение дорожек'),
   ('pitchshift', 'standard', true, 'Изменение тональности'),
-  ('musicgen', 'premium', true, 'ИИ-композитор'),
+  ('musicgen', 'premium', false, 'ИИ-композитор'),
   ('songwriter', 'premium', true, 'Нейросоздание песен')
 on conflict (tool_id) do nothing;
 

@@ -120,7 +120,8 @@ export default function AiToolsAccessSettings() {
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Включите инструменты и задайте минимальный тариф для учеников.
-            Администратор видит всё всегда.
+            Администратор видит всё всегда. Удаление вокала доступно только
+            администратору.
           </p>
         </div>
       </div>
@@ -141,6 +142,11 @@ export default function AiToolsAccessSettings() {
                 <div>
                   <p className="font-medium text-studio-text">{cfg.title}</p>
                   <p className="text-xs text-studio-muted">{tool}</p>
+                  {tool === "remover" && (
+                    <p className="mt-1 text-xs text-amber-300">
+                      Только администратор. Ученикам вкладка скрыта.
+                    </p>
+                  )}
                 </div>
 
                 <label className="flex items-center gap-2 text-sm text-studio-text">

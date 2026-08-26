@@ -50,6 +50,7 @@ def env_file_bytes() -> bytes:
         f"SUPABASE_URL={local.get('SELFHOST_SUPABASE_URL') or url}",
         f"SUPABASE_SERVICE_ROLE_KEY={local.get('SUPABASE_SERVICE_ROLE_KEY', '')}",
         f"HUGGINGFACE_API_KEY={local.get('HUGGINGFACE_API_KEY', '')}",
+        f"GROQ_API_KEY={local.get('GROQ_API_KEY', '')}",
         f"DEMUCS_HF_SPACE={local.get('DEMUCS_HF_SPACE', 'abidlabs/music-separation')}",
         "PROXY_PUBLIC_ORIGIN=https://sb.uniquevocal.ru",
         "",
@@ -68,6 +69,8 @@ def main() -> None:
     env = env_file_bytes()
     if b"SUPABASE_SERVICE_ROLE_KEY=\n" in env or b"HUGGINGFACE_API_KEY=\n" in env:
         raise SystemExit("missing SUPABASE_SERVICE_ROLE_KEY or HUGGINGFACE_API_KEY in .env.local")
+    if b"GROQ_API_KEY=\n" in env:
+        raise SystemExit("missing GROQ_API_KEY in .env.local")
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())

@@ -85,6 +85,8 @@ def main() -> None:
     openai_key = env.get("OPENAI_API_KEY", "").strip()
     if not password:
         raise SystemExit("UVS_SSH_PASS is not set")
+    if not groq_key:
+        raise SystemExit("missing GROQ_API_KEY in .env.local")
     if not FN.is_file():
         raise SystemExit(f"missing {FN}")
     if not SQL.is_file():
