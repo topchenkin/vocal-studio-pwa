@@ -1,27 +1,45 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Lock, Mic, Square, Sparkles, Upload, Waves } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BookmarkPlus,
+  Download,
+  FolderOpen,
+  Lock,
+  Mic,
+  Square,
+  Sparkles,
+  Upload,
+  Waves,
+} from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
+import LibraryTrackPicker from "@/components/student/LibraryTrackPicker";
 import { useAuth } from "@/context/AuthContext";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { cancelArmedIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
-import { downloadAudioUrl } from "@/lib/student-audio";
+import { downloadAudioUrl, saveAudioFromUrl } from "@/lib/student-audio";
 import { decodeBlobToAudioBuffer, encodeWavBlob } from "@/lib/wav-client";
 import {
   VOCAL_FX_PRESETS,
   clampWet,
   connectVocalFx,
   renderVocalFxWav,
+  vocalFxFileSlug,
   type VocalFxPreset,
 } from "@/lib/vocal-fx";
+import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_RECORD_SEC = 90;
 
 type Props = { locked?: boolean };
+
+const PRESET_GROUPS = Array.from(
+  new Set(VOCAL_FX_PRESETS.map((item) => item.group))
+);
 
 function pickRecorderMime(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -48,7 +66,7 @@ function ensureAudioContext(): AudioContext {
 }
 
 export default function VocalFxBox({ locked = false }: Props) {
-  const { tier } = useAuth();
+  const { user, isAdmin, tier } = useAuth();
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
   const [fileName, setFileName] = useState("");
   const [preset, setPreset] = useState<VocalFxPreset>("hall");
@@ -58,6 +76,11 @@ export default function VocalFxBox({ locked = false }: Props) {
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState("");
   const [elapsed, setElapsed] = useState(0);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -77,11 +100,17 @@ export default function VocalFxBox({ locked = false }: Props) {
   const bufferRef = useRef<AudioBuffer | null>(null);
   const presetRef = useRef(preset);
   const wetRef = useRef(wet);
+  const saveUrlRef = useRef("");
 
   bufferRef.current = buffer;
   presetRef.current = preset;
   wetRef.current = wet;
   playingRef.current = playing;
+
+  const activePreset = useMemo(
+    () => VOCAL_FX_PRESETS.find((item) => item.id === preset) ?? VOCAL_FX_PRESETS[0],
+    [preset]
+  );
 
   const closeGraph = useCallback(() => {
     genRef.current += 1;
@@ -172,39 +201,27 @@ export default function VocalFxBox({ locked = false }: Props) {
         Math.max(0, fromSec ?? offsetRef.current)
       );
       const gen = genRef.current;
-      const startSource = (detune = 0, delaySec = 0) => {
-        const source = ctx.createBufferSource();
-        source.buffer = audio;
-        source.detune.value = detune;
-        source.connect(input);
-        source.start(ctx.currentTime + delaySec, offset);
-        source.onended = () => {
-          if (genRef.current !== gen) return;
-          sourcesRef.current = sourcesRef.current.filter((item) => item !== source);
-          if (sourcesRef.current.length === 0) {
-            offsetRef.current = 0;
-            playingRef.current = false;
-            setPlaying(false);
-          }
-        };
-        sourcesRef.current.push(source);
+      const source = ctx.createBufferSource();
+      source.buffer = audio;
+      source.connect(input);
+      source.start(ctx.currentTime, offset);
+      source.onended = () => {
+        if (genRef.current !== gen) return;
+        sourcesRef.current = sourcesRef.current.filter((item) => item !== source);
+        if (sourcesRef.current.length === 0) {
+          offsetRef.current = 0;
+          playingRef.current = false;
+          setPlaying(false);
+        }
       };
-
-      const currentPreset = presetRef.current;
-      if (currentPreset === "double") {
-        startSource(0, 0);
-        startSource(12, 0.025);
-        fxRef.current = connectVocalFx(ctx, input, output, "original", 1);
-      } else {
-        startSource();
-        fxRef.current = connectVocalFx(
-          ctx,
-          input,
-          output,
-          currentPreset,
-          wetRef.current
-        );
-      }
+      sourcesRef.current.push(source);
+      fxRef.current = connectVocalFx(
+        ctx,
+        input,
+        output,
+        presetRef.current,
+        wetRef.current
+      );
       startedAtRef.current = ctx.currentTime;
       offsetRef.current = offset;
       playingRef.current = true;
@@ -222,11 +239,20 @@ export default function VocalFxBox({ locked = false }: Props) {
       recorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       releaseIosCapture(streamRef.current);
+      if (saveUrlRef.current) URL.revokeObjectURL(saveUrlRef.current);
       const ctx = ctxRef.current;
       ctxRef.current = null;
       if (ctx && ctx.state !== "closed") void ctx.close();
     };
   }, [stopPlayback]);
+
+  const adoptBuffer = (decoded: AudioBuffer, name: string) => {
+    stopPlayback();
+    offsetRef.current = 0;
+    setSaved(false);
+    setBuffer(decoded);
+    setFileName(name.replace(/\.\w+$/, "") || "вокал");
+  };
 
   const loadFile = async (file?: File) => {
     if (!file) return;
@@ -239,12 +265,9 @@ export default function VocalFxBox({ locked = false }: Props) {
       return;
     }
     setError("");
-    stopPlayback();
-    offsetRef.current = 0;
     try {
       const decoded = await decodeBlobToAudioBuffer(file);
-      setBuffer(decoded);
-      setFileName(file.name.replace(/\.\w+$/, "") || "вокал");
+      adoptBuffer(decoded, file.name);
     } catch {
       setError("Не удалось прочитать файл. Попробуйте MP3 или WAV.");
     }
@@ -286,9 +309,7 @@ export default function VocalFxBox({ locked = false }: Props) {
         }
         try {
           const decoded = await decodeBlobToAudioBuffer(blob);
-          offsetRef.current = 0;
-          setBuffer(decoded);
-          setFileName("запись");
+          adoptBuffer(decoded, "запись");
         } catch {
           setError("Не удалось разобрать запись. Попробуйте ещё раз.");
         }
@@ -342,24 +363,76 @@ export default function VocalFxBox({ locked = false }: Props) {
     }
   };
 
+  const renderWavBlob = async () => {
+    if (!buffer) throw new Error("Нет аудио");
+    const rendered = await renderVocalFxWav(buffer, preset, wet);
+    const channels: Float32Array[] = [];
+    for (let i = 0; i < rendered.numberOfChannels; i += 1) {
+      channels.push(rendered.getChannelData(i));
+    }
+    return encodeWavBlob(channels, rendered.sampleRate);
+  };
+
   const download = async () => {
     if (!buffer || rendering) return;
     setRendering(true);
     setError("");
     try {
-      const rendered = await renderVocalFxWav(buffer, preset, wet);
-      const channels: Float32Array[] = [];
-      for (let i = 0; i < rendered.numberOfChannels; i += 1) {
-        channels.push(rendered.getChannelData(i));
-      }
-      const wav = encodeWavBlob(channels, rendered.sampleRate);
+      const wav = await renderWavBlob();
       const url = URL.createObjectURL(wav);
-      await downloadAudioUrl(url, `${fileName || "vocal"}-${preset}.wav`);
+      await downloadAudioUrl(
+        url,
+        `${fileName || "vocal"}-${vocalFxFileSlug(preset)}.wav`
+      );
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch {
       setError("Не удалось собрать WAV. Попробуйте короче запись.");
     } finally {
       setRendering(false);
+    }
+  };
+
+  const openSave = async () => {
+    if (!buffer || rendering || !user) return;
+    setRendering(true);
+    setError("");
+    try {
+      const wav = await renderWavBlob();
+      if (saveUrlRef.current) URL.revokeObjectURL(saveUrlRef.current);
+      saveUrlRef.current = URL.createObjectURL(wav);
+      setSaveName(`${fileName || "вокал"} · ${activePreset.label}`);
+      setSaveOpen(true);
+    } catch {
+      setError("Не удалось подготовить файл для «Мои аудио».");
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const saveToLibrary = async () => {
+    if (!user || saving || !saveUrlRef.current) return;
+    const nextTitle = saveName.trim();
+    if (!nextTitle) {
+      setError("Напишите название трека");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await saveAudioFromUrl({
+        url: saveUrlRef.current,
+        source: "vocalfx",
+        title: nextTitle,
+        userId: user.id,
+        isAdmin,
+      });
+      setSaved(true);
+      setSaveOpen(false);
+      window.dispatchEvent(new Event("uvs-audio-saved"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -370,7 +443,7 @@ export default function VocalFxBox({ locked = false }: Props) {
         <div className="relative z-10 flex flex-col items-center py-10 text-center">
           <Lock className="h-7 w-7 text-amber-300" />
           <h2 className="mt-4 font-display text-2xl font-semibold">
-            Голосовые FX-пресеты
+            Обработка голоса
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
@@ -395,11 +468,14 @@ export default function VocalFxBox({ locked = false }: Props) {
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            Голосовые FX-пресеты
+            Обработка голоса
           </h2>
-          <p className="mt-1 text-sm text-studio-muted">
-            Запишите голос или загрузите файл — пресеты работают прямо в
-            браузере, без сервера.
+          <p className="mt-1 text-sm leading-relaxed text-studio-muted">
+            Ваша домашняя студия эффектов: запишите дубль, загрузите MP3 или
+            возьмите трек из «Мои аудио» — и за секунду примерьте собор,
+            улицу, винтажное радио, дабл-трек или гейт 80-х. Слушайте вживую,
+            крутите глубину эффекта и сохраняйте готовый вокал обратно в
+            кабинет. Всё считается в браузере, без сервера и ожидания.
           </p>
         </div>
       </div>
@@ -412,7 +488,7 @@ export default function VocalFxBox({ locked = false }: Props) {
         onChange={(event) => void loadFile(event.target.files?.[0])}
       />
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+      <div className="mt-5 grid gap-2 sm:grid-cols-3">
         <Button
           variant={recording ? "danger" : "secondary"}
           onClick={() => (recording ? stopRecording() : void startRecording())}
@@ -424,6 +500,10 @@ export default function VocalFxBox({ locked = false }: Props) {
           <Upload className="h-4 w-4" />
           Загрузить MP3/WAV
         </Button>
+        <Button variant="secondary" onClick={() => setLibraryOpen(true)}>
+          <FolderOpen className="h-4 w-4" />
+          Из «Мои аудио»
+        </Button>
       </div>
 
       <canvas
@@ -433,28 +513,29 @@ export default function VocalFxBox({ locked = false }: Props) {
         className="mt-5 h-24 w-full rounded-2xl bg-black/50 ring-1 ring-fuchsia-500/20"
       />
 
-      <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {VOCAL_FX_PRESETS.map((item) => {
-          const active = preset === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => changePreset(item.id)}
-              className={`rounded-2xl px-3 py-3 text-left ring-1 transition ${
-                active
-                  ? "bg-fuchsia-500/20 text-fuchsia-100 ring-fuchsia-400 shadow-[0_0_24px_rgba(217,70,239,0.35)]"
-                  : "bg-studio-bg/70 text-studio-muted ring-studio-border hover:text-studio-text"
-              }`}
-            >
-              <span className="block text-sm font-semibold">{item.label}</span>
-              <span className="mt-1 block text-[11px] leading-snug opacity-80">
-                {item.hint}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <label className="mt-5 block text-sm text-studio-muted">
+        Стиль обработки
+        <select
+          value={preset}
+          onChange={(event) => changePreset(event.target.value as VocalFxPreset)}
+          className="mt-1 w-full rounded-xl bg-studio-bg px-3 py-2.5 text-studio-text ring-1 ring-fuchsia-400/40"
+        >
+          {PRESET_GROUPS.map((group) => (
+            <optgroup key={group} label={group}>
+              {VOCAL_FX_PRESETS.filter((item) => item.group === group).map(
+                (item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                )
+              )}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      <p className="mt-2 rounded-2xl bg-fuchsia-500/10 px-4 py-3 text-sm text-fuchsia-100 ring-1 ring-fuchsia-400/30">
+        {activePreset.hint}
+      </p>
 
       <label className="mt-5 block text-sm text-studio-muted">
         Эффект (Wet/Dry): {Math.round(wet * 100)}%
@@ -481,7 +562,29 @@ export default function VocalFxBox({ locked = false }: Props) {
           <Download className="h-4 w-4" />
           {rendering ? "Собираем WAV…" : "Скачать обработанный трек"}
         </Button>
+        <Button
+          variant="secondary"
+          onClick={() => void openSave()}
+          disabled={!buffer || rendering || !user}
+        >
+          <BookmarkPlus className="h-4 w-4" />
+          {saved ? "В кабинете" : "В «Мои аудио»"}
+        </Button>
       </div>
+
+      {saved && (
+        <CabinetTabLink
+          href={
+            isAdmin
+              ? "/dashboard/admin?tab=audio"
+              : "/dashboard/student?tab=audio"
+          }
+          tabId="audio"
+          className="mt-2 inline-block text-[11px] text-studio-accent hover:underline"
+        >
+          Открыть библиотеку
+        </CabinetTabLink>
+      )}
 
       {buffer && (
         <p className="mt-3 text-xs text-studio-muted">
@@ -489,6 +592,55 @@ export default function VocalFxBox({ locked = false }: Props) {
         </p>
       )}
       {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
+
+      <LibraryTrackPicker
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onPicked={(decoded, title) => {
+          setError("");
+          adoptBuffer(decoded, title);
+        }}
+      />
+
+      <Modal
+        open={saveOpen}
+        onClose={() => {
+          if (!saving) setSaveOpen(false);
+        }}
+        title="Сохранить в Мои аудио"
+        size="sm"
+      >
+        <label className="block text-sm">
+          <span className="mb-1.5 block text-studio-muted">Название трека</span>
+          <input
+            autoFocus
+            value={saveName}
+            maxLength={120}
+            onChange={(event) => setSaveName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void saveToLibrary();
+              }
+            }}
+            className="w-full rounded-xl bg-studio-surface px-3 py-2.5 text-sm ring-1 ring-studio-border"
+            placeholder="Например, Куплет · Церковь"
+          />
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={saving}
+            onClick={() => setSaveOpen(false)}
+          >
+            Отмена
+          </Button>
+          <Button size="sm" disabled={saving || !user} onClick={() => void saveToLibrary()}>
+            {saving ? "Сохраняем…" : "Сохранить"}
+          </Button>
+        </div>
+      </Modal>
     </section>
   );
 }

@@ -1,12 +1,11 @@
 "use client";
 
-import { AudioLines, Layers, Mic, Music2, PenLine, Repeat, Shield, Stars, WandSparkles } from "lucide-react";
+import { AudioLines, Layers, Mic, Music2, Repeat, Shield, Stars, WandSparkles } from "lucide-react";
 import dynamic from "next/dynamic";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
-import SongwriterChat from "@/components/ai/SongwriterChat";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
 import type { AiToolId } from "@/lib/ai-tools-access";
 
@@ -34,9 +33,8 @@ const SUB_TABS: Array<{
   { id: "timbre", label: "Вокальный архетип", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
-  { id: "songwriter", label: "Нейросоздание песен", icon: PenLine },
-  { id: "vocalfx", label: "Голосовые FX-пресеты", icon: AudioLines },
-  { id: "chordloop", label: "Генератор аккордовых лупов", icon: Repeat },
+  { id: "vocalfx", label: "Обработка голоса", icon: AudioLines },
+  { id: "chordloop", label: "Генератор аккордов", icon: Repeat },
 ];
 
 export function isAdminAiSubTab(value: string | null): value is AdminAiSubTab {
@@ -83,7 +81,6 @@ export default function AdminAiToolBody({ active }: { active: AdminAiSubTab }) {
       {active === "timbre" && <TimbreMatcher />}
       {active === "mixer" && <MultitrackMixer />}
       {active === "pitchshift" && <PitchShiftStudio />}
-      {active === "songwriter" && <SongwriterChat />}
       {active === "vocalfx" && <VocalFxBox />}
       {active === "chordloop" && <ChordLoopGenerator />}
     </>

@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Lock, Play, Square, Sparkles } from "lucide-react";
+import { BookmarkPlus, Lock, Play, Square, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/context/AuthContext";
 import {
+  INSTRUMENTS,
+  INSTRUMENT_VOICES,
   ROOTS,
   VIBES,
   buildProgression,
@@ -13,16 +16,34 @@ import {
   defaultGroove,
   midiToHz,
   scaleNoteNames,
+  type ChordInstrument,
+  type ChordLoopSettings,
   type ChordVibe,
+  type ChordVoiceSpec,
   type Groove,
   type LoopLength,
   type RootKey,
   type ScaleMode,
 } from "@/lib/chord-loop";
+import {
+  deleteChordLoopPreset,
+  listChordLoopPresets,
+  presetToSettings,
+  saveChordLoopPreset,
+} from "@/lib/chord-loop-presets";
+import type { ChordLoopPreset } from "@/types";
 
 type Props = { locked?: boolean };
 
-const ADSR = { attack: 0.05, decay: 0.3, sustain: 0.7, release: 1.2 };
+const ROCK_CURVE = (() => {
+  const samples = 1024;
+  const curve = new Float32Array(samples);
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i / (samples - 1)) * 2 - 1;
+    curve[i] = Math.tanh(3.2 * x);
+  }
+  return curve;
+})();
 
 function ensureAudioContext(): AudioContext {
   const Ctor =
@@ -44,28 +65,45 @@ function makePadImpulse(ctx: AudioContext): AudioBuffer {
   return buffer;
 }
 
+function makeNoiseBuffer(ctx: AudioContext): AudioBuffer {
+  const length = Math.floor(ctx.sampleRate * 0.4);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
 export default function ChordLoopGenerator({ locked = false }: Props) {
-  const { tier } = useAuth();
+  const { user, tier } = useAuth();
   const [root, setRoot] = useState<RootKey>("A");
   const [mode, setMode] = useState<ScaleMode>("minor");
   const [vibe, setVibe] = useState<ChordVibe>("sad-pop");
   const [length, setLength] = useState<LoopLength>(4);
   const [groove, setGroove] = useState<Groove>("quarters");
   const [bpm, setBpm] = useState(80);
+  const [instrument, setInstrument] = useState<ChordInstrument>("piano");
   const [playing, setPlaying] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [presets, setPresets] = useState<ChordLoopPreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [presetError, setPresetError] = useState("");
 
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
+  const noiseRef = useRef<AudioBuffer | null>(null);
   const intervalRef = useRef(0);
   const nextTimeRef = useRef(0);
   const chordIndexRef = useRef(0);
-  const voicesRef = useRef<OscillatorNode[]>([]);
+  const voicesRef = useRef<AudioScheduledSourceNode[]>([]);
   const timeoutsRef = useRef<number[]>([]);
   const tapsRef = useRef<number[]>([]);
   const playingRef = useRef(false);
   const bpmRef = useRef(bpm);
   const grooveRef = useRef(groove);
+  const instrumentRef = useRef(instrument);
   const chordsRef = useRef(buildProgression(root, mode, vibe, length));
 
   const chords = useMemo(
@@ -73,16 +111,44 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     [root, mode, vibe, length]
   );
   const scale = useMemo(() => scaleNoteNames(root, mode), [root, mode]);
+  const settings: ChordLoopSettings = useMemo(
+    () => ({ root, mode, vibe, length, groove, bpm, instrument }),
+    [root, mode, vibe, length, groove, bpm, instrument]
+  );
   chordsRef.current = chords;
   bpmRef.current = bpm;
   grooveRef.current = groove;
+  instrumentRef.current = instrument;
   playingRef.current = playing;
+
+  const applySettings = (next: ChordLoopSettings) => {
+    setRoot(next.root);
+    setMode(next.mode);
+    setVibe(next.vibe);
+    setLength(next.length);
+    setGroove(next.groove);
+    setBpm(clampBpm(next.bpm));
+    setInstrument(next.instrument);
+  };
+
+  const loadPresets = useCallback(async () => {
+    if (!user) return;
+    try {
+      setPresets(await listChordLoopPresets(user.id));
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : "Не удалось загрузить пресеты");
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadPresets();
+  }, [loadPresets]);
 
   const stopVoices = useCallback((when?: number) => {
     const time = when ?? ctxRef.current?.currentTime ?? 0;
     for (const osc of voicesRef.current) {
       try {
-        osc.stop(time + ADSR.release);
+        osc.stop(time + 0.05);
       } catch {
         /* already stopped */
       }
@@ -106,42 +172,104 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     }
   }, [stopVoices]);
 
-  const playVoice = useCallback(
-    (ctx: AudioContext, dest: AudioNode, midi: number, when: number, dur: number, pan: number) => {
+  const playTone = useCallback(
+    (
+      ctx: AudioContext,
+      dest: AudioNode,
+      midi: number,
+      when: number,
+      dur: number,
+      pan: number,
+      spec: ChordVoiceSpec
+    ) => {
       const oscA = ctx.createOscillator();
       const oscB = ctx.createOscillator();
-      oscA.type = "triangle";
-      oscB.type = "sine";
-      oscA.frequency.value = midiToHz(midi);
-      oscB.frequency.value = midiToHz(midi);
-      oscB.detune.value = -8;
+      oscA.type = spec.oscA;
+      oscB.type = spec.oscB;
+      oscA.frequency.value = midiToHz(midi + spec.midiOffset);
+      oscB.frequency.value = midiToHz(midi + spec.midiOffset);
+      oscB.detune.value = spec.detuneB;
       const gain = ctx.createGain();
       const panner = ctx.createStereoPanner();
       panner.pan.value = pan;
-      const peak = 0.12;
+      const peak = spec.peak;
       gain.gain.setValueAtTime(0.0001, when);
-      gain.gain.exponentialRampToValueAtTime(peak, when + ADSR.attack);
+      gain.gain.exponentialRampToValueAtTime(peak, when + spec.attack);
       gain.gain.exponentialRampToValueAtTime(
-        Math.max(0.0002, peak * ADSR.sustain),
-        when + ADSR.attack + ADSR.decay
+        Math.max(0.0002, peak * spec.sustain),
+        when + spec.attack + spec.decay
       );
       const releaseAt = when + dur;
-      gain.gain.setValueAtTime(Math.max(0.0002, peak * ADSR.sustain), releaseAt);
-      gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + ADSR.release);
+      gain.gain.setValueAtTime(Math.max(0.0002, peak * spec.sustain), releaseAt);
+      gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + spec.release);
       oscA.connect(gain);
       oscB.connect(gain);
-      gain.connect(panner);
+      if (spec.distort) {
+        const shaper = ctx.createWaveShaper();
+        (shaper as unknown as { curve: Float32Array }).curve = ROCK_CURVE;
+        shaper.oversample = "2x";
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1200;
+        bp.Q.value = 0.9;
+        gain.connect(shaper);
+        shaper.connect(bp);
+        bp.connect(panner);
+      } else {
+        gain.connect(panner);
+      }
       panner.connect(dest);
       oscA.start(when);
       oscB.start(when);
-      oscA.stop(releaseAt + ADSR.release + 0.05);
-      oscB.stop(releaseAt + ADSR.release + 0.05);
+      oscA.stop(releaseAt + spec.release + 0.05);
+      oscB.stop(releaseAt + spec.release + 0.05);
       voicesRef.current.push(oscA, oscB);
       oscA.onended = () => {
         voicesRef.current = voicesRef.current.filter(
           (item) => item !== oscA && item !== oscB
         );
       };
+    },
+    []
+  );
+
+  const playDrum = useCallback(
+    (ctx: AudioContext, dest: AudioNode, kind: "kick" | "snare" | "hat", when: number) => {
+      if (kind === "kick") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.setValueAtTime(150, when);
+        osc.frequency.exponentialRampToValueAtTime(42, when + 0.12);
+        gain.gain.setValueAtTime(0.9, when);
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+        osc.connect(gain);
+        gain.connect(dest);
+        osc.start(when);
+        osc.stop(when + 0.24);
+        voicesRef.current.push(osc);
+        return;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseRef.current ?? makeNoiseBuffer(ctx);
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      if (kind === "snare") {
+        filter.type = "highpass";
+        filter.frequency.value = 1800;
+        gain.gain.setValueAtTime(0.35, when);
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.16);
+      } else {
+        filter.type = "highpass";
+        filter.frequency.value = 7000;
+        gain.gain.setValueAtTime(0.12, when);
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
+      }
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(dest);
+      noise.start(when);
+      noise.stop(when + 0.2);
+      voicesRef.current.push(noise);
     },
     []
   );
@@ -157,26 +285,51 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       chordIndexRef.current = index;
       const chord = list[index];
       const barSec = (4 * 60) / bpmRef.current;
-      if (grooveRef.current === "arpeggio") {
-        const notes = chord.midi;
-        const step = barSec / Math.max(4, notes.length * 2);
-        notes.forEach((midi, i) => {
-          const pan = notes.length === 1 ? 0 : (i / (notes.length - 1)) * 1.2 - 0.6;
-          playVoice(ctx, dest, midi, when + i * step, step * 1.6, pan);
+      const currentInstrument = instrumentRef.current;
+
+      if (currentInstrument === "drums") {
+        const beat = barSec / 4;
+        for (let step = 0; step < 8; step += 1) {
+          const t = when + step * (beat / 2);
+          playDrum(ctx, dest, "hat", t);
+          if (step % 2 === 0) {
+            playDrum(ctx, dest, step % 4 === 0 ? "kick" : "snare", t);
+          }
+        }
+        chord.midi.slice(0, 3).forEach((midi, i) => {
+          const pan = (i / 2) * 1.1 - 0.55;
+          playTone(ctx, dest, midi, when, barSec * 0.18, pan, {
+            ...INSTRUMENT_VOICES.piano,
+            peak: 0.06,
+            sustain: 0.2,
+            release: 0.25,
+          });
         });
       } else {
-        chord.midi.forEach((midi, i) => {
-          const pan = (i / Math.max(1, chord.midi.length - 1)) * 1.1 - 0.55;
-          playVoice(ctx, dest, midi, when, barSec * 0.92, pan);
-        });
+        const spec = INSTRUMENT_VOICES[currentInstrument];
+        const notes =
+          currentInstrument === "bass" ? [chord.midi[0]] : chord.midi;
+        if (grooveRef.current === "arpeggio") {
+          const step = barSec / Math.max(4, notes.length * 2);
+          notes.forEach((midi, i) => {
+            const pan = notes.length === 1 ? 0 : (i / (notes.length - 1)) * 1.2 - 0.6;
+            playTone(ctx, dest, midi, when + i * step, step * 1.6, pan, spec);
+          });
+        } else {
+          notes.forEach((midi, i) => {
+            const pan = (i / Math.max(1, notes.length - 1)) * 1.1 - 0.55;
+            playTone(ctx, dest, midi, when, barSec * 0.92, pan, spec);
+          });
+        }
       }
+
       const wait = Math.max(0, (when - ctx.currentTime) * 1000);
       const id = window.setTimeout(() => {
         if (playingRef.current) setActiveIndex(index);
       }, wait);
       timeoutsRef.current.push(id);
     },
-    [playVoice]
+    [playDrum, playTone]
   );
 
   const tick = useCallback(() => {
@@ -209,6 +362,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       wet.connect(ctx.destination);
       ctxRef.current = ctx;
       masterRef.current = master;
+      noiseRef.current = makeNoiseBuffer(ctx);
     }
     const ctx = ctxRef.current;
     if (ctx.state === "suspended") await ctx.resume();
@@ -224,10 +378,6 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     if (intervalRef.current) window.clearInterval(intervalRef.current);
     intervalRef.current = window.setInterval(tick, 25);
   }, [tick]);
-
-  useEffect(() => {
-    setGroove(defaultGroove(vibe));
-  }, [vibe]);
 
   useEffect(() => {
     return () => {
@@ -250,6 +400,51 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     setBpm(clampBpm(60000 / avg));
   };
 
+  const onPickPreset = (id: string) => {
+    setSelectedPreset(id);
+    const row = presets.find((item) => item.id === id);
+    if (!row) return;
+    const next = presetToSettings(row);
+    if (next) applySettings(next);
+  };
+
+  const onSavePreset = async () => {
+    if (!user || presetBusy) return;
+    const name = saveName.trim();
+    if (!name) {
+      setPresetError("Напишите название пресета");
+      return;
+    }
+    setPresetBusy(true);
+    setPresetError("");
+    try {
+      const row = await saveChordLoopPreset({ userId: user.id, name, settings });
+      setPresets((current) => [row, ...current]);
+      setSelectedPreset(row.id);
+      setSaveOpen(false);
+      setSaveName("");
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : "Не удалось сохранить");
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const onDeletePreset = async () => {
+    if (!selectedPreset || presetBusy) return;
+    setPresetBusy(true);
+    setPresetError("");
+    try {
+      await deleteChordLoopPreset(selectedPreset);
+      setPresets((current) => current.filter((item) => item.id !== selectedPreset));
+      setSelectedPreset("");
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : "Не удалось удалить");
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
   if (locked) {
     return (
       <section className="relative overflow-hidden rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border sm:p-6">
@@ -257,7 +452,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         <div className="relative z-10 flex flex-col items-center py-10 text-center">
           <Lock className="h-7 w-7 text-amber-300" />
           <h2 className="mt-4 font-display text-2xl font-semibold">
-            Генератор аккордовых лупов
+            Генератор аккордов
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
@@ -275,6 +470,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   }
 
   const pulseMs = Math.round((60 / bpm) * 1000);
+  const instrumentHint =
+    INSTRUMENTS.find((item) => item.id === instrument)?.hint ?? "";
 
   return (
     <section className="rounded-3xl bg-studio-surface p-4 ring-1 ring-studio-border sm:p-6">
@@ -284,13 +481,65 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            Генератор аккордовых лупов
+            Генератор аккордов
           </h2>
-          <p className="mt-1 text-sm text-studio-muted">
-            Гармония для вокальных импровизаций. Синтезатор играет в браузере,
-            файлы с сервера не нужны.
+          <p className="mt-1 text-sm leading-relaxed text-studio-muted">
+            Живой бэк-трек для распевок, импровизации и разбора песен: выберите
+            тональность, вайб и инструмент — и пойте поверх готовой сетки, как
+            с аккомпаниатором. Карточки показывают, какой аккорд звучит сейчас,
+            а подсказка снизу даёт безопасные ноты гаммы. Сохраните любимый
+            луп в свои пресеты и запускайте его в один тап на следующем занятии.
           </p>
         </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl bg-studio-bg/70 p-3 ring-1 ring-cyan-400/20">
+        <p className="text-xs font-medium uppercase tracking-wide text-cyan-200/80">
+          Мои пресеты
+        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <select
+            value={selectedPreset}
+            onChange={(event) => onPickPreset(event.target.value)}
+            className="w-full rounded-xl bg-studio-bg px-3 py-2 text-sm text-studio-text ring-1 ring-studio-border"
+          >
+            <option value="">Новый луп — настройте ниже</option>
+            {presets.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1 sm:flex-none"
+              onClick={() => {
+                setSaveName(
+                  `${root}${mode === "minor" ? "m" : ""} · ${
+                    INSTRUMENTS.find((item) => item.id === instrument)?.label ?? ""
+                  }`
+                );
+                setSaveOpen(true);
+              }}
+              disabled={!user}
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              Сохранить
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => void onDeletePreset()}
+              disabled={!selectedPreset || presetBusy}
+              aria-label="Удалить пресет"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        {presetError && (
+          <p className="mt-2 text-sm text-rose-300">{presetError}</p>
+        )}
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -319,11 +568,15 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
             <option value="minor">Минор</option>
           </select>
         </label>
-        <label className="text-sm text-studio-muted sm:col-span-2">
+        <label className="text-sm text-studio-muted">
           Вайб
           <select
             value={vibe}
-            onChange={(event) => setVibe(event.target.value as ChordVibe)}
+            onChange={(event) => {
+              const next = event.target.value as ChordVibe;
+              setVibe(next);
+              setGroove(defaultGroove(next));
+            }}
             className="mt-1 w-full rounded-xl bg-studio-bg px-3 py-2 text-studio-text ring-1 ring-studio-border"
           >
             {VIBES.map((item) => (
@@ -333,7 +586,24 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
             ))}
           </select>
         </label>
+        <label className="text-sm text-studio-muted">
+          Сэмпл / инструмент
+          <select
+            value={instrument}
+            onChange={(event) =>
+              setInstrument(event.target.value as ChordInstrument)
+            }
+            className="mt-1 w-full rounded-xl bg-studio-bg px-3 py-2 text-studio-text ring-1 ring-cyan-400/40"
+          >
+            {INSTRUMENTS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      <p className="mt-2 text-xs text-studio-muted">{instrumentHint}</p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {([2, 4, 8] as LoopLength[]).map((item) => (
@@ -409,9 +679,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       </label>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Button
-          onClick={() => (playing ? stop() : void play())}
-        >
+        <Button onClick={() => (playing ? stop() : void play())}>
           {playing ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {playing ? "Стоп" : "Play"}
         </Button>
@@ -419,6 +687,46 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
           Tap Tempo
         </Button>
       </div>
+
+      <Modal
+        open={saveOpen}
+        onClose={() => {
+          if (!presetBusy) setSaveOpen(false);
+        }}
+        title="Сохранить пресет"
+        size="sm"
+      >
+        <label className="block text-sm">
+          <span className="mb-1.5 block text-studio-muted">Название</span>
+          <input
+            autoFocus
+            value={saveName}
+            maxLength={80}
+            onChange={(event) => setSaveName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onSavePreset();
+              }
+            }}
+            className="w-full rounded-xl bg-studio-surface px-3 py-2.5 text-sm ring-1 ring-studio-border"
+            placeholder="Am грустный поп · гитара"
+          />
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={presetBusy}
+            onClick={() => setSaveOpen(false)}
+          >
+            Отмена
+          </Button>
+          <Button size="sm" disabled={presetBusy || !user} onClick={() => void onSavePreset()}>
+            {presetBusy ? "Сохраняем…" : "Сохранить"}
+          </Button>
+        </div>
+      </Modal>
     </section>
   );
 }

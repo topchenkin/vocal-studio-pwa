@@ -2384,7 +2384,7 @@ end $$;
 
 create table if not exists public.ai_tool_access (
   tool_id text primary key
-    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'songwriter', 'vocalfx', 'chordloop')),
+    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'vocalfx', 'chordloop')),
   min_tier text not null default 'none'
     check (min_tier in ('none', 'standard', 'premium', 'vip')),
   enabled boolean not null default true,
@@ -2415,9 +2415,8 @@ values
   ('mixer', 'standard', true, 'Сведение дорожек'),
   ('pitchshift', 'standard', true, 'Изменение тональности'),
   ('musicgen', 'premium', false, 'ИИ-композитор'),
-  ('songwriter', 'premium', true, 'Нейросоздание песен'),
-  ('vocalfx', 'none', true, 'Голосовые FX-пресеты'),
-  ('chordloop', 'none', true, 'Генератор аккордовых лупов')
+  ('vocalfx', 'none', true, 'Обработка голоса'),
+  ('chordloop', 'none', true, 'Генератор аккордов')
 on conflict (tool_id) do nothing;
 
 update public.ai_tool_access
@@ -2457,7 +2456,7 @@ set public = false,
 create table if not exists public.student_audio_tracks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
-  source text not null check (source in ('remover_minus', 'remover_vocal', 'mixer', 'pitchshift')),
+  source text not null check (source in ('remover_minus', 'remover_vocal', 'mixer', 'pitchshift', 'vocalfx')),
   title text not null check (char_length(title) between 1 and 120),
   duration_sec numeric not null check (duration_sec > 0),
   storage_path text not null unique,
@@ -2608,4 +2607,48 @@ create policy "vocal_test_results_insert_own"
 on public.vocal_test_results for insert
 to authenticated
 with check (user_id = auth.uid() or public.current_user_is_admin());
+
+create table if not exists public.chord_loop_presets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 80),
+  root text not null,
+  mode text not null check (mode in ('major', 'minor')),
+  vibe text not null,
+  loop_length integer not null check (loop_length in (2, 4, 8)),
+  groove text not null check (groove in ('quarters', 'arpeggio')),
+  bpm integer not null check (bpm between 50 and 140),
+  instrument text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists chord_loop_presets_user_created_idx
+  on public.chord_loop_presets (user_id, created_at desc);
+
+alter table public.chord_loop_presets enable row level security;
+
+drop policy if exists "chord_loop_presets_select_own" on public.chord_loop_presets;
+create policy "chord_loop_presets_select_own"
+on public.chord_loop_presets for select
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "chord_loop_presets_insert_own" on public.chord_loop_presets;
+create policy "chord_loop_presets_insert_own"
+on public.chord_loop_presets for insert
+to authenticated
+with check (user_id = auth.uid());
+
+drop policy if exists "chord_loop_presets_delete_own" on public.chord_loop_presets;
+create policy "chord_loop_presets_delete_own"
+on public.chord_loop_presets for delete
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "chord_loop_presets_update_own" on public.chord_loop_presets;
+create policy "chord_loop_presets_update_own"
+on public.chord_loop_presets for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
 

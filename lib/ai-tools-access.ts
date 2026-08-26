@@ -21,7 +21,6 @@ export const AI_TOOL_IDS: AiToolId[] = [
   "timbre",
   "mixer",
   "pitchshift",
-  "songwriter",
   "vocalfx",
   "chordloop",
 ];
@@ -40,20 +39,15 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
     enabled: true,
     title: "Изменение тональности",
   },
-  songwriter: {
-    min_tier: "premium",
-    enabled: true,
-    title: "Нейросоздание песен",
-  },
   vocalfx: {
     min_tier: "none",
     enabled: true,
-    title: "Голосовые FX-пресеты",
+    title: "Обработка голоса",
   },
   chordloop: {
     min_tier: "none",
     enabled: true,
-    title: "Генератор аккордовых лупов",
+    title: "Генератор аккордов",
   },
 };
 
@@ -69,7 +63,6 @@ export function defaultAiToolAccessMap(): AiToolAccessMap {
     timbre: { ...DEFAULT_AI_TOOL_ACCESS.timbre },
     mixer: { ...DEFAULT_AI_TOOL_ACCESS.mixer },
     pitchshift: { ...DEFAULT_AI_TOOL_ACCESS.pitchshift },
-    songwriter: { ...DEFAULT_AI_TOOL_ACCESS.songwriter },
     vocalfx: { ...DEFAULT_AI_TOOL_ACCESS.vocalfx },
     chordloop: { ...DEFAULT_AI_TOOL_ACCESS.chordloop },
   };
@@ -91,7 +84,6 @@ function isToolId(value: string): value is AiToolId {
     value === "timbre" ||
     value === "mixer" ||
     value === "pitchshift" ||
-    value === "songwriter" ||
     value === "vocalfx" ||
     value === "chordloop"
   );

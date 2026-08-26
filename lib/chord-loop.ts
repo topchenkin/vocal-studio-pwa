@@ -18,6 +18,15 @@ export type ScaleMode = "major" | "minor";
 export type LoopLength = 2 | 4 | 8;
 export type ChordVibe = "sad-pop" | "neo-soul" | "rock-ballad" | "jazz";
 export type Groove = "quarters" | "arpeggio";
+export type ChordInstrument =
+  | "piano"
+  | "guitar"
+  | "rock-guitar"
+  | "bass"
+  | "organ"
+  | "strings"
+  | "synth"
+  | "drums";
 
 export const VIBES: Array<{ id: ChordVibe; label: string }> = [
   { id: "sad-pop", label: "Грустный поп" },
@@ -25,6 +34,150 @@ export const VIBES: Array<{ id: ChordVibe; label: string }> = [
   { id: "rock-ballad", label: "Рок-баллада" },
   { id: "jazz", label: "Джазовый стандарт" },
 ];
+
+export const INSTRUMENTS: Array<{ id: ChordInstrument; label: string; hint: string }> = [
+  { id: "piano", label: "Фортепиано", hint: "Тёплый электророяль" },
+  { id: "guitar", label: "Гитара", hint: "Мягкий щипок акустики" },
+  { id: "rock-guitar", label: "Рок-гитара", hint: "Перегруз и сустейн" },
+  { id: "bass", label: "Бас", hint: "Низкая линия под вокал" },
+  { id: "organ", label: "Орган", hint: "Церковный и соул-орган" },
+  { id: "strings", label: "Струнные", hint: "Плавный ambient pad" },
+  { id: "synth", label: "Синтезатор", hint: "Яркий электро-пэд" },
+  { id: "drums", label: "Барабаны", hint: "Грув 4/4 плюс аккордовые удары" },
+];
+
+export type ChordVoiceSpec = {
+  oscA: OscillatorType;
+  oscB: OscillatorType;
+  detuneB: number;
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  peak: number;
+  midiOffset: number;
+  distort: boolean;
+};
+
+export const INSTRUMENT_VOICES: Record<
+  Exclude<ChordInstrument, "drums">,
+  ChordVoiceSpec
+> = {
+  piano: {
+    oscA: "triangle",
+    oscB: "sine",
+    detuneB: -8,
+    attack: 0.05,
+    decay: 0.3,
+    sustain: 0.7,
+    release: 1.2,
+    peak: 0.12,
+    midiOffset: 0,
+    distort: false,
+  },
+  guitar: {
+    oscA: "triangle",
+    oscB: "sawtooth",
+    detuneB: 6,
+    attack: 0.008,
+    decay: 0.28,
+    sustain: 0.18,
+    release: 0.45,
+    peak: 0.13,
+    midiOffset: 12,
+    distort: false,
+  },
+  "rock-guitar": {
+    oscA: "sawtooth",
+    oscB: "square",
+    detuneB: -12,
+    attack: 0.01,
+    decay: 0.22,
+    sustain: 0.35,
+    release: 0.35,
+    peak: 0.1,
+    midiOffset: 0,
+    distort: true,
+  },
+  bass: {
+    oscA: "sine",
+    oscB: "triangle",
+    detuneB: -5,
+    attack: 0.02,
+    decay: 0.22,
+    sustain: 0.55,
+    release: 0.4,
+    peak: 0.18,
+    midiOffset: -12,
+    distort: false,
+  },
+  organ: {
+    oscA: "square",
+    oscB: "sine",
+    detuneB: 7,
+    attack: 0.03,
+    decay: 0.12,
+    sustain: 0.82,
+    release: 0.28,
+    peak: 0.09,
+    midiOffset: 0,
+    distort: false,
+  },
+  strings: {
+    oscA: "sawtooth",
+    oscB: "sine",
+    detuneB: -10,
+    attack: 0.18,
+    decay: 0.4,
+    sustain: 0.78,
+    release: 1.4,
+    peak: 0.08,
+    midiOffset: 0,
+    distort: false,
+  },
+  synth: {
+    oscA: "sawtooth",
+    oscB: "triangle",
+    detuneB: 14,
+    attack: 0.04,
+    decay: 0.25,
+    sustain: 0.65,
+    release: 0.9,
+    peak: 0.1,
+    midiOffset: 0,
+    distort: false,
+  },
+};
+
+export type ChordLoopSettings = {
+  root: RootKey;
+  mode: ScaleMode;
+  vibe: ChordVibe;
+  length: LoopLength;
+  groove: Groove;
+  bpm: number;
+  instrument: ChordInstrument;
+};
+
+export function isRootKey(value: string): value is RootKey {
+  return (ROOTS as readonly string[]).includes(value);
+}
+
+export function isChordInstrument(value: string): value is ChordInstrument {
+  return INSTRUMENTS.some((item) => item.id === value);
+}
+
+export function isChordVibe(value: string): value is ChordVibe {
+  return VIBES.some((item) => item.id === value);
+}
+
+export function isLoopLength(value: number): value is LoopLength {
+  return value === 2 || value === 4 || value === 8;
+}
+
+export function isGroove(value: string): value is Groove {
+  return value === "quarters" || value === "arpeggio";
+}
 
 const MAJOR_STEPS = [0, 2, 4, 5, 7, 9, 11];
 const MINOR_STEPS = [0, 2, 3, 5, 7, 8, 10];

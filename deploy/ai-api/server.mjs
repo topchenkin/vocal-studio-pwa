@@ -1,5 +1,5 @@
 /**
- * AI API for the static site: Demucs (admin) + Groq songwriter.
+ * AI API for the static site: Demucs vocal remover (admin).
  * Caddy proxies /api/ai/* here so Safari does not get index.html.
  */
 import { createServer } from "node:http";
@@ -10,12 +10,8 @@ const BIND = process.env.BIND || "127.0.0.1";
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const HF_TOKEN = process.env.HUGGINGFACE_API_KEY?.trim() || "";
-const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim() || "";
-const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 const PROXY_PUBLIC_ORIGIN = (process.env.PROXY_PUBLIC_ORIGIN || "https://sb.uniquevocal.ru").replace(/\/$/, "");
 const MAX_BYTES = 10 * 1024 * 1024;
-const TIER_RANK = { none: 0, standard: 1, premium: 2, vip: 3 };
 
 function spaceHost(spaceId) {
   return `https://${spaceId.replace("/", "-").toLowerCase()}.hf.space`;
@@ -84,33 +80,9 @@ async function getAuth(bearer) {
   return profile ? { user, profile } : null;
 }
 
-async function canUseTool(profile, toolId) {
-  if (profile.role === "admin") return true;
-  const accessRes = await sbFetch(
-    `/rest/v1/ai_tool_access?tool_id=eq.${encodeURIComponent(toolId)}&select=tool_id,min_tier,enabled`
-  );
-  let minTier = "premium";
-  let enabled = true;
-  if (accessRes.ok) {
-    const rows = await accessRes.json();
-    const row = Array.isArray(rows) ? rows[0] : null;
-    if (row) {
-      minTier = row.min_tier || minTier;
-      enabled = row.enabled !== false;
-    }
-  }
-  if (!enabled) return false;
-  const have = TIER_RANK[profile.app_sub_tier] ?? 0;
-  const need = TIER_RANK[minTier] ?? 0;
-  return have >= need;
-}
-
 function canUseRemover(profile) {
   return profile.role === "admin";
 }
-
-const SONGWRITER_SYSTEM =
-  "Ты профессиональный музыкальный продюсер и автор хитов. Твоя задача — помогать вокалистам писать тексты песен, придумывать структуру (Куплет, Бридж, Припев) и рифмы. Давай советы по вокалу (где петь тише (субтон), где использовать бэлтинг, где добавить вибрато). Общайся вдохновляюще, как наставник. Отвечай кратко и структурировано. Пиши только по-русски. Текст песни тоже на русском, если ученик явно не попросил другой язык.";
 
 async function incomingRequest(req) {
   const chunks = [];
@@ -439,158 +411,12 @@ async function handleSeparate(req, res) {
     }
   }
 
-  return json(res, 503, {
+  return   json(res, 503, {
     code: "demucs_unavailable",
     error: "Сейчас обработка недоступна. Попробуйте через пару минут.",
     detail: lastError instanceof Error ? lastError.message : String(lastError ?? ""),
     attempts,
   });
-}
-
-async function readJsonBody(req) {
-  const request = await incomingRequest(req);
-  return request.json();
-}
-
-function sanitizeChatMessages(raw) {
-  if (!Array.isArray(raw)) return [];
-  const out = [];
-  for (const item of raw) {
-    if (!item || (item.role !== "user" && item.role !== "assistant")) continue;
-    const content = typeof item.content === "string" ? item.content.trim() : "";
-    if (!content) continue;
-    out.push({ role: item.role, content: content.slice(0, 4000) });
-    if (out.length >= 40) break;
-  }
-  return out;
-}
-
-function groqReply(body) {
-  const msg = body?.choices?.[0]?.message;
-  if (!msg || typeof msg !== "object") return "";
-  if (typeof msg.content === "string" && msg.content.trim()) return msg.content.trim();
-  if (Array.isArray(msg.content)) {
-    const text = msg.content
-      .map((part) => (typeof part?.text === "string" ? part.text : ""))
-      .join("")
-      .trim();
-    if (text) return text;
-  }
-  if (typeof msg.reasoning === "string" && msg.reasoning.trim()) {
-    return msg.reasoning.trim();
-  }
-  return "";
-}
-
-async function chatOnGroq(history) {
-  const messages = [{ role: "system", content: SONGWRITER_SYSTEM }, ...history];
-  const attempts = [];
-  let lastError = "failed";
-  for (const model of GROQ_MODELS) {
-    console.info(`[songwriter] trying groq ${model}`);
-    const isGptOss = model.startsWith("openai/gpt-oss");
-    const response = await fetch(GROQ_CHAT_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.8,
-        messages,
-        ...(isGptOss
-          ? { max_completion_tokens: 1200, reasoning_effort: "low" }
-          : { max_tokens: 900 }),
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (response.ok) {
-      const reply = groqReply(body);
-      if (reply) return { reply, model };
-      lastError = "empty_reply";
-      attempts.push(`${model}: empty_reply`);
-      continue;
-    }
-    lastError = body?.error?.message || `groq_${response.status}`;
-    attempts.push(`${model}: ${String(lastError).slice(0, 160)}`);
-    console.error(`[songwriter] ${model} failed:`, lastError);
-    if (response.status === 429) {
-      const error = new Error("busy");
-      error.code = "busy";
-      error.attempts = attempts;
-      throw error;
-    }
-    if (response.status === 401 || response.status === 403) {
-      const error = new Error("llm_forbidden");
-      error.code = "llm_forbidden";
-      error.attempts = attempts;
-      throw error;
-    }
-  }
-  const error = new Error(lastError);
-  error.attempts = attempts;
-  throw error;
-}
-
-async function handleSongwriter(req, res) {
-  if (!SUPABASE_URL || !SERVICE_KEY) {
-    return json(res, 503, { error: "Сервер нейросети ещё не настроен." });
-  }
-  if (!GROQ_API_KEY) {
-    return json(res, 503, {
-      error: "Сервер автора песен не настроен. Напишите преподавателю.",
-      code: "missing_groq_key",
-    });
-  }
-  const auth = await getAuth(req.headers.authorization);
-  if (!auth) {
-    return json(res, 401, {
-      error: "Сессия истекла. Обновите страницу и войдите снова.",
-      code: "unauthorized",
-    });
-  }
-  if (!(await canUseTool(auth.profile, "songwriter"))) {
-    return json(res, 403, {
-      error: "Твой личный ИИ-продюсер доступен в Premium.",
-      code: "premium_required",
-    });
-  }
-  const payload = await readJsonBody(req).catch(() => null);
-  const history = sanitizeChatMessages(payload?.messages);
-  if (!history.length || history[history.length - 1].role !== "user") {
-    return json(res, 400, {
-      error: "Напишите, с чем помочь — тема, строка или рифма.",
-      code: "empty_prompt",
-    });
-  }
-  try {
-    const generated = await chatOnGroq(history);
-    return json(res, 200, { reply: generated.reply, model: generated.model });
-  } catch (error) {
-    const code = error?.code || "failed";
-    if (code === "busy") {
-      return json(res, 429, {
-        code,
-        error: "Продюсер сейчас занят. Подождите несколько секунд и повторите.",
-        attempts: error.attempts || [],
-      });
-    }
-    if (code === "llm_forbidden") {
-      return json(res, 502, {
-        code,
-        error: "Groq отклонил API-ключ. Создайте новый ключ на console.groq.com и пришлите его.",
-        attempts: error.attempts || [],
-      });
-    }
-    return json(res, 503, {
-      code,
-      error: "Сейчас продюсер недоступен. Попробуйте через пару минут.",
-      detail: error instanceof Error ? error.message : String(error ?? ""),
-      attempts: error?.attempts || [],
-    });
-  }
 }
 
 const server = createServer((req, res) => {
@@ -633,18 +459,11 @@ const server = createServer((req, res) => {
     });
     return;
   }
-  if (req.method === "POST" && path === "/api/ai/songwriter-chat") {
-    handleSongwriter(req, res).catch((error) => {
-      console.error("[ai-api:songwriter]", error);
-      json(res, 503, { error: "Сейчас продюсер недоступен. Попробуйте через пару минут." });
-    });
-    return;
-  }
   json(res, 404, { error: "Not found" });
 });
 
 server.requestTimeout = 300_000;
 server.headersTimeout = 300_000;
 server.listen(PORT, BIND, () => {
-  console.log(`[ai-api] ${BIND}:${PORT} supabase=${SUPABASE_URL || "(unset)"} hf=${HF_TOKEN ? "yes" : "no"} groq=${GROQ_API_KEY ? "yes" : "no"}`);
+  console.log(`[ai-api] ${BIND}:${PORT} supabase=${SUPABASE_URL || "(unset)"} hf=${HF_TOKEN ? "yes" : "no"}`);
 });

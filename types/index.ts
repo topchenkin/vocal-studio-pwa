@@ -388,7 +388,23 @@ export type StudentAudioSource =
   | "remover_minus"
   | "remover_vocal"
   | "mixer"
-  | "pitchshift";
+  | "pitchshift"
+  | "vocalfx";
+
+export interface ChordLoopPreset {
+  [key: string]: unknown;
+  id: string;
+  user_id: string;
+  name: string;
+  root: string;
+  mode: string;
+  vibe: string;
+  loop_length: number;
+  groove: string;
+  bpm: number;
+  instrument: string;
+  created_at: string;
+}
 
 export interface StudentAudioTrack {
   [key: string]: unknown;
@@ -425,7 +441,6 @@ export type AiToolId =
   | "timbre"
   | "mixer"
   | "pitchshift"
-  | "songwriter"
   | "vocalfx"
   | "chordloop";
 
@@ -827,6 +842,24 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Pick<StudentAudioTrack, "title">>;
+        Relationships: [];
+      };
+      chord_loop_presets: {
+        Row: ChordLoopPreset;
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          root: string;
+          mode: string;
+          vibe: string;
+          loop_length: number;
+          groove: string;
+          bpm: number;
+          instrument: string;
+          created_at?: string;
+        };
+        Update: Partial<Pick<ChordLoopPreset, "name">>;
         Relationships: [];
       };
       vocal_test_results: {
