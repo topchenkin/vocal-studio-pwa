@@ -1,37 +1,7 @@
 import { midiToHz, type ChordInstrument } from "@/lib/chord-loop";
+import { isSampledInstrument, playSampledNote } from "@/lib/chord-sampler";
 
 export type ScheduledVoice = AudioScheduledSourceNode;
-
-function setCurve(shaper: WaveShaperNode, amount: number): void {
-  const samples = 1024;
-  const curve = new Float32Array(samples);
-  for (let i = 0; i < samples; i += 1) {
-    const x = (i / (samples - 1)) * 2 - 1;
-    curve[i] = Math.tanh(amount * x);
-  }
-  (shaper as unknown as { curve: Float32Array }).curve = curve;
-}
-
-function envGain(
-  ctx: AudioContext,
-  peak: number,
-  when: number,
-  attack: number,
-  decay: number,
-  sustain: number,
-  dur: number,
-  release: number
-): GainNode {
-  const gain = ctx.createGain();
-  const sustainLevel = Math.max(0.0002, peak * sustain);
-  gain.gain.setValueAtTime(0.0001, when);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
-  gain.gain.exponentialRampToValueAtTime(sustainLevel, when + attack + decay);
-  const releaseAt = when + dur;
-  gain.gain.setValueAtTime(sustainLevel, releaseAt);
-  gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + release);
-  return gain;
-}
 
 function panTo(ctx: AudioContext, dest: AudioNode, pan: number): StereoPannerNode {
   const panner = ctx.createStereoPanner();
@@ -78,120 +48,25 @@ function noiseBurst(
   return source;
 }
 
-function playPiano(
+function envGain(
   ctx: AudioContext,
-  dest: AudioNode,
-  hz: number,
+  peak: number,
   when: number,
+  attack: number,
+  decay: number,
+  sustain: number,
   dur: number,
-  pan: number,
-  noise: AudioBuffer
-): ScheduledVoice[] {
-  const out = panTo(ctx, dest, pan);
-  const gain = envGain(ctx, 0.16, when, 0.004, 0.35, 0.22, dur, 0.7);
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.Q.value = 0.7;
-  lp.frequency.setValueAtTime(4200, when);
-  lp.frequency.exponentialRampToValueAtTime(900, when + Math.min(1.4, dur + 0.4));
-  gain.connect(lp);
-  lp.connect(out);
-  const hammer = ctx.createGain();
-  hammer.gain.value = 0.08;
-  const hp = ctx.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.value = 1800;
-  hammer.connect(hp);
-  hp.connect(gain);
-  const stopAt = when + dur + 0.85;
-  return [
-    noiseBurst(ctx, noise, when, 0.012, hammer),
-    startOsc(ctx, "sine", hz, when, stopAt, gain),
-    startOsc(ctx, "triangle", hz, when, stopAt, gain, 4),
-    startOsc(ctx, "sine", hz * 2, when, stopAt, gain),
-    startOsc(ctx, "sine", hz * 3.01, when, stopAt, gain),
-  ];
-}
-
-function playKarplus(
-  ctx: AudioContext,
-  dest: AudioNode,
-  hz: number,
-  when: number,
-  dur: number,
-  pan: number,
-  noise: AudioBuffer,
-  bright: number,
-  feedback: number
-): ScheduledVoice[] {
-  const period = Math.max(0.0008, 1 / hz);
-  const delay = ctx.createDelay(1);
-  delay.delayTime.value = period;
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = bright;
-  const fb = ctx.createGain();
-  fb.gain.value = feedback;
-  const out = panTo(ctx, dest, pan);
-  const amp = ctx.createGain();
-  amp.gain.setValueAtTime(0.28, when);
-  amp.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.35);
-  delay.connect(filter);
-  filter.connect(fb);
-  fb.connect(delay);
-  filter.connect(amp);
-  amp.connect(out);
-  return [noiseBurst(ctx, noise, when, period * 1.15, delay)];
-}
-
-function playGuitar(
-  ctx: AudioContext,
-  dest: AudioNode,
-  hz: number,
-  when: number,
-  dur: number,
-  pan: number,
-  noise: AudioBuffer
-): ScheduledVoice[] {
-  return playKarplus(ctx, dest, hz, when, dur, pan, noise, 3200, 0.965);
-}
-
-function playRockGuitar(
-  ctx: AudioContext,
-  dest: AudioNode,
-  hz: number,
-  when: number,
-  dur: number,
-  pan: number
-): ScheduledVoice[] {
-  const out = panTo(ctx, dest, pan);
-  const gain = envGain(ctx, 0.11, when, 0.008, 0.18, 0.45, dur, 0.28);
-  const shaper = ctx.createWaveShaper();
-  setCurve(shaper, 7.5);
-  shaper.oversample = "4x";
-  const cab = ctx.createBiquadFilter();
-  cab.type = "peaking";
-  cab.frequency.value = 1100;
-  cab.Q.value = 0.8;
-  cab.gain.value = 7;
-  const cut = ctx.createBiquadFilter();
-  cut.type = "highshelf";
-  cut.frequency.value = 5500;
-  cut.gain.value = -6;
-  const hp = ctx.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.value = 90;
-  gain.connect(shaper);
-  shaper.connect(hp);
-  hp.connect(cab);
-  cab.connect(cut);
-  cut.connect(out);
-  const stopAt = when + dur + 0.4;
-  return [
-    startOsc(ctx, "sawtooth", hz, when, stopAt, gain),
-    startOsc(ctx, "square", hz, when, stopAt, gain, -11),
-    startOsc(ctx, "sawtooth", hz * 2, when, stopAt, gain, 6),
-  ];
+  release: number
+): GainNode {
+  const gain = ctx.createGain();
+  const sustainLevel = Math.max(0.0002, peak * sustain);
+  gain.gain.setValueAtTime(0.0001, when);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
+  gain.gain.exponentialRampToValueAtTime(sustainLevel, when + attack + decay);
+  const releaseAt = when + dur;
+  gain.gain.setValueAtTime(sustainLevel, releaseAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + release);
+  return gain;
 }
 
 function playBass(
@@ -252,29 +127,6 @@ function playOrgan(
     partial.connect(gain);
     return startOsc(ctx, "sine", hz * ratio, when, stopAt, partial);
   });
-}
-
-function playStrings(
-  ctx: AudioContext,
-  dest: AudioNode,
-  hz: number,
-  when: number,
-  dur: number,
-  pan: number
-): ScheduledVoice[] {
-  const out = panTo(ctx, dest, pan);
-  const gain = envGain(ctx, 0.07, when, 0.22, 0.35, 0.8, dur, 1.1);
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 1600;
-  gain.connect(lp);
-  lp.connect(out);
-  const stopAt = when + dur + 1.2;
-  return [
-    startOsc(ctx, "sawtooth", hz, when, stopAt, gain, -14),
-    startOsc(ctx, "sawtooth", hz, when, stopAt, gain, 12),
-    startOsc(ctx, "sine", hz, when, stopAt, gain),
-  ];
 }
 
 function playSynth(
@@ -347,12 +199,11 @@ export function playDrumHit(
 }
 
 export const INSTRUMENT_MIX: Record<ChordInstrument, { dry: number; wet: number }> = {
-  piano: { dry: 0.72, wet: 0.28 },
-  guitar: { dry: 0.88, wet: 0.1 },
-  "rock-guitar": { dry: 0.92, wet: 0.07 },
+  piano: { dry: 0.86, wet: 0.14 },
+  guitar: { dry: 0.92, wet: 0.08 },
+  "rock-guitar": { dry: 0.95, wet: 0.05 },
   bass: { dry: 0.94, wet: 0.06 },
   organ: { dry: 0.62, wet: 0.34 },
-  strings: { dry: 0.48, wet: 0.52 },
   synth: { dry: 0.7, wet: 0.26 },
   drums: { dry: 0.96, wet: 0.05 },
 };
@@ -367,23 +218,14 @@ export function playInstrumentNote(
   pan: number,
   noise: AudioBuffer
 ): ScheduledVoice[] {
+  if (isSampledInstrument(instrument)) {
+    return playSampledNote(ctx, dest, instrument, midi, when, dur, pan);
+  }
   if (instrument === "bass") {
     return playBass(ctx, dest, midiToHz(midi - 12), when, dur, pan, noise);
-  }
-  if (instrument === "guitar") {
-    return playGuitar(ctx, dest, midiToHz(midi), when, dur, pan, noise);
-  }
-  if (instrument === "rock-guitar") {
-    return playRockGuitar(ctx, dest, midiToHz(midi), when, dur, pan);
   }
   if (instrument === "organ") {
     return playOrgan(ctx, dest, midiToHz(midi), when, dur, pan);
   }
-  if (instrument === "strings") {
-    return playStrings(ctx, dest, midiToHz(midi), when, dur, pan);
-  }
-  if (instrument === "synth") {
-    return playSynth(ctx, dest, midiToHz(midi), when, dur, pan);
-  }
-  return playPiano(ctx, dest, midiToHz(midi), when, dur, pan, noise);
+  return playSynth(ctx, dest, midiToHz(midi), when, dur, pan);
 }

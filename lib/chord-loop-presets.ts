@@ -18,7 +18,8 @@ function asSettings(row: ChordLoopPreset): ChordLoopSettings | null {
   if (!isChordVibe(row.vibe)) return null;
   if (!isLoopLength(row.loop_length)) return null;
   if (!isGroove(row.groove)) return null;
-  if (!isChordInstrument(row.instrument)) return null;
+  const instrument = row.instrument === "strings" ? "piano" : row.instrument;
+  if (!isChordInstrument(instrument)) return null;
   return {
     root: row.root,
     mode: row.mode,
@@ -26,7 +27,7 @@ function asSettings(row: ChordLoopPreset): ChordLoopSettings | null {
     length: row.loop_length,
     groove: row.groove,
     bpm: clampBpm(row.bpm),
-    instrument: row.instrument,
+    instrument,
   };
 }
 

@@ -46,10 +46,24 @@ assert.ok(fxUi.includes('source: "vocalfx"'));
 
 const chords = readFileSync(path.join(root, "lib", "chord-loop.ts"), "utf8");
 assert.ok(chords.includes("rock-guitar"));
-assert.ok(
-  readFileSync(path.join(root, "lib", "chord-synth.ts"), "utf8").includes("playKarplus")
-);
+assert.ok(!chords.includes("Струнные"));
 assert.ok(chords.includes("INSTRUMENTS"));
+assert.ok(
+  readFileSync(path.join(root, "lib", "chord-sampler.ts"), "utf8").includes(
+    "ensureChordSamples"
+  )
+);
+assert.ok(
+  readFileSync(path.join(root, "public", "samples", "piano", "C3.mp3")).length > 1000
+);
+assert.ok(
+  readFileSync(path.join(root, "public", "samples", "guitar", "C3.mp3")).length > 1000
+);
+assert.ok(
+  readFileSync(
+    path.join(root, "public", "samples", "rock-guitar", "C3.mp3")
+  ).length > 1000
+);
 
 const chordUi = readFileSync(
   path.join(root, "components", "audio", "ChordLoopGenerator.tsx"),

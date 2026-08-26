@@ -27,6 +27,7 @@ import {
   playDrumHit,
   playInstrumentNote,
 } from "@/lib/chord-synth";
+import { ensureChordSamples } from "@/lib/chord-sampler";
 import {
   deleteChordLoopPreset,
   listChordLoopPresets,
@@ -82,6 +83,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   const [saveName, setSaveName] = useState("");
   const [presetBusy, setPresetBusy] = useState(false);
   const [presetError, setPresetError] = useState("");
+  const [sampleBusy, setSampleBusy] = useState(false);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -99,6 +101,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   const bpmRef = useRef(bpm);
   const grooveRef = useRef(groove);
   const instrumentRef = useRef(instrument);
+  const sampleGenRef = useRef(0);
   const chordsRef = useRef(buildProgression(root, mode, vibe, length));
 
   const chords = useMemo(
@@ -115,18 +118,6 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   grooveRef.current = groove;
   instrumentRef.current = instrument;
   playingRef.current = playing;
-
-  const applySettings = (next: ChordLoopSettings) => {
-    setRoot(next.root);
-    setMode(next.mode);
-    setVibe(next.vibe);
-    setLength(next.length);
-    setGroove(next.groove);
-    setBpm(clampBpm(next.bpm));
-    setInstrument(next.instrument);
-    instrumentRef.current = next.instrument;
-    applyMix(next.instrument);
-  };
 
   const loadPresets = useCallback(async () => {
     if (!user) return;
@@ -154,6 +145,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   }, []);
 
   const stop = useCallback(() => {
+    sampleGenRef.current += 1;
+    setSampleBusy(false);
     playingRef.current = false;
     setPlaying(false);
     if (intervalRef.current) {
@@ -170,7 +163,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   }, [stopVoices]);
 
   const applyMix = useCallback((next: ChordInstrument) => {
-    const mix = INSTRUMENT_MIX[next];
+    const mix = INSTRUMENT_MIX[next] ?? INSTRUMENT_MIX.piano;
     const ctx = ctxRef.current;
     if (!ctx || !dryRef.current || !wetRef.current) return;
     dryRef.current.gain.setTargetAtTime(mix.dry, ctx.currentTime, 0.04);
@@ -282,6 +275,26 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     }
   }, [scheduleChord]);
 
+  const restartVoices = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!playingRef.current || !ctx || !masterRef.current) return;
+    const previous = voiceBusRef.current;
+    if (previous) {
+      previous.gain.cancelScheduledValues(ctx.currentTime);
+      previous.gain.setValueAtTime(Math.max(0.0001, previous.gain.value), ctx.currentTime);
+      previous.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
+    }
+    const bus = ctx.createGain();
+    bus.gain.value = 1;
+    bus.connect(masterRef.current);
+    voiceBusRef.current = bus;
+    stopVoices(ctx.currentTime);
+    const count = Math.max(1, chordsRef.current.length);
+    chordIndexRef.current = (chordIndexRef.current - 1 + count) % count;
+    nextTimeRef.current = ctx.currentTime + 0.03;
+    tick();
+  }, [stopVoices, tick]);
+
   const play = useCallback(async () => {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
       const ctx = ensureAudioContext();
@@ -291,7 +304,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       voiceBus.gain.value = 1;
       const dry = ctx.createGain();
       const wet = ctx.createGain();
-      const mix = INSTRUMENT_MIX[instrumentRef.current];
+      const mix = INSTRUMENT_MIX[instrumentRef.current] ?? INSTRUMENT_MIX.piano;
       dry.gain.value = mix.dry;
       wet.gain.value = mix.wet;
       const convolver = ctx.createConvolver();
@@ -311,6 +324,25 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     }
     const ctx = ctxRef.current;
     if (ctx.state === "suspended") await ctx.resume();
+    const gen = ++sampleGenRef.current;
+    setSampleBusy(true);
+    try {
+      while (true) {
+        const wanted = instrumentRef.current;
+        await ensureChordSamples(ctx, wanted);
+        if (sampleGenRef.current !== gen) return;
+        if (instrumentRef.current === wanted) break;
+      }
+    } catch (err) {
+      if (sampleGenRef.current !== gen) return;
+      setSampleBusy(false);
+      setPresetError(
+        err instanceof Error ? err.message : "Не удалось загрузить сэмплы"
+      );
+      return;
+    }
+    if (sampleGenRef.current !== gen) return;
+    setSampleBusy(false);
     applyMix(instrumentRef.current);
     if (masterRef.current) {
       masterRef.current.gain.setValueAtTime(0.9, ctx.currentTime);
@@ -338,23 +370,36 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     instrumentRef.current = next;
     setInstrument(next);
     applyMix(next);
-    if (!playingRef.current || !ctxRef.current || !masterRef.current) return;
     const ctx = ctxRef.current;
-    const previous = voiceBusRef.current;
-    if (previous) {
-      previous.gain.cancelScheduledValues(ctx.currentTime);
-      previous.gain.setValueAtTime(Math.max(0.0001, previous.gain.value), ctx.currentTime);
-      previous.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
-    }
-    const bus = ctx.createGain();
-    bus.gain.value = 1;
-    bus.connect(masterRef.current);
-    voiceBusRef.current = bus;
-    stopVoices(ctx.currentTime);
-    const count = Math.max(1, chordsRef.current.length);
-    chordIndexRef.current = (chordIndexRef.current - 1 + count) % count;
-    nextTimeRef.current = ctx.currentTime + 0.03;
-    tick();
+    if (!playingRef.current || !ctx) return;
+    const gen = ++sampleGenRef.current;
+    const apply = async () => {
+      setSampleBusy(true);
+      try {
+        await ensureChordSamples(ctx, next);
+      } catch (err) {
+        if (sampleGenRef.current !== gen) return;
+        setSampleBusy(false);
+        setPresetError(
+          err instanceof Error ? err.message : "Не удалось загрузить сэмплы"
+        );
+        return;
+      }
+      if (sampleGenRef.current !== gen) return;
+      setSampleBusy(false);
+      restartVoices();
+    };
+    void apply();
+  };
+
+  const applySettings = (next: ChordLoopSettings) => {
+    setRoot(next.root);
+    setMode(next.mode);
+    setVibe(next.vibe);
+    setLength(next.length);
+    setGroove(next.groove);
+    setBpm(clampBpm(next.bpm));
+    changeInstrument(next.instrument);
   };
 
   const tapTempo = () => {
@@ -573,6 +618,9 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         </label>
       </div>
       <p className="mt-2 text-xs text-studio-muted">{instrumentHint}</p>
+      {sampleBusy && (
+        <p className="mt-1 text-xs text-cyan-200">Загружаем живые сэмплы…</p>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-2">
         {([2, 4, 8] as LoopLength[]).map((item) => (
@@ -648,7 +696,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       </label>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <Button onClick={() => (playing ? stop() : void play())}>
+        <Button onClick={() => (playing ? stop() : void play())} disabled={sampleBusy}>
           {playing ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {playing ? "Стоп" : "Play"}
         </Button>
@@ -656,6 +704,9 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
           Tap Tempo
         </Button>
       </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-studio-muted">
+        Фортепиано и гитары — сэмплы FluidR3 GM (Frank Wen), CC BY 3.0.
+      </p>
 
       <Modal
         open={saveOpen}

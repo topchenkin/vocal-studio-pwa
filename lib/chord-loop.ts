@@ -24,7 +24,6 @@ export type ChordInstrument =
   | "rock-guitar"
   | "bass"
   | "organ"
-  | "strings"
   | "synth"
   | "drums";
 
@@ -36,12 +35,11 @@ export const VIBES: Array<{ id: ChordVibe; label: string }> = [
 ];
 
 export const INSTRUMENTS: Array<{ id: ChordInstrument; label: string; hint: string }> = [
-  { id: "piano", label: "Фортепиано", hint: "Тёплый электророяль" },
-  { id: "guitar", label: "Гитара", hint: "Мягкий щипок акустики" },
-  { id: "rock-guitar", label: "Рок-гитара", hint: "Перегруз и сустейн" },
+  { id: "piano", label: "Фортепиано", hint: "Живой рояль" },
+  { id: "guitar", label: "Гитара", hint: "Акустическая стальная гитара" },
+  { id: "rock-guitar", label: "Рок-гитара", hint: "Перегруженная электрогитара" },
   { id: "bass", label: "Бас", hint: "Низкая линия под вокал" },
   { id: "organ", label: "Орган", hint: "Церковный и соул-орган" },
-  { id: "strings", label: "Струнные", hint: "Плавный ambient pad" },
   { id: "synth", label: "Синтезатор", hint: "Яркий электро-пэд" },
   { id: "drums", label: "Барабаны", hint: "Грув 4/4 плюс аккордовые удары" },
 ];
@@ -120,18 +118,6 @@ export const INSTRUMENT_VOICES: Record<
     sustain: 0.82,
     release: 0.28,
     peak: 0.09,
-    midiOffset: 0,
-    distort: false,
-  },
-  strings: {
-    oscA: "sawtooth",
-    oscB: "sine",
-    detuneB: -10,
-    attack: 0.18,
-    decay: 0.4,
-    sustain: 0.78,
-    release: 1.4,
-    peak: 0.08,
     midiOffset: 0,
     distort: false,
   },
