@@ -46,6 +46,9 @@ assert.ok(fxUi.includes('source: "vocalfx"'));
 
 const chords = readFileSync(path.join(root, "lib", "chord-loop.ts"), "utf8");
 assert.ok(chords.includes("rock-guitar"));
+assert.ok(
+  readFileSync(path.join(root, "lib", "chord-synth.ts"), "utf8").includes("playKarplus")
+);
 assert.ok(chords.includes("INSTRUMENTS"));
 
 const chordUi = readFileSync(

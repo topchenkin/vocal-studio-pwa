@@ -8,23 +8,25 @@ import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/context/AuthContext";
 import {
   INSTRUMENTS,
-  INSTRUMENT_VOICES,
   ROOTS,
   VIBES,
   buildProgression,
   clampBpm,
   defaultGroove,
-  midiToHz,
   scaleNoteNames,
   type ChordInstrument,
   type ChordLoopSettings,
   type ChordVibe,
-  type ChordVoiceSpec,
   type Groove,
   type LoopLength,
   type RootKey,
   type ScaleMode,
 } from "@/lib/chord-loop";
+import {
+  INSTRUMENT_MIX,
+  playDrumHit,
+  playInstrumentNote,
+} from "@/lib/chord-synth";
 import {
   deleteChordLoopPreset,
   listChordLoopPresets,
@@ -34,16 +36,6 @@ import {
 import type { ChordLoopPreset } from "@/types";
 
 type Props = { locked?: boolean };
-
-const ROCK_CURVE = (() => {
-  const samples = 1024;
-  const curve = new Float32Array(samples);
-  for (let i = 0; i < samples; i += 1) {
-    const x = (i / (samples - 1)) * 2 - 1;
-    curve[i] = Math.tanh(3.2 * x);
-  }
-  return curve;
-})();
 
 function ensureAudioContext(): AudioContext {
   const Ctor =
@@ -93,6 +85,9 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
 
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
+  const voiceBusRef = useRef<GainNode | null>(null);
+  const dryRef = useRef<GainNode | null>(null);
+  const wetRef = useRef<GainNode | null>(null);
   const noiseRef = useRef<AudioBuffer | null>(null);
   const intervalRef = useRef(0);
   const nextTimeRef = useRef(0);
@@ -129,6 +124,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     setGroove(next.groove);
     setBpm(clampBpm(next.bpm));
     setInstrument(next.instrument);
+    instrumentRef.current = next.instrument;
+    applyMix(next.instrument);
   };
 
   const loadPresets = useCallback(async () => {
@@ -172,6 +169,14 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     }
   }, [stopVoices]);
 
+  const applyMix = useCallback((next: ChordInstrument) => {
+    const mix = INSTRUMENT_MIX[next];
+    const ctx = ctxRef.current;
+    if (!ctx || !dryRef.current || !wetRef.current) return;
+    dryRef.current.gain.setTargetAtTime(mix.dry, ctx.currentTime, 0.04);
+    wetRef.current.gain.setTargetAtTime(mix.wet, ctx.currentTime, 0.04);
+  }, []);
+
   const playTone = useCallback(
     (
       ctx: AudioContext,
@@ -180,96 +185,30 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       when: number,
       dur: number,
       pan: number,
-      spec: ChordVoiceSpec
+      instrument: Exclude<ChordInstrument, "drums">
     ) => {
-      const oscA = ctx.createOscillator();
-      const oscB = ctx.createOscillator();
-      oscA.type = spec.oscA;
-      oscB.type = spec.oscB;
-      oscA.frequency.value = midiToHz(midi + spec.midiOffset);
-      oscB.frequency.value = midiToHz(midi + spec.midiOffset);
-      oscB.detune.value = spec.detuneB;
-      const gain = ctx.createGain();
-      const panner = ctx.createStereoPanner();
-      panner.pan.value = pan;
-      const peak = spec.peak;
-      gain.gain.setValueAtTime(0.0001, when);
-      gain.gain.exponentialRampToValueAtTime(peak, when + spec.attack);
-      gain.gain.exponentialRampToValueAtTime(
-        Math.max(0.0002, peak * spec.sustain),
-        when + spec.attack + spec.decay
+      const noise = noiseRef.current ?? makeNoiseBuffer(ctx);
+      if (!noiseRef.current) noiseRef.current = noise;
+      const voices = playInstrumentNote(
+        ctx,
+        dest,
+        instrument,
+        midi,
+        when,
+        dur,
+        pan,
+        noise
       );
-      const releaseAt = when + dur;
-      gain.gain.setValueAtTime(Math.max(0.0002, peak * spec.sustain), releaseAt);
-      gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + spec.release);
-      oscA.connect(gain);
-      oscB.connect(gain);
-      if (spec.distort) {
-        const shaper = ctx.createWaveShaper();
-        (shaper as unknown as { curve: Float32Array }).curve = ROCK_CURVE;
-        shaper.oversample = "2x";
-        const bp = ctx.createBiquadFilter();
-        bp.type = "bandpass";
-        bp.frequency.value = 1200;
-        bp.Q.value = 0.9;
-        gain.connect(shaper);
-        shaper.connect(bp);
-        bp.connect(panner);
-      } else {
-        gain.connect(panner);
-      }
-      panner.connect(dest);
-      oscA.start(when);
-      oscB.start(when);
-      oscA.stop(releaseAt + spec.release + 0.05);
-      oscB.stop(releaseAt + spec.release + 0.05);
-      voicesRef.current.push(oscA, oscB);
-      oscA.onended = () => {
-        voicesRef.current = voicesRef.current.filter(
-          (item) => item !== oscA && item !== oscB
-        );
-      };
+      voicesRef.current.push(...voices);
     },
     []
   );
 
   const playDrum = useCallback(
     (ctx: AudioContext, dest: AudioNode, kind: "kick" | "snare" | "hat", when: number) => {
-      if (kind === "kick") {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.setValueAtTime(150, when);
-        osc.frequency.exponentialRampToValueAtTime(42, when + 0.12);
-        gain.gain.setValueAtTime(0.9, when);
-        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
-        osc.connect(gain);
-        gain.connect(dest);
-        osc.start(when);
-        osc.stop(when + 0.24);
-        voicesRef.current.push(osc);
-        return;
-      }
-      const noise = ctx.createBufferSource();
-      noise.buffer = noiseRef.current ?? makeNoiseBuffer(ctx);
-      const filter = ctx.createBiquadFilter();
-      const gain = ctx.createGain();
-      if (kind === "snare") {
-        filter.type = "highpass";
-        filter.frequency.value = 1800;
-        gain.gain.setValueAtTime(0.35, when);
-        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.16);
-      } else {
-        filter.type = "highpass";
-        filter.frequency.value = 7000;
-        gain.gain.setValueAtTime(0.12, when);
-        gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
-      }
-      noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(dest);
-      noise.start(when);
-      noise.stop(when + 0.2);
-      voicesRef.current.push(noise);
+      const noise = noiseRef.current ?? makeNoiseBuffer(ctx);
+      if (!noiseRef.current) noiseRef.current = noise;
+      voicesRef.current.push(...playDrumHit(ctx, dest, kind, when, noise));
     },
     []
   );
@@ -277,7 +216,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   const scheduleChord = useCallback(
     (when: number) => {
       const ctx = ctxRef.current;
-      const dest = masterRef.current;
+      const dest = voiceBusRef.current;
       if (!ctx || !dest) return;
       const list = chordsRef.current;
       if (!list.length) return;
@@ -296,29 +235,28 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
             playDrum(ctx, dest, step % 4 === 0 ? "kick" : "snare", t);
           }
         }
-        chord.midi.slice(0, 3).forEach((midi, i) => {
-          const pan = (i / 2) * 1.1 - 0.55;
-          playTone(ctx, dest, midi, when, barSec * 0.18, pan, {
-            ...INSTRUMENT_VOICES.piano,
-            peak: 0.06,
-            sustain: 0.2,
-            release: 0.25,
-          });
-        });
+        playTone(ctx, dest, chord.midi[0], when, barSec * 0.35, 0, "bass");
       } else {
-        const spec = INSTRUMENT_VOICES[currentInstrument];
         const notes =
           currentInstrument === "bass" ? [chord.midi[0]] : chord.midi;
         if (grooveRef.current === "arpeggio") {
           const step = barSec / Math.max(4, notes.length * 2);
           notes.forEach((midi, i) => {
             const pan = notes.length === 1 ? 0 : (i / (notes.length - 1)) * 1.2 - 0.6;
-            playTone(ctx, dest, midi, when + i * step, step * 1.6, pan, spec);
+            playTone(
+              ctx,
+              dest,
+              midi,
+              when + i * step,
+              step * 1.6,
+              pan,
+              currentInstrument
+            );
           });
         } else {
           notes.forEach((midi, i) => {
             const pan = (i / Math.max(1, notes.length - 1)) * 1.1 - 0.55;
-            playTone(ctx, dest, midi, when, barSec * 0.92, pan, spec);
+            playTone(ctx, dest, midi, when, barSec * 0.92, pan, currentInstrument);
           });
         }
       }
@@ -349,12 +287,16 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       const ctx = ensureAudioContext();
       const master = ctx.createGain();
       master.gain.value = 0.9;
+      const voiceBus = ctx.createGain();
+      voiceBus.gain.value = 1;
       const dry = ctx.createGain();
-      dry.gain.value = 0.72;
       const wet = ctx.createGain();
-      wet.gain.value = 0.28;
+      const mix = INSTRUMENT_MIX[instrumentRef.current];
+      dry.gain.value = mix.dry;
+      wet.gain.value = mix.wet;
       const convolver = ctx.createConvolver();
       convolver.buffer = makePadImpulse(ctx);
+      voiceBus.connect(master);
       master.connect(dry);
       dry.connect(ctx.destination);
       master.connect(convolver);
@@ -362,10 +304,14 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       wet.connect(ctx.destination);
       ctxRef.current = ctx;
       masterRef.current = master;
+      voiceBusRef.current = voiceBus;
+      dryRef.current = dry;
+      wetRef.current = wet;
       noiseRef.current = makeNoiseBuffer(ctx);
     }
     const ctx = ctxRef.current;
     if (ctx.state === "suspended") await ctx.resume();
+    applyMix(instrumentRef.current);
     if (masterRef.current) {
       masterRef.current.gain.setValueAtTime(0.9, ctx.currentTime);
     }
@@ -377,7 +323,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     tick();
     if (intervalRef.current) window.clearInterval(intervalRef.current);
     intervalRef.current = window.setInterval(tick, 25);
-  }, [tick]);
+  }, [applyMix, tick]);
 
   useEffect(() => {
     return () => {
@@ -387,6 +333,29 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       if (ctx && ctx.state !== "closed") void ctx.close();
     };
   }, [stop]);
+
+  const changeInstrument = (next: ChordInstrument) => {
+    instrumentRef.current = next;
+    setInstrument(next);
+    applyMix(next);
+    if (!playingRef.current || !ctxRef.current || !masterRef.current) return;
+    const ctx = ctxRef.current;
+    const previous = voiceBusRef.current;
+    if (previous) {
+      previous.gain.cancelScheduledValues(ctx.currentTime);
+      previous.gain.setValueAtTime(Math.max(0.0001, previous.gain.value), ctx.currentTime);
+      previous.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
+    }
+    const bus = ctx.createGain();
+    bus.gain.value = 1;
+    bus.connect(masterRef.current);
+    voiceBusRef.current = bus;
+    stopVoices(ctx.currentTime);
+    const count = Math.max(1, chordsRef.current.length);
+    chordIndexRef.current = (chordIndexRef.current - 1 + count) % count;
+    nextTimeRef.current = ctx.currentTime + 0.03;
+    tick();
+  };
 
   const tapTempo = () => {
     const now = Date.now();
@@ -591,7 +560,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
           <select
             value={instrument}
             onChange={(event) =>
-              setInstrument(event.target.value as ChordInstrument)
+              changeInstrument(event.target.value as ChordInstrument)
             }
             className="mt-1 w-full rounded-xl bg-studio-bg px-3 py-2 text-studio-text ring-1 ring-cyan-400/40"
           >
