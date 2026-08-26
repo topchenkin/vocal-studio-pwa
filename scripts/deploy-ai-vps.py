@@ -58,7 +58,10 @@ def env_file_bytes() -> bytes:
 
 
 def main() -> None:
-    if not PASSWORD:
+    local = local_env()
+    password = os.environ.get("UVS_SSH_PASS") or local.get("UVS_SSH_PASS", "")
+    host = os.environ.get("UVS_SSH_HOST") or local.get("UVS_SSH_HOST", HOST)
+    if not password:
         raise SystemExit("UVS_SSH_PASS is not set")
     server = (AI / "server.mjs").read_bytes().replace(b"\r\n", b"\n")
     unit = (AI / "ai-api.service").read_bytes().replace(b"\r\n", b"\n")
@@ -69,14 +72,15 @@ def main() -> None:
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(
-        HOST,
+        host,
         username="root",
-        password=PASSWORD,
+        password=password,
         timeout=30,
         allow_agent=False,
         look_for_keys=False,
     )
     try:
+        run(client, "command -v ffmpeg >/dev/null || apt-get install -y ffmpeg")
         run(client, "mkdir -p /opt/ai-api /etc/uniquevocal")
         sftp = client.open_sftp()
         try:

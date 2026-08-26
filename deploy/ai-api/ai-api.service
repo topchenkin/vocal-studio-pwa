@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/uniquevocal/ai-api.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=/opt/ai-api
 ExecStart=/usr/bin/node /opt/ai-api/server.mjs
 Restart=always

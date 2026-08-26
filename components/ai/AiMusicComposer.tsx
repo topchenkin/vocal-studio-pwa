@@ -8,7 +8,7 @@ import Spinner from "@/components/ui/Spinner";
 import MediaAudio from "@/components/media/MediaAudio";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import { useAuth } from "@/context/AuthContext";
-import { supabase } from "@/lib/supabase";
+import { getChatSessionToken } from "@/lib/chat-media";
 import { downloadAudioUrl } from "@/lib/student-audio";
 
 const PLACEHOLDER =
@@ -28,8 +28,40 @@ const WAIT_STEPS = [
   "Сводим трек... Длиннее клип — дольше ожидание",
 ] as const;
 
-type GenerateOk = { audioBase64: string; mime?: string };
-type GenerateErr = { error?: string; estimated_time?: number };
+const API_TIMEOUT_MS = 240_000;
+
+type GenerateOk = { audioBase64?: string; mime?: string; error?: string; code?: string; estimated_time?: number };
+
+function abortAfter(ms: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel: () => window.clearTimeout(timer),
+  };
+}
+
+function humanizeError(code: string | undefined, fallback?: string) {
+  switch (code) {
+    case "premium_required":
+      return "Создание авторских треков с помощью нейросетей доступно в Premium.";
+    case "unauthorized":
+      return "Сессия истекла. Обновите страницу и войдите снова.";
+    case "empty_prompt":
+      return "Опишите трек чуть подробнее.";
+    case "prompt_too_long":
+      return "Описание слишком длинное. Сократите текст.";
+    case "timeout":
+      return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
+    case "busy":
+      return "Нейросеть остывает после прошлого трека. Подождите полминуты и нажмите ещё раз.";
+    case "missing_hf_key":
+      return "Сервер генерации не настроен. Напишите преподавателю.";
+    default:
+      if (fallback && /[А-Яа-яЁё]/.test(fallback)) return fallback;
+      return "Не удалось сгенерировать трек. Попробуйте ещё раз через минуту.";
+  }
+}
 
 function revoke(url: string | null) {
   if (url) URL.revokeObjectURL(url);
@@ -49,30 +81,6 @@ function extensionFor(mime: string) {
   if (/aac|mp4|m4a/i.test(mime)) return "m4a";
   if (/mpeg|mp3/i.test(mime)) return "mp3";
   return "flac";
-}
-
-function humanizeError(code: string | undefined) {
-  switch (code) {
-    case "premium_required":
-      return "Создание авторских треков с помощью нейросетей доступно в Premium.";
-    case "unauthorized":
-      return "Сессия истекла. Обновите страницу и войдите снова.";
-    case "empty_prompt":
-      return "Опишите трек чуть подробнее.";
-    case "prompt_too_long":
-      return "Описание слишком длинное. Сократите текст.";
-    case "timeout":
-    case "space_empty":
-    case "space_no_file":
-      return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
-    case "busy":
-    case "space_gpu":
-      return "Нейросеть остывает после прошлого трека. Подождите полминуты и нажмите ещё раз.";
-    case "missing_hf_key":
-      return "Сервер генерации не настроен. Напишите преподавателю.";
-    default:
-      return "Не удалось сгенерировать трек. Попробуйте ещё раз через минуту.";
-  }
 }
 
 function loadingMessage(seconds: number | undefined) {
@@ -95,7 +103,7 @@ export default function AiMusicComposer({ locked }: Props) {
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [audioMime, setAudioMime] = useState("audio/flac");
+  const [audioMime, setAudioMime] = useState("audio/wav");
   const [clipDuration, setClipDuration] = useState<number | null>(null);
   const urlRef = useRef<string | null>(null);
 
@@ -127,49 +135,47 @@ export default function AiMusicComposer({ locked }: Props) {
     setError("");
     setStep(0);
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke<
-        GenerateOk & GenerateErr
-      >("generate-music", { body: { prompt: text, duration } });
+      const token = await getChatSessionToken();
+      if (!token) {
+        setError("Сессия истекла. Обновите страницу и войдите снова.");
+        return;
+      }
+      const timeout = abortAfter(API_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch("/api/ai/generate-music", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ prompt: text, duration }),
+          signal: timeout.signal,
+        });
+      } finally {
+        timeout.cancel();
+      }
 
-      if (data?.error === "loading") {
-        setError(loadingMessage(data.estimated_time));
+      const payload = (await response.json().catch(() => null)) as GenerateOk | null;
+      if (payload?.error === "loading") {
+        setError(loadingMessage(payload.estimated_time));
+        return;
+      }
+      if (!response.ok || !payload?.audioBase64) {
+        setError(humanizeError(payload?.code || payload?.error, payload?.error));
         return;
       }
 
-      if (invokeError) {
-        const context = invokeError as { context?: Response };
-        let payload: GenerateErr | null = null;
-        try {
-          payload = context.context
-            ? ((await context.context.json()) as GenerateErr)
-            : null;
-        } catch {
-          payload = data ?? null;
-        }
-        if (payload?.error === "loading") {
-          setError(loadingMessage(payload.estimated_time));
-          return;
-        }
-        setError(humanizeError(payload?.error || data?.error));
-        return;
-      }
-
-      if (data?.error) {
-        setError(humanizeError(data.error));
-        return;
-      }
-
-      if (!data?.audioBase64) {
-        setError("Нейросеть не вернула аудио. Измените описание и попробуйте снова.");
-        return;
-      }
-
-      const mime = data.mime || "audio/flac";
-      const blob = decodeAudio(data.audioBase64, mime);
+      const mime = payload.mime || "audio/wav";
+      const blob = decodeAudio(payload.audioBase64, mime);
       setAudioMime(mime);
       setClipDuration(duration);
       setResultUrl(URL.createObjectURL(blob));
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setError("Генерация заняла слишком много времени. Попробуйте ещё раз.");
+        return;
+      }
       setError("Не удалось связаться с нейросетью. Проверьте интернет и повторите.");
     } finally {
       setBusy(false);

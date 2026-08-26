@@ -3,6 +3,7 @@
  * Caddy proxies /api/ai/* here so Safari does not get index.html.
  */
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 const PORT = Number(process.env.PORT) || 8788;
@@ -81,10 +82,10 @@ async function getAuth(bearer) {
   return profile ? { user, profile } : null;
 }
 
-async function canUseRemover(profile) {
+async function canUseTool(profile, toolId) {
   if (profile.role === "admin") return true;
   const accessRes = await sbFetch(
-    "/rest/v1/ai_tool_access?tool_id=eq.remover&select=tool_id,min_tier,enabled"
+    `/rest/v1/ai_tool_access?tool_id=eq.${encodeURIComponent(toolId)}&select=tool_id,min_tier,enabled`
   );
   let minTier = "premium";
   let enabled = true;
@@ -101,6 +102,35 @@ async function canUseRemover(profile) {
   const need = TIER_RANK[minTier] ?? 0;
   return have >= need;
 }
+
+function canUseRemover(profile) {
+  return canUseTool(profile, "remover");
+}
+
+const MUSICGEN_SPACES = [
+  {
+    id: "sanchit-gandhi/musicgen-streaming",
+    host: spaceHost("sanchit-gandhi/musicgen-streaming"),
+    endpoint: "generate_audio",
+  },
+];
+
+const CHAT_SPACES = [
+  {
+    id: "huggingface-projects/llama-3.2-3B-Instruct",
+    host: "https://huggingface-projects-llama-3-2-3b-instruct.hf.space",
+    endpoint: "generate",
+  },
+  {
+    id: "huggingface-projects/gemma-2-2b-it",
+    host: "https://huggingface-projects-gemma-2-2b-it.hf.space",
+    endpoint: "generate",
+  },
+];
+
+const MUSICGEN_DURATIONS = [10, 15, 20, 25, 30];
+const SONGWRITER_SYSTEM =
+  "Ты профессиональный музыкальный продюсер и автор хитов. Твоя задача — помогать вокалистам писать тексты песен, придумывать структуру (Куплет, Бридж, Припев) и рифмы. Давай советы по вокалу (где петь тише (субтон), где использовать бэлтинг, где добавить вибрато). Общайся вдохновляюще, как наставник. Отвечай кратко и структурировано.";
 
 async function incomingRequest(req) {
   const chunks = [];
@@ -232,6 +262,58 @@ async function callGradio(host, endpoint, data) {
   const parsed = JSON.parse(completePayload);
   if (!Array.isArray(parsed)) throw new Error("Gradio complete payload is not an array");
   return parsed;
+}
+
+async function callGradioPreferComplete(host, endpoint, data) {
+  const start = await fetch(`${host}/gradio_api/call/${endpoint}`, {
+    method: "POST",
+    headers: {
+      ...hfHeaders(),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ data }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!start.ok) {
+    const text = await start.text().catch(() => "");
+    throw new Error(`Call failed (${start.status}): ${text.slice(0, 200)}`);
+  }
+  const started = await start.json();
+  if (!started.event_id) throw new Error("Gradio не вернул event_id");
+
+  const stream = await fetch(
+    `${host}/gradio_api/call/${endpoint}/${started.event_id}`,
+    {
+      headers: hfHeaders(),
+      signal: AbortSignal.timeout(240_000),
+    }
+  );
+  if (!stream.ok) {
+    const text = await stream.text().catch(() => "");
+    throw new Error(`Queue failed (${stream.status}): ${text.slice(0, 200)}`);
+  }
+  const body = await stream.text();
+  let completePayload = null;
+  let errorPayload = null;
+  for (const block of body.split(/\n\n+/)) {
+    const lines = block.split("\n");
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (dataLines.length === 0) continue;
+    const payload = dataLines.join("\n").trim();
+    if (eventName === "error") errorPayload = payload;
+    if (eventName === "complete" && payload && payload !== "null") completePayload = payload;
+  }
+  if (completePayload) {
+    const parsed = JSON.parse(completePayload);
+    if (!Array.isArray(parsed)) throw new Error("Gradio complete payload is not an array");
+    return parsed;
+  }
+  throw new Error(`Gradio error: ${(errorPayload || body).slice(0, 240)}`);
 }
 
 function unwrapOutputs(parsed) {
@@ -434,6 +516,230 @@ async function handleSeparate(req, res) {
   });
 }
 
+function clampDuration(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 15;
+  let best = 15;
+  let dist = Infinity;
+  for (const option of MUSICGEN_DURATIONS) {
+    const gap = Math.abs(option - n);
+    if (gap < dist) {
+      dist = gap;
+      best = option;
+    }
+  }
+  return best;
+}
+
+function isHlsUrl(url, file) {
+  if (!url) return false;
+  if (/\.m3u8(\?|$)/i.test(url) || url.includes("playlist.m3u8")) return true;
+  return Boolean(file && typeof file === "object" && file.is_stream);
+}
+
+function ffmpegToWav(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "ffmpeg",
+      ["-hide_banner", "-loglevel", "error", ...args, "-acodec", "pcm_s16le", "-ar", "32000", "-ac", "2", "-f", "wav", "pipe:1"],
+      { stdio: ["ignore", "pipe", "pipe"] }
+    );
+    const chunks = [];
+    const errChunks = [];
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("ffmpeg timeout"));
+    }, 90_000);
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stderr.on("data", (chunk) => errChunks.push(chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(Buffer.concat(errChunks).toString("utf8").slice(0, 200) || `ffmpeg ${code}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+  });
+}
+
+async function hlsToWav(playlistUrl) {
+  const headers = HF_TOKEN ? `Authorization: Bearer ${HF_TOKEN}\r\n` : "";
+  const args = ["-protocol_whitelist", "file,http,https,tcp,tls,crypto", "-allowed_extensions", "ALL"];
+  if (headers) args.push("-headers", headers);
+  args.push("-i", playlistUrl);
+  const wav = await ffmpegToWav(args);
+  if (!sniffAudio(wav)) {
+    throw new Error("ffmpeg returned non-wav");
+  }
+  return wav;
+}
+
+function extractFile(parsed) {
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const found = extractFile(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (parsed && typeof parsed === "object" && (parsed.path || parsed.url)) {
+    return parsed;
+  }
+  return null;
+}
+
+function replyFromGradio(parsed) {
+  if (typeof parsed === "string" && parsed.trim()) return parsed.trim();
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      if (typeof item === "string" && item.trim()) return item.trim();
+    }
+  }
+  return "";
+}
+
+async function generateOnSpace(space, prompt, durationSec) {
+  await wakeSpace(space.host);
+  const seed = Math.floor(Math.random() * 11);
+  const outputs = unwrapOutputs(
+    await callGradioPreferComplete(space.host, space.endpoint, [prompt, durationSec, 1.5, seed])
+  );
+  const file = extractFile(outputs);
+  const fileUrl = fileDataToUrl(space.host, file);
+  if (!fileUrl) throw new Error(`${space.id}: нет URL аудио`);
+  if (isHlsUrl(fileUrl, file)) {
+    const wav = await hlsToWav(fileUrl);
+    return { buf: wav, mime: "audio/wav", model: `MusicGen · ${space.id}` };
+  }
+  const buf = await downloadBinary(fileUrl);
+  return { buf, mime: sniffAudio(buf) || "audio/wav", model: `MusicGen · ${space.id}` };
+}
+
+async function chatOnSpace(space, prompt) {
+  await wakeSpace(space.host);
+  const outputs = unwrapOutputs(
+    await callGradioPreferComplete(space.host, space.endpoint, [prompt, 700, 0.8, 0.9, 50, 1.2])
+  );
+  const reply = replyFromGradio(outputs);
+  if (!reply) throw new Error(`${space.id}: пустой ответ`);
+  return reply;
+}
+
+function toChatPrompt(messages) {
+  const lines = [SONGWRITER_SYSTEM, ""];
+  for (const item of messages) {
+    if (!item || (item.role !== "user" && item.role !== "assistant")) continue;
+    const content = typeof item.content === "string" ? item.content.trim() : "";
+    if (!content) continue;
+    lines.push(item.role === "user" ? `Ученик: ${content.slice(0, 4000)}` : `Продюсер: ${content.slice(0, 4000)}`);
+  }
+  lines.push("Продюсер:");
+  return lines.join("\n").slice(-8000);
+}
+
+async function readJsonBody(req) {
+  const request = await incomingRequest(req);
+  return request.json();
+}
+
+async function handleGenerateMusic(req, res) {
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return json(res, 503, { error: "Сервер нейросети ещё не настроен." });
+  }
+  if (!HF_TOKEN) {
+    return json(res, 503, { error: "Сейчас обработка недоступна. Попробуйте позже.", code: "missing_hf_key" });
+  }
+  const auth = await getAuth(req.headers.authorization);
+  if (!auth) return json(res, 401, { error: "Сессия истекла. Обновите страницу и войдите снова.", code: "unauthorized" });
+  if (!(await canUseTool(auth.profile, "musicgen"))) {
+    return json(res, 403, {
+      error: "Создание авторских треков с помощью нейросетей доступно в Premium.",
+      code: "premium_required",
+    });
+  }
+  const payload = await readJsonBody(req).catch(() => null);
+  const prompt = typeof payload?.prompt === "string" ? payload.prompt.trim() : "";
+  if (prompt.length < 3) return json(res, 400, { error: "Опишите трек чуть подробнее.", code: "empty_prompt" });
+  if (prompt.length > 400) return json(res, 400, { error: "Описание слишком длинное. Сократите текст.", code: "prompt_too_long" });
+  const duration = clampDuration(payload?.duration);
+  const attempts = [];
+  let lastError = null;
+  for (const space of MUSICGEN_SPACES) {
+    try {
+      console.info(`[musicgen] trying ${space.id}`);
+      const generated = await generateOnSpace(space, prompt, duration);
+      return json(res, 200, {
+        audioBase64: generated.buf.toString("base64"),
+        mime: generated.mime,
+        model: generated.model,
+        space: space.id,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      lastError = error;
+      attempts.push(`${space.id}: ${msg.slice(0, 160)}`);
+      console.error(`[musicgen] ${space.id} failed:`, msg);
+    }
+  }
+  return json(res, 503, {
+    code: "failed",
+    error: "Сейчас нейросеть недоступна. Попробуйте через пару минут.",
+    detail: lastError instanceof Error ? lastError.message : String(lastError ?? ""),
+    attempts,
+  });
+}
+
+async function handleSongwriter(req, res) {
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    return json(res, 503, { error: "Сервер нейросети ещё не настроен." });
+  }
+  if (!HF_TOKEN) {
+    return json(res, 503, { error: "Сейчас обработка недоступна. Попробуйте позже.", code: "missing_hf_key" });
+  }
+  const auth = await getAuth(req.headers.authorization);
+  if (!auth) return json(res, 401, { error: "Сессия истекла. Обновите страницу и войдите снова.", code: "unauthorized" });
+  if (!(await canUseTool(auth.profile, "songwriter"))) {
+    return json(res, 403, {
+      error: "Твой личный ИИ-продюсер доступен в Premium.",
+      code: "premium_required",
+    });
+  }
+  const payload = await readJsonBody(req).catch(() => null);
+  const raw = Array.isArray(payload?.messages) ? payload.messages : [];
+  const history = raw
+    .filter((item) => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string")
+    .slice(0, 40);
+  if (!history.length || history[history.length - 1].role !== "user") {
+    return json(res, 400, { error: "Напишите, с чем помочь — тема, строка или рифма.", code: "empty_prompt" });
+  }
+  const prompt = toChatPrompt(history);
+  const attempts = [];
+  let lastError = null;
+  for (const space of CHAT_SPACES) {
+    try {
+      console.info(`[songwriter] trying ${space.id}`);
+      const reply = await chatOnSpace(space, prompt);
+      return json(res, 200, { reply, space: space.id });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      lastError = error;
+      attempts.push(`${space.id}: ${msg.slice(0, 160)}`);
+      console.error(`[songwriter] ${space.id} failed:`, msg);
+    }
+  }
+  return json(res, 503, {
+    code: "failed",
+    error: "Сейчас продюсер недоступен. Попробуйте через пару минут.",
+    detail: lastError instanceof Error ? lastError.message : String(lastError ?? ""),
+    attempts,
+  });
+}
+
 const server = createServer((req, res) => {
   const url = req.url || "/";
   const path = url.split("?")[0];
@@ -471,6 +777,20 @@ const server = createServer((req, res) => {
       json(res, 503, {
         error: "Сейчас обработка недоступна. Попробуйте через пару минут.",
       });
+    });
+    return;
+  }
+  if (req.method === "POST" && path === "/api/ai/generate-music") {
+    handleGenerateMusic(req, res).catch((error) => {
+      console.error("[ai-api:musicgen]", error);
+      json(res, 503, { error: "Сейчас нейросеть недоступна. Попробуйте через пару минут." });
+    });
+    return;
+  }
+  if (req.method === "POST" && path === "/api/ai/songwriter-chat") {
+    handleSongwriter(req, res).catch((error) => {
+      console.error("[ai-api:songwriter]", error);
+      json(res, 503, { error: "Сейчас продюсер недоступен. Попробуйте через пару минут." });
     });
     return;
   }

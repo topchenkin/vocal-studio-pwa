@@ -3,20 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
-const fn = readFileSync(
-  path.join(root, "supabase", "functions", "songwriter-chat", "index.ts"),
-  "utf8"
-);
-assert.ok(fn.includes("api.groq.com/openai/v1/chat/completions"));
-assert.ok(fn.includes("GROQ_API_KEY"));
-assert.ok(fn.includes("llama3-8b-8192"));
-assert.ok(fn.includes("Ты профессиональный музыкальный продюсер и автор хитов"));
-assert.ok(fn.includes("Access-Control-Allow-Origin"));
-assert.ok(fn.includes("premium_required"));
-assert.ok(fn.includes("{ reply:"));
-assert.ok(fn.includes("huggingface-projects-llama-3-2-3b-instruct.hf.space"));
-assert.ok(fn.includes("completeViaSpace"));
-assert.ok(!fn.includes("role: rec.role === \"system\""));
+const api = readFileSync(path.join(root, "deploy", "ai-api", "server.mjs"), "utf8");
+assert.ok(api.includes("/api/ai/songwriter-chat"));
+assert.ok(api.includes("huggingface-projects-llama-3-2-3b-instruct.hf.space"));
+assert.ok(api.includes("Ты профессиональный музыкальный продюсер и автор хитов"));
+assert.ok(api.includes("HUGGINGFACE_API_KEY"));
+assert.ok(api.includes("{ reply"));
 
 const page = readFileSync(
   path.join(root, "app", "dashboard", "student", "songwriter", "page.tsx"),
@@ -28,8 +20,9 @@ const ui = readFileSync(
   path.join(root, "components", "ai", "SongwriterChat.tsx"),
   "utf8"
 );
-assert.ok(ui.includes("songwriter-chat"));
-assert.ok(ui.includes("functions.invoke"));
+assert.ok(ui.includes("/api/ai/songwriter-chat"));
+assert.ok(ui.includes("getChatSessionToken"));
+assert.ok(!ui.includes("functions.invoke"));
 assert.ok(ui.includes("Написать хит про осень"));
 assert.ok(ui.includes("Помоги с рифмой к слову..."));
 assert.ok(ui.includes("Как структурировать песню?"));
@@ -59,4 +52,4 @@ const sql = readFileSync(
 );
 assert.ok(sql.includes("'songwriter'"));
 
-console.log("songwriter chat + 7th нейросети tab: ok");
+console.log("songwriter chat via ai-api + 7th нейросети tab: ok");

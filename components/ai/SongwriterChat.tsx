@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Lock, PenLine, Send, Sparkles } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
-import { supabase } from "@/lib/supabase";
+import { getChatSessionToken } from "@/lib/chat-media";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
@@ -16,10 +16,20 @@ const CHIPS = [
   "Как структурировать песню?",
 ] as const;
 
-type ChatOk = { reply?: string };
-type ChatErr = { error?: string };
+type ChatOk = { reply?: string; error?: string; code?: string };
 
-function humanizeError(code: string | undefined) {
+const API_TIMEOUT_MS = 240_000;
+
+function abortAfter(ms: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel: () => window.clearTimeout(timer),
+  };
+}
+
+function humanizeError(code: string | undefined, fallback?: string) {
   switch (code) {
     case "premium_required":
       return "Твой личный ИИ-продюсер доступен в Premium.";
@@ -30,12 +40,11 @@ function humanizeError(code: string | undefined) {
     case "busy":
       return "Продюсер сейчас занят. Подождите несколько секунд и повторите.";
     case "timeout":
-    case "loading":
-      return "Продюсер просыпается. Подождите полминуты и повторите.";
-    case "llm_forbidden":
-    case "missing_llm_key":
-      return "Сервер автора песен временно недоступен. Попробуйте ещё раз.";
+      return "Ответ занял слишком много времени. Попробуйте ещё раз.";
+    case "missing_hf_key":
+      return "Сервер автора песен не настроен. Напишите преподавателю.";
     default:
+      if (fallback && /[А-Яа-яЁё]/.test(fallback)) return fallback;
       return "Не удалось получить ответ. Попробуйте ещё раз.";
   }
 }
@@ -120,34 +129,37 @@ export default function SongwriterChat({ locked }: Props) {
       }
     });
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke<
-        ChatOk & ChatErr
-      >("songwriter-chat", { body: { messages: history } });
-
-      if (invokeError) {
-        const context = invokeError as { context?: Response };
-        let payload: ChatErr | null = null;
-        try {
-          payload = context.context
-            ? ((await context.context.json()) as ChatErr)
-            : null;
-        } catch {
-          payload = data ?? null;
-        }
-        setError(humanizeError(payload?.error || data?.error));
+      const token = await getChatSessionToken();
+      if (!token) {
+        setError("Сессия истекла. Обновите страницу и войдите снова.");
         return;
       }
-      if (data?.error) {
-        setError(humanizeError(data.error));
+      const timeout = abortAfter(API_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch("/api/ai/songwriter-chat", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ messages: history }),
+          signal: timeout.signal,
+        });
+      } finally {
+        timeout.cancel();
+      }
+      const payload = (await response.json().catch(() => null)) as ChatOk | null;
+      if (!response.ok || !payload?.reply?.trim()) {
+        setError(humanizeError(payload?.code || payload?.error, payload?.error));
         return;
       }
-      const reply = data?.reply?.trim();
-      if (!reply) {
-        setError("Продюсер не вернул текст. Попробуйте переформулировать запрос.");
+      setMessages([...history, { role: "assistant", content: payload.reply.trim() }]);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setError("Ответ занял слишком много времени. Попробуйте ещё раз.");
         return;
       }
-      setMessages([...history, { role: "assistant", content: reply }]);
-    } catch {
       setError("Не удалось связаться с продюсером. Проверьте интернет и повторите.");
     } finally {
       setBusy(false);
