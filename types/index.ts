@@ -419,7 +419,13 @@ export interface VocalTestResult {
   created_at: string;
 }
 
-export type AiToolId = "tuner" | "remover" | "timbre" | "mixer" | "pitchshift";
+export type AiToolId =
+  | "tuner"
+  | "remover"
+  | "timbre"
+  | "mixer"
+  | "pitchshift"
+  | "musicgen";
 
 export interface AiToolAccess {
   [key: string]: unknown;

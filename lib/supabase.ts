@@ -44,7 +44,7 @@ const WS_CONNECT_MS = 8_000;
 
 function timeoutFor(url: string) {
   if (/\/storage\/v1\//i.test(url)) return STORAGE_MS;
-  if (/\/functions\/v1\//i.test(url)) return 120_000;
+  if (/\/functions\/v1\//i.test(url)) return 180_000;
   return REQUEST_MS;
 }
 

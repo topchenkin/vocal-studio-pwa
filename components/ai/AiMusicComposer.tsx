@@ -23,7 +23,7 @@ const CHIPS = [
 const WAIT_STEPS = [
   "Отправляем запрос...",
   "Нейросеть сочиняет ноты...",
-  "Сводим трек... Это может занять до 30 секунд",
+  "Сводим трек... Это может занять до 90 секунд",
 ] as const;
 
 type GenerateOk = { audioBase64: string; mime?: string };
@@ -48,9 +48,42 @@ function extensionFor(mime: string) {
   return "flac";
 }
 
-export default function AiMusicComposer() {
+function humanizeError(code: string | undefined) {
+  switch (code) {
+    case "premium_required":
+      return "Создание авторских треков с помощью нейросетей доступно в Premium.";
+    case "unauthorized":
+      return "Сессия истекла. Обновите страницу и войдите снова.";
+    case "empty_prompt":
+      return "Опишите трек чуть подробнее.";
+    case "prompt_too_long":
+      return "Описание слишком длинное. Сократите текст.";
+    case "timeout":
+      return "Генерация заняла слишком много времени. Попробуйте ещё раз.";
+    case "busy":
+    case "space_gpu":
+      return "Нейросеть сейчас занята. Подождите минуту и повторите.";
+    case "missing_hf_key":
+      return "Сервер генерации не настроен. Напишите преподавателю.";
+    default:
+      return "Не удалось сгенерировать трек. Попробуйте ещё раз через минуту.";
+  }
+}
+
+function loadingMessage(seconds: number | undefined) {
+  const wait =
+    typeof seconds === "number" && seconds > 0 ? Math.round(seconds) : 25;
+  return `Нейросеть разогревается. Пожалуйста, подождите ${wait} секунд и попробуйте снова`;
+}
+
+type Props = {
+  locked?: boolean;
+};
+
+export default function AiMusicComposer({ locked }: Props) {
   const { tier, isAdmin } = useAuth();
-  const allowed = isAdmin || tier === "premium" || tier === "vip";
+  const blocked =
+    locked ?? !(isAdmin || tier === "premium" || tier === "vip");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
@@ -93,13 +126,7 @@ export default function AiMusicComposer() {
       >("generate-music", { body: { prompt: text } });
 
       if (data?.error === "loading") {
-        const wait =
-          typeof data.estimated_time === "number" && data.estimated_time > 0
-            ? Math.round(data.estimated_time)
-            : 20;
-        setError(
-          `Нейросеть разогревается. Пожалуйста, подождите ${wait} секунд и попробуйте снова`
-        );
+        setError(loadingMessage(data.estimated_time));
         return;
       }
 
@@ -111,26 +138,18 @@ export default function AiMusicComposer() {
             ? ((await context.context.json()) as GenerateErr)
             : null;
         } catch {
-          payload = null;
+          payload = data ?? null;
         }
         if (payload?.error === "loading") {
-          const wait =
-            typeof payload.estimated_time === "number" &&
-            payload.estimated_time > 0
-              ? Math.round(payload.estimated_time)
-              : 20;
-          setError(
-            `Нейросеть разогревается. Пожалуйста, подождите ${wait} секунд и попробуйте снова`
-          );
+          setError(loadingMessage(payload.estimated_time));
           return;
         }
-        if (payload?.error === "premium_required") {
-          setError(
-            "Создание авторских треков с помощью нейросетей доступно в Premium."
-          );
-          return;
-        }
-        setError("Не удалось сгенерировать трек. Попробуйте ещё раз через минуту.");
+        setError(humanizeError(payload?.error || data?.error));
+        return;
+      }
+
+      if (data?.error) {
+        setError(humanizeError(data.error));
         return;
       }
 
@@ -150,7 +169,7 @@ export default function AiMusicComposer() {
     }
   };
 
-  if (!allowed) {
+  if (blocked) {
     return (
       <section className="relative overflow-hidden rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border sm:p-6">
         <div className="pointer-events-none absolute inset-0 bg-studio-bg/50 backdrop-blur-[2px]" />

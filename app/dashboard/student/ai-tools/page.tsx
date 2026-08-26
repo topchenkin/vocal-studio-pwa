@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Layers, Mic, Music2, Stars, WandSparkles } from "lucide-react";
-import Link from "next/link";
+import { Layers, Mic, Music2, Sparkles, Stars, WandSparkles } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
+import AiMusicComposer from "@/components/ai/AiMusicComposer";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -38,6 +38,7 @@ const TABS: Array<{
   { id: "timbre", label: "Вокальный архетип", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
+  { id: "musicgen", label: "ИИ-композитор", icon: Sparkles },
 ];
 
 export default function AiToolsPage() {
@@ -92,25 +93,12 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="Нейросети Premium"
-      subtitle="Анализ нот, тональность, минусовка, вокальный архетип и сведение"
+      subtitle="Анализ нот, тональность, минусовка, архетип, сведение и ИИ-композитор"
       bottomInset
     >
       <StudentNav />
 
-      <Link
-        href="/dashboard/student/ai-music"
-        className="mb-4 flex items-center gap-3 rounded-2xl bg-gradient-to-r from-fuchsia-600/20 via-violet-600/15 to-amber-500/10 p-4 ring-1 ring-fuchsia-400/25"
-      >
-        <Music2 className="h-5 w-5 shrink-0 text-fuchsia-200" />
-        <div className="min-w-0">
-          <p className="font-medium">ИИ-композитор</p>
-          <p className="text-xs text-studio-muted">
-            Сгенерировать авторскую минусовку по описанию — Premium
-          </p>
-        </div>
-      </Link>
-
-      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-6">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
           const lock = aiToolLockLabel(item.id, access);
@@ -152,6 +140,9 @@ export default function AiToolsPage() {
       )}
       {activeTab === "pitchshift" && (
         <PitchShiftStudio locked={locked("pitchshift")} />
+      )}
+      {activeTab === "musicgen" && (
+        <AiMusicComposer locked={locked("musicgen")} />
       )}
     </DashboardLayout>
   );

@@ -2384,7 +2384,7 @@ end $$;
 
 create table if not exists public.ai_tool_access (
   tool_id text primary key
-    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift')),
+    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen')),
   min_tier text not null default 'none'
     check (min_tier in ('none', 'standard', 'premium', 'vip')),
   enabled boolean not null default true,
@@ -2413,7 +2413,8 @@ values
   ('remover', 'premium', true, 'Удаление вокала'),
   ('timbre', 'premium', true, 'Звёздный двойник'),
   ('mixer', 'standard', true, 'Сведение дорожек'),
-  ('pitchshift', 'standard', true, 'Изменение тональности')
+  ('pitchshift', 'standard', true, 'Изменение тональности'),
+  ('musicgen', 'premium', true, 'ИИ-композитор')
 on conflict (tool_id) do nothing;
 
 update public.ai_tool_access

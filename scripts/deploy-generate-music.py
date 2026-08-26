@@ -9,10 +9,12 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
 FN = ROOT / "supabase" / "functions" / "generate-music" / "index.ts"
+SQL = ROOT / "supabase-migrations" / "2026-08-26-ai-musicgen-tool.sql"
 REMOTE_DIR = "/opt/supabase/volumes/functions/generate-music"
+REMOTE_MAIN = "/opt/supabase/volumes/functions/main/index.ts"
 COMPOSE = "/opt/supabase/docker-compose.yml"
 ENV_PATH = "/opt/supabase/.env"
-COMPOSE_MARKER = 'HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY}'
+COMPOSE_MARKER = "HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY}"
 VERIFY_LINE = 'VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"'
 
 
@@ -58,6 +60,27 @@ def patch_compose(text: str) -> str:
     )
 
 
+def patch_worker_timeout(text: str) -> str:
+    next_text = (
+        text.replace(
+            "const workerTimeoutMs = 1 * 60 * 1000",
+            "const workerTimeoutMs = 3 * 60 * 1000",
+        )
+        .replace(
+            "workerTimeoutMs: 1 * 60 * 1000",
+            "workerTimeoutMs: 3 * 60 * 1000",
+        )
+    )
+    if "const workerTimeoutMs = 60 * 1000" in next_text:
+        next_text = next_text.replace(
+            "const workerTimeoutMs = 60 * 1000",
+            "const workerTimeoutMs = 3 * 60 * 1000",
+        )
+    if "3 * 60 * 1000" not in next_text and "180000" not in next_text:
+        raise SystemExit("could not patch workerTimeoutMs in main/index.ts")
+    return next_text
+
+
 def run(client: paramiko.SSHClient, command: str, timeout: int = 180) -> None:
     print(f">>> {command}", flush=True)
     _, stdout, stderr = client.exec_command(command, timeout=timeout)
@@ -82,6 +105,8 @@ def main() -> None:
         raise SystemExit("HUGGINGFACE_API_KEY is missing in .env.local")
     if not FN.is_file():
         raise SystemExit(f"missing {FN}")
+    if not SQL.is_file():
+        raise SystemExit(f"missing {SQL}")
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -94,23 +119,35 @@ def main() -> None:
         look_for_keys=False,
     )
     try:
-        run(client, f"mkdir -p {REMOTE_DIR}")
+        run(client, f"mkdir -p {REMOTE_DIR} /opt/uvs-migrate")
         sftp = client.open_sftp()
         try:
             sftp.put(str(FN), f"{REMOTE_DIR}/index.ts")
+            sftp.put(str(SQL), f"/opt/uvs-migrate/{SQL.name}")
             with sftp.file(ENV_PATH, "r") as handle:
                 env_text = handle.read().decode("utf-8", "replace")
             with sftp.file(COMPOSE, "r") as handle:
                 compose_text = handle.read().decode("utf-8", "replace")
+            with sftp.file(REMOTE_MAIN, "r") as handle:
+                main_text = handle.read().decode("utf-8", "replace")
             next_env = upsert_env(env_text, "HUGGINGFACE_API_KEY", hf_key)
             next_compose = patch_compose(compose_text)
+            next_main = patch_worker_timeout(main_text)
             with sftp.file(ENV_PATH, "w") as handle:
                 handle.write(next_env.encode("utf-8"))
             if next_compose != compose_text:
                 with sftp.file(COMPOSE, "w") as handle:
                     handle.write(next_compose.encode("utf-8"))
+            if next_main != main_text:
+                with sftp.file(REMOTE_MAIN, "w") as handle:
+                    handle.write(next_main.encode("utf-8"))
         finally:
             sftp.close()
+        run(
+            client,
+            "docker exec -i supabase-db psql -U postgres -d postgres "
+            f"-v ON_ERROR_STOP=1 < /opt/uvs-migrate/{SQL.name}",
+        )
         run(
             client,
             "cd /opt/supabase && docker compose up -d --no-deps --force-recreate functions",
