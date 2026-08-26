@@ -429,7 +429,12 @@ def process_attempt(attempt: dict[str, Any]) -> None:
             for row in anchors
             if row.get("band") in {"high", "mid", "low"} and row.get("features")
         }
-        result = score_with_anchors(feature_rows[0]["features"], student, anchor_map)
+        result = score_with_anchors(
+            feature_rows[0]["features"],
+            student,
+            anchor_map,
+            int(attempt.get("global_shift_semitones") or 0),
+        )
         if not result["evaluable"]:
             patch(
                 "vocal_exercise_attempts",

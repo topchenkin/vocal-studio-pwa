@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Feature extraction and timbre-independent vocal phrase scoring.
+"""Rhythm-game hitbox scoring for vocal exercises.
 
-MIT-compatible runtime stack: librosa (ISC), NumPy (BSD), SciPy (BSD).
-The score compares F0/rhythm features only; raw waveforms and timbre are never
-used as the scoring target.
+Teacher F0 is quantized into MIDI NoteBlocks. Student takes are scored by
+50 ms frames against those hitboxes (SingStar / Guitar Hero), not DTW.
 """
 from __future__ import annotations
 
@@ -16,9 +15,18 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "vocal-score-5"
+ANALYZER_VERSION = "hitbox-1"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
+
+FRAME_SEC = 0.05
+TIMING_SLACK_SEC = 0.20
+GREEN_CENTS = 60.0
+NEAR_CENTS = 120.0
+MIN_BLOCK_SEC = 0.08
+VIBRATO_CENTS = 80.0
+GAP_MERGE_SEC = 0.12
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 _librosa = None
 
@@ -81,6 +89,21 @@ configure_numba_runtime()
 
 def _round_list(values: np.ndarray, digits: int) -> list[float]:
     return [round(float(value), digits) for value in values]
+
+
+def midi_to_note(midi: float) -> str:
+    rounded = int(round(float(midi)))
+    return f"{NOTE_NAMES[((rounded % 12) + 12) % 12]}{rounded // 12 - 1}"
+
+
+def midi_to_hz(midi: float) -> float:
+    return 440.0 * (2.0 ** ((float(midi) - 69.0) / 12.0))
+
+
+def hz_to_cents(user_hz: float, target_hz: float) -> float:
+    if user_hz <= 0 or target_hz <= 0:
+        return 9999.0
+    return 1200.0 * math.log2(user_hz / target_hz)
 
 
 def extract_features(
@@ -163,7 +186,6 @@ def extract_features(
     midi = np.full_like(f0, np.nan, dtype=float)
     midi[voiced] = librosa.hz_to_midi(f0[voiced])
 
-    # Compact to roughly 20 fps while preserving voiced confidence.
     stride = max(1, round((sample_rate / hop) / 20))
     sampled = np.arange(0, len(times), stride)
     onset_frames = librosa.onset.onset_detect(
@@ -177,7 +199,7 @@ def extract_features(
     flatness = float(np.mean(librosa.feature.spectral_flatness(y=normalized)))
     voiced_coverage = float(np.mean(voiced)) if voiced.size else 0.0
 
-    return {
+    features = {
         "version": ANALYZER_VERSION,
         "sample_rate": SAMPLE_RATE,
         "duration": round(float(audio.size / sample_rate), 4),
@@ -194,24 +216,11 @@ def extract_features(
         "clipping_ratio": round(clipping_ratio, 5),
         "spectral_flatness": round(flatness, 4),
     }
-
-
-def _voiced_track(features: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
-    times: list[float] = []
-    pitch: list[float] = []
-    for time, value, confidence in zip(
-        features.get("times", []),
-        features.get("pitch_midi", []),
-        features.get("confidence", []),
-    ):
-        if value is not None and float(confidence) >= 0.3:
-            times.append(float(time))
-            pitch.append(float(value))
-    return np.asarray(times), _unwrap_octave_jumps(np.asarray(pitch, dtype=float))
+    features["blocks"] = quantize_note_blocks(features)
+    return features
 
 
 def _unwrap_octave_jumps(pitch: np.ndarray) -> np.ndarray:
-    """Remove isolated +/-12/24 tracker jumps; keep real melodic motion."""
     if pitch.size < 2:
         return pitch
     out = np.empty_like(pitch)
@@ -226,198 +235,162 @@ def _unwrap_octave_jumps(pitch: np.ndarray) -> np.ndarray:
     return out
 
 
-def _wrap_octave(semitone: float) -> float:
-    return semitone - 12.0 * round(semitone / 12.0)
-
-
-def _wrap_octaves(semitones: np.ndarray) -> np.ndarray:
-    """Map interval error into [-6, 6] so gender/octave is not a pitch error."""
-    return semitones - 12.0 * np.rint(semitones / 12.0)
-
-
-def _best_global_shift(differences: np.ndarray) -> float:
-    """One transposition for the whole phrase, including octave (+/-12, +/-24)."""
-    median = float(np.median(differences))
-    candidates = [median + 12.0 * step for step in (-2, -1, 0, 1, 2)]
-
-    def cost(shift: float) -> tuple[float, float]:
-        folded = _wrap_octaves(differences - shift)
-        return float(np.median(np.abs(folded))), abs(shift - median)
-
-    return min(candidates, key=cost)
-
-
-def _note_events(features: dict[str, Any]) -> list[dict[str, float]]:
-    """Median pitch of each sung island. Slides stay one note; piano rests are gaps."""
+def quantize_note_blocks(features: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collapse raw F0 into Guitar-Hero note hitboxes. Vibrato stays one block."""
     times = [float(value) for value in features.get("times") or []]
     pitches = list(features.get("pitch_midi") or [])
     confidence = list(features.get("confidence") or [])
     while len(confidence) < len(pitches):
         confidence.append(0.0)
-    hop = 0.05
-    if len(times) >= 2:
-        hop = max(0.03, (times[-1] - times[0]) / max(1, len(times) - 1))
 
-    notes: list[dict[str, float]] = []
-    bucket: list[tuple[float, float]] = []
+    voiced_t: list[float] = []
+    voiced_m: list[float] = []
+    for time, pitch, conf in zip(times, pitches, confidence):
+        if pitch is None or float(conf) < 0.28:
+            continue
+        voiced_t.append(float(time))
+        voiced_m.append(float(pitch))
+    if not voiced_m:
+        return []
+    voiced_m = _unwrap_octave_jumps(np.asarray(voiced_m, dtype=float)).tolist()
+
+    raw: list[dict[str, Any]] = []
+    bucket_t: list[float] = []
+    bucket_m: list[float] = []
 
     def flush() -> None:
-        if len(bucket) < 1:
+        if len(bucket_t) < 1:
             return
-        start, end = bucket[0][0], bucket[-1][0]
-        duration = max(hop, end - start + hop)
-        if duration < 0.08 and len(bucket) < 2:
+        start = bucket_t[0]
+        end = bucket_t[-1]
+        duration = max(0.0, end - start)
+        if duration < MIN_BLOCK_SEC and len(bucket_t) < 2:
+            bucket_t.clear()
+            bucket_m.clear()
             return
-        midi = float(np.median([pitch for _, pitch in bucket]))
-        notes.append({"t": start, "end": end + hop, "dur": duration, "midi": midi})
+        median = float(np.median(bucket_m))
+        midi = int(round(median))
+        raw.append(
+            {
+                "note": midi_to_note(midi),
+                "midi": midi,
+                "startHz": round(midi_to_hz(midi), 2),
+                "startTime": round(start, 3),
+                "endTime": round(max(end, start + MIN_BLOCK_SEC), 3),
+            }
+        )
+        bucket_t.clear()
+        bucket_m.clear()
 
-    last_time: float | None = None
-    for time, pitch, conf in zip(times, pitches, confidence):
-        voiced = pitch is not None and float(conf) >= 0.3
-        if not voiced:
-            flush()
-            bucket = []
-            last_time = None
+    for time, midi in zip(voiced_t, voiced_m):
+        if not bucket_t:
+            bucket_t.append(time)
+            bucket_m.append(midi)
             continue
-        midi = float(pitch)
-        if last_time is not None and time - last_time > 0.38:
+        gap = time - bucket_t[-1]
+        center = float(np.median(bucket_m))
+        cents = abs(midi - center) * 100.0
+        same_note = round(midi) == round(center) or cents <= VIBRATO_CENTS
+        if gap > GAP_MERGE_SEC and not same_note:
             flush()
-            bucket = []
-        if bucket:
-            prev = bucket[-1][1]
-            if abs(midi - prev) > 1.15:
+            bucket_t.append(time)
+            bucket_m.append(midi)
+            continue
+        if same_note or gap <= GAP_MERGE_SEC:
+            if not same_note and gap <= GAP_MERGE_SEC:
                 flush()
-                bucket = []
-            else:
-                center = float(np.median([item[1] for item in bucket]))
-                if abs(midi - center) > 2.8:
-                    flush()
-                    bucket = []
-        bucket.append((time, midi))
-        last_time = time
-    flush()
-    return notes
-
-
-def _rest_intervals(features: dict[str, Any], min_dur: float = 0.4) -> list[tuple[float, float]]:
-    times = [float(value) for value in features.get("times") or []]
-    pitches = list(features.get("pitch_midi") or [])
-    if not times:
-        return []
-    rests: list[tuple[float, float]] = []
-    start: float | None = None
-    last_unvoiced = times[0]
-    for time, pitch in zip(times, pitches):
-        if pitch is None:
-            if start is None:
-                start = time
-            last_unvoiced = time
-        else:
-            if start is not None and last_unvoiced - start >= min_dur:
-                rests.append((start, last_unvoiced))
-            start = None
-    if start is not None and last_unvoiced - start >= min_dur:
-        rests.append((start, last_unvoiced))
-    duration = float(features.get("duration") or (times[-1] if times else 0))
-    if times and times[0] > min_dur:
-        rests.append((0.0, times[0]))
-    if duration - (times[-1] if times else 0) > min_dur:
-        rests.append((times[-1], duration))
-    return rests
-
-
-def _overlaps_rest(note: dict[str, float], rests: list[tuple[float, float]]) -> bool:
-    for start, end in rests:
-        overlap = min(note["end"], end) - max(note["t"], start)
-        if overlap > 0.2 and overlap >= 0.45 * note["dur"]:
-            return True
-    return False
-
-
-def _melody_notes(
-    notes: list[dict[str, float]],
-    rests: list[tuple[float, float]],
-) -> list[dict[str, float]]:
-    return [note for note in notes if not _overlaps_rest(note, rests)]
-
-
-def _dtw_note_pairs(
-    ref_notes: list[dict[str, float]],
-    stu_notes: list[dict[str, float]],
-) -> list[tuple[int, int]]:
-    if not ref_notes or not stu_notes:
-        return []
-    ref_pitch = np.asarray([note["midi"] for note in ref_notes], dtype=float)
-    stu_pitch = np.asarray([note["midi"] for note in stu_notes], dtype=float)
-    ref_rel = _wrap_octaves(ref_pitch - np.median(ref_pitch))
-    stu_rel = _wrap_octaves(stu_pitch - np.median(stu_pitch))
-    ref_t = np.asarray([note["t"] for note in ref_notes], dtype=float)
-    stu_t = np.asarray([note["t"] for note in stu_notes], dtype=float)
-    ref_span = max(0.25, float(ref_t[-1] - ref_t[0]) if len(ref_t) > 1 else 1.0)
-    stu_span = max(0.25, float(stu_t[-1] - stu_t[0]) if len(stu_t) > 1 else 1.0)
-    ref_tn = (ref_t - ref_t[0]) / ref_span
-    stu_tn = (stu_t - stu_t[0]) / stu_span
-    n, m = len(ref_notes), len(stu_notes)
-    costs = np.full((n + 1, m + 1), np.inf)
-    costs[0, 0] = 0
-    parent = np.zeros((n + 1, m + 1), dtype=np.uint8)
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            pitch_cost = abs(_wrap_octave(float(ref_rel[i - 1] - stu_rel[j - 1])))
-            time_cost = 2.2 * abs(float(ref_tn[i - 1] - stu_tn[j - 1]))
-            local = pitch_cost + time_cost
-            choices = (costs[i - 1, j - 1], costs[i - 1, j] + 0.35, costs[i, j - 1] + 0.35)
-            move = int(np.argmin(choices))
-            costs[i, j] = local + choices[move]
-            parent[i, j] = move
-    pairs: list[tuple[int, int]] = []
-    i, j = n, m
-    while i > 0 and j > 0:
-        move = int(parent[i, j])
-        if move == 0:
-            pairs.append((i - 1, j - 1))
-            i -= 1
-            j -= 1
-        elif move == 1:
-            i -= 1
-        else:
-            j -= 1
-    pairs.reverse()
-    seen_i: set[int] = set()
-    seen_j: set[int] = set()
-    unique: list[tuple[int, int]] = []
-    for i, j in pairs:
-        if i in seen_i or j in seen_j:
+                bucket_t.append(time)
+                bucket_m.append(midi)
+                continue
+            bucket_t.append(time)
+            bucket_m.append(midi)
             continue
-        seen_i.add(i)
-        seen_j.add(j)
-        unique.append((i, j))
-    return unique
+        flush()
+        bucket_t.append(time)
+        bucket_m.append(midi)
+    flush()
+
+    merged: list[dict[str, Any]] = []
+    for block in raw:
+        if (
+            merged
+            and block["midi"] == merged[-1]["midi"]
+            and block["startTime"] - merged[-1]["endTime"] <= GAP_MERGE_SEC
+        ):
+            merged[-1]["endTime"] = block["endTime"]
+        else:
+            merged.append(block)
+    return [block for block in merged if block["endTime"] - block["startTime"] >= MIN_BLOCK_SEC]
 
 
-# Karaoke tolerance: inside +/- 1 semitone is the same note. Two human takes of
-# the same phrase cannot match more tightly, including the teacher re-singing it.
-IN_TUNE_CENTS = 100.0
-FAIL_CENTS = 300.0
-ONSET_SLACK_SEC = 0.22
-ONSET_FAIL_SEC = 0.85
+def shift_blocks(blocks: list[dict[str, Any]], semitones: int) -> list[dict[str, Any]]:
+    shift = int(np.clip(semitones, -2, 2))
+    if shift == 0:
+        return blocks
+    factor = 2.0 ** (shift / 12.0)
+    out: list[dict[str, Any]] = []
+    for block in blocks:
+        midi = int(block["midi"]) + shift
+        out.append(
+            {
+                "note": midi_to_note(midi),
+                "midi": midi,
+                "startHz": round(float(block["startHz"]) * factor, 2),
+                "startTime": block["startTime"],
+                "endTime": block["endTime"],
+            }
+        )
+    return out
 
 
-def _note_quality(error_semitones: float) -> float:
-    """Correct sung note = 1. Anything inside the +/-100 cent window is full credit."""
-    error_cents = abs(_wrap_octave(error_semitones)) * 100.0
-    if error_cents <= IN_TUNE_CENTS:
-        return 1.0
-    if error_cents >= FAIL_CENTS:
-        return 0.0
-    return max(0.0, 1.0 - (error_cents - IN_TUNE_CENTS) / (FAIL_CENTS - IN_TUNE_CENTS))
-
-
-def _voiced_midis(features: dict[str, Any]) -> np.ndarray:
-    return np.asarray(
-        [float(value) for value in (features.get("pitch_midi") or []) if value is not None],
-        dtype=float,
+def block_at(
+    blocks: list[dict[str, Any]],
+    time: float,
+    slack: float = TIMING_SLACK_SEC,
+) -> dict[str, Any] | None:
+    inside = [
+        block
+        for block in blocks
+        if float(block["startTime"]) <= time <= float(block["endTime"])
+    ]
+    if inside:
+        return min(inside, key=lambda block: abs(time - (block["startTime"] + block["endTime"]) / 2))
+    nearby = [
+        block
+        for block in blocks
+        if float(block["startTime"]) - slack <= time <= float(block["endTime"]) + slack
+    ]
+    if not nearby:
+        return None
+    return min(
+        nearby,
+        key=lambda block: min(
+            abs(time - float(block["startTime"])),
+            abs(time - float(block["endTime"])),
+        ),
     )
+
+
+def _student_hz_at(times: list[float], hz: list[float | None], time: float) -> float | None:
+    voiced = [(stamp, value) for stamp, value in zip(times, hz) if value is not None]
+    if not voiced:
+        return None
+    lo: tuple[float, float] | None = None
+    hi: tuple[float, float] | None = None
+    for stamp, value in voiced:
+        if stamp <= time:
+            lo = (stamp, float(value))
+        if stamp >= time and hi is None:
+            hi = (stamp, float(value))
+            break
+    if lo and hi and hi[0] > lo[0] and hi[0] - lo[0] <= 0.35:
+        mix = (time - lo[0]) / (hi[0] - lo[0])
+        return lo[1] * (1.0 - mix) + hi[1] * mix
+    if lo and time - lo[0] <= TIMING_SLACK_SEC:
+        return lo[1]
+    if hi and hi[0] - time <= TIMING_SLACK_SEC:
+        return hi[1]
+    return None
 
 
 UNRECOGNIZED = (
@@ -442,29 +415,24 @@ WEAK_REFERENCE = (
     "\u0412 \u044d\u0442\u0430\u043b\u043e\u043d\u043d\u043e\u0439 \u0444\u0440\u0430\u0437\u0435 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u043c\u0430\u043b\u043e \u043d\u043e\u0442, "
     "\u0447\u0442\u043e\u0431\u044b \u043e\u0446\u0435\u043d\u0438\u0432\u0430\u0442\u044c \u043c\u0435\u043b\u043e\u0434\u0438\u044e."
 )
-DRONE = (
-    "\u042d\u0442\u043e \u043f\u043e\u0445\u043e\u0436\u0435 \u043d\u0430 \u043e\u0434\u043d\u0443 \u043d\u043e\u0442\u0443, "
-    "\u0430 \u0432 \u044d\u0442\u0430\u043b\u043e\u043d\u0435 \u043c\u0435\u043b\u043e\u0434\u0438\u044f \u0434\u0432\u0438\u0436\u0435\u0442\u0441\u044f."
-)
 ABORTED = (
     "\u0424\u0440\u0430\u0437\u0430 \u043e\u0431\u043e\u0440\u0432\u0430\u043d\u0430 \u0441\u043b\u0438\u0448\u043a\u043e\u043c \u0440\u0430\u043d\u043e. "
     "\u0414\u043e\u043f\u043e\u0439\u0442\u0435 \u0435\u0451 \u0434\u043e \u043a\u043e\u043d\u0446\u0430."
 )
 FEEDBACK = {
     "intonation": (
-        "\u0414\u0435\u0440\u0436\u0438\u0442\u0435 \u043d\u043e\u0442\u044b \u0431\u043b\u0438\u0436\u0435 \u043a \u043a\u043e\u043d\u0442\u0443\u0440\u0443 "
-        "\u0438 \u0434\u0432\u0438\u0433\u0430\u0439\u0442\u0435\u0441\u044c \u0432\u043c\u0435\u0441\u0442\u0435 \u0441\u043e \u0444\u0440\u0430\u0437\u043e\u0439."
+        "\u0414\u0435\u0440\u0436\u0438\u0442\u0435 \u0433\u043e\u043b\u043e\u0441 \u0432\u043d\u0443\u0442\u0440\u0438 "
+        "\u0437\u0435\u043b\u0451\u043d\u044b\u0445 \u0431\u043b\u043e\u043a\u043e\u0432 \u043d\u043e\u0442."
     ),
     "rhythm": (
-        "\u041f\u043e\u0439\u043c\u0430\u0439\u0442\u0435 \u0442\u043e\u0447\u043d\u0435\u0435 \u0432\u0441\u0442\u0443\u043f\u043b\u0435\u043d\u0438\u044f "
-        "\u043f\u0435\u0432\u0447\u0435\u0441\u043a\u0438\u0445 \u043d\u043e\u0442 \u043f\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438."
+        "\u0412\u0445\u043e\u0434\u0438\u0442\u0435 \u0432 \u0431\u043b\u043e\u043a \u0432\u043e\u0432\u0440\u0435\u043c\u044f. "
+        "\u0414\u043e\u043f\u0443\u0441\u043a \u043d\u0430 \u0440\u0435\u0430\u043a\u0446\u0438\u044e 200 \u043c\u0441."
     ),
     "completeness": (
-        "\u0414\u043e\u043f\u043e\u0439\u0442\u0435 \u0432\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 \u043a\u0443\u0441\u043a\u0438 "
-        "\u0438 \u043f\u043e\u043c\u043e\u043b\u0447\u0438\u0442\u0435 \u043d\u0430 \u043f\u0430\u0443\u0437\u0430\u0445 \u0444\u043e\u0440\u0442\u0435\u043f\u0438\u0430\u043d\u043e."
+        "\u041f\u0440\u043e\u043f\u043e\u0439\u0442\u0435 \u0432\u0441\u0435 \u0437\u0435\u043b\u0451\u043d\u044b\u0435 "
+        "\u0431\u043b\u043e\u043a\u0438 \u0434\u043e \u043a\u043e\u043d\u0446\u0430 \u0444\u0440\u0430\u0437\u044b."
     ),
 }
-BAND_CENTER = {"high": 90.0, "mid": 65.0, "low": 28.0}
 
 
 def _unevaluable(reason: str, **confidence: Any) -> dict[str, Any]:
@@ -475,298 +443,125 @@ def _unevaluable(reason: str, **confidence: Any) -> dict[str, Any]:
     }
 
 
-def _garbage_reason(
+def frame_points(cents: float | None) -> int:
+    """Hitbox points for one 50 ms frame. Silence inside a block is a miss."""
+    if cents is None:
+        return 0
+    error = abs(cents)
+    if error <= GREEN_CENTS:
+        return 100
+    if error <= NEAR_CENTS:
+        return 50
+    return 0
+
+
+def score_features(
     reference: dict[str, Any],
     student: dict[str, Any],
-    ref_notes: list[dict[str, float]],
-    stu_notes: list[dict[str, float]],
-) -> str | None:
-    """Reject only silence-like aborts and a true drone against a moving melody.
-
-    Humming, sparse outlines and off-contour singing must still receive a score.
-    """
-    if len(ref_notes) < 3:
-        return WEAK_REFERENCE
-    ref_voiced = sum(note["dur"] for note in ref_notes)
-    stu_voiced = sum(note["dur"] for note in stu_notes)
-    if stu_voiced < 0.28 * max(0.4, ref_voiced):
-        return ABORTED
-    ref_m = _voiced_midis(reference)
-    stu_m = _voiced_midis(student)
-    if (
-        ref_m.size >= 8
-        and float(np.ptp(ref_m)) >= 4.0
-        and stu_m.size >= 8
-        and float(np.ptp(stu_m)) < 1.6
-    ):
-        return DRONE
-    return None
-
-
-def _rest_silence_score(
-    rest: list[tuple[float, float]],
-    stu_notes: list[dict[str, float]],
-) -> float:
-    if not rest:
-        return 1.0
-    rest_dur = sum(max(0.0, end - start) for start, end in rest)
-    if rest_dur < 0.4:
-        return 1.0
-    sung = 0.0
-    for note in stu_notes:
-        for start, end in rest:
-            overlap = min(note["end"], end) - max(note["t"], start)
-            if overlap > 0:
-                sung += overlap
-    return max(0.0, 1.0 - min(1.0, sung / rest_dur))
-
-
-def _rhythm_from_notes(
-    ref_notes: list[dict[str, float]],
-    stu_notes: list[dict[str, float]],
-    pairs: list[tuple[int, int]],
-    ref_duration: float,
-    stu_duration: float,
-) -> float:
-    tail_slack = 2.0
-    if stu_duration < ref_duration * 0.88:
-        duration_penalty = min(1.0, (ref_duration - stu_duration) / ref_duration)
-    elif stu_duration > ref_duration + tail_slack:
-        duration_penalty = min(1.0, (stu_duration - ref_duration - tail_slack) / ref_duration)
-    else:
-        duration_penalty = 0.0
-    if not pairs:
-        return 100.0 * max(0.0, 0.35 * (1.0 - duration_penalty))
-    offsets = [float(stu_notes[j]["t"] - ref_notes[i]["t"]) for i, j in pairs]
-    global_delay = float(np.median(offsets))
-    mean_err = float(
-        np.mean(
-            [
-                abs(float(stu_notes[j]["t"] - ref_notes[i]["t"] - global_delay))
-                for i, j in pairs
-            ]
-        )
-    )
-    if mean_err <= ONSET_SLACK_SEC:
-        onset_score = 1.0
-    elif mean_err >= ONSET_FAIL_SEC:
-        onset_score = 0.0
-    else:
-        onset_score = 1.0 - (mean_err - ONSET_SLACK_SEC) / (ONSET_FAIL_SEC - ONSET_SLACK_SEC)
-    return 100.0 * max(0.0, 0.7 * onset_score + 0.3 * (1.0 - duration_penalty))
-
-
-def _shape_corr(ref_notes: list[dict[str, float]], stu_notes: list[dict[str, float]]) -> float:
-    """Relative melody shape after time-normalizing each take. Ignores DTW cherry-picks."""
-    if len(ref_notes) < 4 or len(stu_notes) < 4:
-        return 1.0
-
-    def series(notes: list[dict[str, float]]) -> np.ndarray:
-        times = np.asarray([note["t"] for note in notes], dtype=float)
-        pitch = np.asarray([note["midi"] for note in notes], dtype=float)
-        span = max(0.2, float(times[-1] - times[0]))
-        tn = (times - times[0]) / span
-        rel = _wrap_octaves(pitch - np.median(pitch))
-        grid = np.linspace(0.0, 1.0, 24)
-        return np.interp(grid, tn, rel)
-
-    reference = series(ref_notes)
-    student = series(stu_notes)
-    if float(np.std(reference)) < 0.35:
-        return 1.0
-    corr = float(np.corrcoef(reference, student)[0, 1])
-    return corr if np.isfinite(corr) else 0.0
-
-
-def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[str, Any]:
-    """Score sung or hummed notes vs teacher vocal melody. Loudness and manner are ignored."""
+    transpose: int = 0,
+) -> dict[str, Any]:
+    """Score a take against quantized teacher hitboxes. No DTW, no auto-transpose."""
     coverage = float(student.get("voiced_coverage", 0))
     rms_db = float(student.get("rms_db", -120))
     clipping = float(student.get("clipping_ratio", 0))
     flatness = float(student.get("spectral_flatness", 0))
-    duration = float(student.get("duration", 0))
+    duration = float(student.get("duration") or reference.get("duration") or 0)
     voiced_seconds = coverage * max(0.0, duration)
     if rms_db < -48:
-        return _unevaluable(
-            TOO_QUIET,
-            voiced_coverage=coverage,
-            voiced_seconds=round(voiced_seconds, 3),
-            rms_db=rms_db,
-            clipping_ratio=clipping,
-            spectral_flatness=flatness,
-        )
+        return _unevaluable(TOO_QUIET, voiced_coverage=coverage, rms_db=rms_db)
     if voiced_seconds < 0.35 and coverage < 0.06:
-        return _unevaluable(
-            UNRECOGNIZED,
-            voiced_coverage=coverage,
-            voiced_seconds=round(voiced_seconds, 3),
-            rms_db=rms_db,
-            clipping_ratio=clipping,
-            spectral_flatness=flatness,
-        )
+        return _unevaluable(UNRECOGNIZED, voiced_coverage=coverage, rms_db=rms_db)
     if clipping > 0.015:
-        return _unevaluable(
-            CLIPPED,
-            voiced_coverage=coverage,
-            voiced_seconds=round(voiced_seconds, 3),
-            rms_db=rms_db,
-            clipping_ratio=clipping,
-            spectral_flatness=flatness,
-        )
+        return _unevaluable(CLIPPED, clipping_ratio=clipping)
     if flatness > 0.55 and coverage < 0.3:
-        return _unevaluable(
-            NOISY,
-            voiced_coverage=coverage,
-            voiced_seconds=round(voiced_seconds, 3),
-            rms_db=rms_db,
-            clipping_ratio=clipping,
-            spectral_flatness=flatness,
-        )
+        return _unevaluable(NOISY, spectral_flatness=flatness)
 
-    rests = _rest_intervals(reference)
-    ref_notes = _note_events(reference)
-    stu_all = _note_events(student)
-    stu_notes = _melody_notes(stu_all, rests)
-    garbage = _garbage_reason(reference, student, ref_notes, stu_notes)
-    if garbage:
-        return _unevaluable(
-            garbage,
-            voiced_coverage=coverage,
-            ref_notes=len(ref_notes),
-            stu_notes=len(stu_notes),
-        )
+    raw_blocks = reference.get("blocks")
+    blocks = list(raw_blocks) if isinstance(raw_blocks, list) and raw_blocks else quantize_note_blocks(reference)
+    blocks = shift_blocks(blocks, int(transpose))
+    if len(blocks) < 1:
+        return _unevaluable(WEAK_REFERENCE, blocks=0)
 
-    pairs = _dtw_note_pairs(ref_notes, stu_notes)
-    matched = {i for i, _ in pairs}
-    rest_score = _rest_silence_score(rests, stu_all)
-    coverage_notes = min(1.0, len(matched) / max(1, len(ref_notes)))
-    global_shift = 0.0
-    cents_error = np.asarray([0.0])
-    paired_corr: float | None = None
+    times = [float(value) for value in student.get("times") or []]
+    midis = list(student.get("pitch_midi") or [])
+    student_hz: list[float | None] = []
+    for midi in midis:
+        student_hz.append(None if midi is None else midi_to_hz(float(midi)))
 
-    if pairs:
-        differences = np.asarray(
-            [stu_notes[j]["midi"] - ref_notes[i]["midi"] for i, j in pairs],
-            dtype=float,
-        )
-        global_shift = _best_global_shift(differences)
-        qualities = [
-            _note_quality(float(stu_notes[j]["midi"] - ref_notes[i]["midi"] - global_shift))
-            for i, j in pairs
-        ]
-        melody = 100.0 * float(np.mean(qualities))
-        paired_ref = np.asarray([ref_notes[i]["midi"] for i, _ in pairs], dtype=float)
-        paired_stu = np.asarray(
-            [stu_notes[j]["midi"] - global_shift for _, j in pairs],
-            dtype=float,
-        )
-        if len(pairs) >= 4 and float(np.std(_wrap_octaves(paired_ref - np.median(paired_ref)))) > 0.35:
-            paired_corr = float(
-                np.corrcoef(
-                    _wrap_octaves(paired_ref - np.median(paired_ref)),
-                    _wrap_octaves(paired_stu - np.median(paired_ref)),
-                )[0, 1]
-            )
-            if not np.isfinite(paired_corr) or paired_corr < 0.18:
-                melody = min(melody, 38.0 * max(0.0, (float(paired_corr or 0.0) + 1.0) / 1.18))
-        cents_error = np.abs(_wrap_octaves(differences - global_shift) * 100)
-    else:
-        melody = 18.0
-
-    shape = _shape_corr(ref_notes, stu_notes)
-    if len(ref_notes) >= 4 and len(stu_notes) >= 4 and shape < 0.22:
-        melody = min(melody, 38.0 * max(0.0, (shape + 1.0) / 1.22))
-    if len(pairs) < min(3, len(ref_notes)) or coverage_notes < 0.32:
-        melody = min(melody, 42.0)
-
-    rhythm = _rhythm_from_notes(
-        ref_notes,
-        stu_notes,
-        pairs,
-        max(0.1, float(reference.get("duration", 0))),
-        max(0.1, duration),
+    end = max(
+        duration,
+        max((float(block["endTime"]) for block in blocks), default=0.0),
     )
-    completeness = 100.0 * (
-        0.7 * min(1.0, coverage_notes / 0.88) + 0.3 * rest_score
-    )
+    earned = 0
+    possible = 0
+    green = 0
+    near = 0
+    miss = 0
+    voiced_hits = 0
+    t = 0.0
+    while t <= end + 1e-9:
+        block = block_at(blocks, t, slack=0)
+        if block is None:
+            t += FRAME_SEC
+            continue
+        possible += 100
+        hz = _student_hz_at(times, student_hz, t)
+        if hz is None:
+            miss += 1
+            t += FRAME_SEC
+            continue
+        voiced_hits += 1
+        cents = hz_to_cents(hz, float(block["startHz"]))
+        points = frame_points(cents)
+        earned += points
+        if points >= 100:
+            green += 1
+        elif points >= 50:
+            near += 1
+        else:
+            miss += 1
+        t += FRAME_SEC
 
-    melody_i = int(round(np.clip(melody, 0, 100)))
-    rhythm_i = int(round(np.clip(rhythm, 0, 100)))
-    completeness_i = int(round(np.clip(completeness, 0, 100)))
-    overall = int(round(0.5 * melody_i + 0.3 * rhythm_i + 0.2 * completeness_i))
+    if possible <= 0:
+        return _unevaluable(WEAK_REFERENCE, blocks=len(blocks))
+    if voiced_hits < 3 or voiced_hits < 0.25 * max(1, possible // 100):
+        return _unevaluable(ABORTED, voiced_hits=voiced_hits, possible=possible)
+
+    overall = int(round(100.0 * earned / possible))
+    intonation = overall
+    completeness = int(round(100.0 * voiced_hits / max(1, possible // 100)))
+    rhythm = 100
     weakest = min(
-        ("intonation", melody_i),
-        ("rhythm", rhythm_i),
-        ("completeness", completeness_i),
+        ("intonation", intonation),
+        ("completeness", completeness),
         key=lambda item: item[1],
     )[0]
     return {
         "evaluable": True,
-        "overall": overall,
-        "intonation": melody_i,
-        "rhythm": rhythm_i,
-        "completeness": completeness_i,
-        "global_shift_semitones": int(np.rint(global_shift)),
+        "overall": int(np.clip(overall, 0, 100)),
+        "intonation": int(np.clip(intonation, 0, 100)),
+        "rhythm": rhythm,
+        "completeness": int(np.clip(completeness, 0, 100)),
+        "global_shift_semitones": int(np.clip(int(transpose), -2, 2)),
         "feedback": FEEDBACK[weakest],
         "confidence": {
-            "aligned_notes": len(pairs),
-            "voiced_coverage": coverage,
-            "median_residual_cents": round(float(np.median(cents_error)), 1),
-            "rest_silence": round(rest_score, 3),
-            "contour_corr": None if not np.isfinite(shape) else round(float(shape), 3),
-            "paired_corr": None if paired_corr is None or not np.isfinite(paired_corr) else round(float(paired_corr), 3),
+            "blocks": len(blocks),
+            "earned": earned,
+            "possible": possible,
+            "green_frames": green,
+            "near_frames": near,
+            "miss_frames": miss,
+            "voiced_hits": voiced_hits,
         },
     }
-
-
-def _softmax(values: np.ndarray, temperature: float = 12.0) -> np.ndarray:
-    scaled = np.asarray(values, dtype=float) / max(1e-6, temperature)
-    scaled = scaled - float(np.max(scaled))
-    exp = np.exp(scaled)
-    total = float(np.sum(exp))
-    if total <= 0:
-        return np.full(len(values), 1.0 / max(1, len(values)))
-    return exp / total
-
-
-def _anchor_interpolated(usable: dict[str, float]) -> float:
-    bands = [band for band in ("high", "mid", "low") if band in usable]
-    if not bands:
-        return 50.0
-    sims = np.asarray([usable[band] for band in bands], dtype=float)
-    if len(bands) == 1:
-        peak = float(np.clip(sims[0], 0, 100)) / 100.0
-        return float(BAND_CENTER[bands[0]]) * peak + 50.0 * (1.0 - peak)
-    weights = _softmax(sims)
-    return float(sum(float(weights[index]) * BAND_CENTER[band] for index, band in enumerate(bands)))
 
 
 def score_with_anchors(
     reference: dict[str, Any],
     student: dict[str, Any],
     anchors: dict[str, dict[str, Any]] | None = None,
+    transpose: int = 0,
 ) -> dict[str, Any]:
-    """Blend stem-vs-student score with optional high/mid/low few-shot examples."""
-    stem = score_features(reference, student)
-    usable: dict[str, float] = {}
-    for band, features in (anchors or {}).items():
-        if band not in BAND_CENTER or not isinstance(features, dict):
-            continue
-        compared = score_features(features, student)
-        if compared.get("evaluable"):
-            usable[band] = float(compared["overall"])
-        else:
-            shape = _shape_corr(_note_events(features), _note_events(student))
-            usable[band] = float(np.clip(50.0 * (shape + 1.0), 0, 100))
-    if not usable or not stem.get("evaluable"):
-        return stem
-    interpolated = _anchor_interpolated(usable)
-    blended = int(round(np.clip(0.5 * float(stem["overall"]) + 0.5 * interpolated, 0, 100)))
-    result = dict(stem)
-    result["overall"] = blended
-    result["confidence"] = {
-        **dict(stem.get("confidence") or {}),
-        "anchor_score": round(interpolated, 1),
-        "anchor_sims": {band: round(score, 1) for band, score in usable.items()},
-    }
-    return result
+    """Hitbox scoring ignores few-shot anchors; kept for worker call compatibility."""
+    _ = anchors
+    return score_features(reference, student, transpose=transpose)

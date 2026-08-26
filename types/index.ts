@@ -143,12 +143,21 @@ export interface ExercisePhrase {
   updated_at: string;
 }
 
+export interface NoteBlock {
+  note: string;
+  midi: number;
+  startHz: number;
+  startTime: number;
+  endTime: number;
+}
+
 export interface PhrasePitchFeatures {
   [key: string]: unknown;
   times?: number[];
   pitch_midi?: Array<number | null>;
   confidence?: number[];
   duration?: number;
+  blocks?: NoteBlock[];
 }
 
 export interface ExercisePhraseFeatures {
@@ -547,6 +556,7 @@ export interface Database {
           media_mime: string;
           duration_sec: number;
           status?: VocalExerciseAttempt["status"];
+          global_shift_semitones?: number | null;
           expires_at?: string;
         };
         Update: Partial<VocalExerciseAttempt>;

@@ -21,6 +21,7 @@ import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@
 import { supabase } from "@/lib/supabase";
 import {
   EXERCISE_ATTEMPT_MAX_SEC,
+  EXERCISE_TRANSPOSE_OPTIONS,
   sanitizeAttemptFeedback,
   teacherReaction,
   weakestDimension,
@@ -68,6 +69,7 @@ export default function VocalExercisePractice({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [phraseFeatures, setPhraseFeatures] = useState<PhrasePitchFeatures | null>(null);
   const [playheadSec, setPlayheadSec] = useState(0);
+  const [transpose, setTranspose] = useState(0);
 
   stageRef.current = stage;
   selectedRef.current = selected;
@@ -275,6 +277,7 @@ export default function VocalExercisePractice({
           media_mime: "audio/wav",
           duration_sec: Number(buffer.duration.toFixed(2)),
           status: "queued",
+          global_shift_semitones: transpose,
         })
         .select("*")
         .single();
@@ -416,7 +419,7 @@ export default function VocalExercisePractice({
             </span>
           </div>
           <p className="mt-1 text-xs text-studio-muted">
-            Слушайте фразу и пойте вместе с ней — как караоке. На записи эталон светится коридором, ваш голос рисуется поверх вживую.
+            Слушайте фразу и пойте в серые блоки нот, как в караоке. Внутри зелёной зоны — попадание на 100.
           </p>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
             <div
@@ -485,6 +488,7 @@ export default function VocalExercisePractice({
               selected ? Math.max(0.9, Number(selected.end_sec) - Number(selected.start_sec)) : 0
             }
             clockSynced={guideOn}
+            transpose={transpose}
           />
           {stage === "counting" && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -519,14 +523,31 @@ export default function VocalExercisePractice({
               </Button>
             )}
           </div>
-          <label className="mt-3 flex items-center gap-2 text-xs text-studio-muted">
-            <input
-              type="checkbox"
-              checked={countIn}
-              onChange={(event) => setCountIn(event.target.checked)}
-            />
-            Отсчёт 3–2–1 перед записью
-          </label>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-xs text-studio-muted">
+              <input
+                type="checkbox"
+                checked={countIn}
+                onChange={(event) => setCountIn(event.target.checked)}
+              />
+              Отсчёт 3–2–1 перед записью
+            </label>
+            <label className="flex items-center gap-2 text-xs text-studio-muted">
+              Тональность
+              <select
+                className="rounded-lg bg-studio-surface px-2 py-1 text-xs text-studio-text ring-1 ring-studio-border"
+                value={transpose}
+                disabled={!["idle", "listening", "failed"].includes(stage)}
+                onChange={(event) => setTranspose(Number(event.target.value))}
+              >
+                {EXERCISE_TRANSPOSE_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {value > 0 ? `+${value}` : value} пт
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </>
       )}
       {stage === "recording" && (
@@ -567,22 +588,21 @@ export default function VocalExercisePractice({
               <p className="mt-1 text-xs text-studio-muted">{resultReaction.message}</p>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
-              ["Мелодия", attempt.intonation_score, "50%"],
-              ["Ритм", attempt.rhythm_score, "30%"],
-              ["Полнота", attempt.completeness_score, "20%"],
-            ].map(([label, value, weight]) => (
+              ["Попадание", attempt.overall_score],
+              ["Полнота", attempt.completeness_score],
+            ].map(([label, value]) => (
               <div key={String(label)} className="rounded-xl bg-studio-surface p-3 text-center">
-                <p className="text-[10px] text-studio-muted">{label} · {weight}</p>
+                <p className="text-[10px] text-studio-muted">{label}</p>
                 <p className="mt-1 text-xl font-semibold">{value}</p>
               </div>
             ))}
           </div>
           {attempt.global_shift_semitones !== null && attempt.global_shift_semitones !== 0 && (
             <p className="text-center text-xs text-studio-muted">
-              Учтена единая транспозиция: {attempt.global_shift_semitones > 0 ? "+" : ""}
-              {attempt.global_shift_semitones} полутонов
+              Тональность упражнения: {attempt.global_shift_semitones > 0 ? "+" : ""}
+              {attempt.global_shift_semitones} полутона
             </p>
           )}
           {attempt.status === "shared" ? (

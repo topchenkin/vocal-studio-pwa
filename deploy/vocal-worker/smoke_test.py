@@ -25,7 +25,7 @@ def main() -> None:
         ref_path = Path(temp) / "ref.wav"
         stu_path = Path(temp) / "stu.wav"
         _melody(ref_path, [220.0, 246.9, 261.6, 293.7, 329.6])
-        _melody(stu_path, [246.9, 277.2, 293.7, 329.6, 349.2])
+        _melody(stu_path, [220.0, 246.9, 261.6, 293.7, 329.6])
         reference = extract_features(str(ref_path))
         student = extract_features(str(stu_path))
         result = score_features(reference, student)

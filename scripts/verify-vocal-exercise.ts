@@ -186,10 +186,11 @@ const guide = readFileSync(
   "utf8"
 );
 assert.ok(guide.includes("createYinDetector"));
-assert.ok(guide.includes("EXERCISE_IN_TUNE_CENTS"));
+assert.ok(guide.includes("HITBOX_GREEN_CENTS") || guide.includes("quantizeNoteBlocks"));
 assert.ok(guide.includes("devicePixelRatio"));
 assert.ok(practice.includes("LiveMelodyGuide"));
-assert.ok(practice.includes("stream.clone"));
+assert.ok(practice.includes("transpose"));
+assert.ok(practice.includes("EXERCISE_TRANSPOSE_OPTIONS"));
 assert.ok(practice.includes("sanitizeAttemptFeedback"));
 assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
 
