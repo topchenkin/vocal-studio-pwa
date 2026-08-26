@@ -5,7 +5,9 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MUSICGEN_SPACE = "https://facebook-musicgen.hf.space";
+const MUSICGEN_SPACE = "https://sanchit-gandhi-musicgen-streaming.hf.space";
+const MUSICGEN_ENDPOINT = "generate_audio";
+const MUSICGEN_DURATION_SEC = 12;
 const MAX_PROMPT = 400;
 
 function json(body: unknown, status = 200) {
@@ -111,6 +113,56 @@ type SpaceResult =
   | { bytes: Uint8Array; mime: string }
   | { error: string; estimated_time?: number; status: number };
 
+function isHlsUrl(url: string, file: unknown) {
+  if (/\.m3u8(\?|$)/i.test(url) || url.includes("playlist.m3u8")) return true;
+  if (file && typeof file === "object" && (file as { is_stream?: boolean }).is_stream) {
+    return true;
+  }
+  return false;
+}
+
+async function bytesFromHls(
+  playlistUrl: string,
+  hfKey: string
+): Promise<SpaceResult> {
+  const playlistRes = await fetch(playlistUrl, {
+    headers: authHeaders(hfKey),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!playlistRes.ok) {
+    return { error: `space_download_${playlistRes.status}`, status: 502 };
+  }
+  const playlist = await playlistRes.text();
+  const base = playlistUrl.replace(/[^/]+(?:\?.*)?$/, "");
+  const names = playlist
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+  if (names.length === 0) return { error: "empty_audio", status: 502 };
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (const name of names) {
+    const segUrl = /^https?:\/\//i.test(name) ? name : new URL(name, base).href;
+    const seg = await fetch(segUrl, {
+      headers: authHeaders(hfKey),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!seg.ok) return { error: `space_download_${seg.status}`, status: 502 };
+    const bytes = new Uint8Array(await seg.arrayBuffer());
+    chunks.push(bytes);
+    total += bytes.byteLength;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (out.byteLength < 64) return { error: "empty_audio", status: 502 };
+  return { bytes: out, mime: "audio/aac" };
+}
+
 async function bytesFromMusicGenSpace(
   prompt: string,
   hfKey: string
@@ -127,15 +179,20 @@ async function bytesFromMusicGenSpace(
     return { error: "loading", estimated_time: 25, status: 200 };
   }
 
-  const start = await fetch(`${MUSICGEN_SPACE}/gradio_api/call/predict_batched`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(hfKey),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ data: [prompt, null] }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  const start = await fetch(
+    `${MUSICGEN_SPACE}/gradio_api/call/${MUSICGEN_ENDPOINT}`,
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(hfKey),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        data: [prompt, MUSICGEN_DURATION_SEC, 2.5, 5],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
   if (start.status === 429) return { error: "busy", status: 429 };
   if (start.status >= 500) {
     return { error: "loading", estimated_time: 30, status: 200 };
@@ -151,7 +208,7 @@ async function bytesFromMusicGenSpace(
   if (!started.event_id) return { error: "space_no_event", status: 502 };
 
   const stream = await fetch(
-    `${MUSICGEN_SPACE}/gradio_api/call/predict_batched/${started.event_id}`,
+    `${MUSICGEN_SPACE}/gradio_api/call/${MUSICGEN_ENDPOINT}/${started.event_id}`,
     {
       headers: authHeaders(hfKey),
       signal: AbortSignal.timeout(150_000),
@@ -198,8 +255,13 @@ async function bytesFromMusicGenSpace(
   } catch {
     return { error: "space_empty", status: 502 };
   }
-  const fileUrl = fileUrlFromGradio(extractFile(parsed));
+  const file = extractFile(parsed);
+  const fileUrl = fileUrlFromGradio(file);
   if (!fileUrl) return { error: "space_no_file", status: 502 };
+
+  if (isHlsUrl(fileUrl, file)) {
+    return await bytesFromHls(fileUrl, hfKey);
+  }
 
   const audio = await fetch(fileUrl, {
     headers: authHeaders(hfKey),

@@ -44,6 +44,7 @@ function decodeAudio(base64: string, mime: string) {
 
 function extensionFor(mime: string) {
   if (/wav/i.test(mime)) return "wav";
+  if (/aac|mp4|m4a/i.test(mime)) return "m4a";
   if (/mpeg|mp3/i.test(mime)) return "mp3";
   return "flac";
 }

@@ -7,9 +7,11 @@ const fn = readFileSync(
   path.join(root, "supabase", "functions", "generate-music", "index.ts"),
   "utf8"
 );
-assert.ok(fn.includes("facebook-musicgen.hf.space"));
-assert.ok(fn.includes("predict_batched"));
+assert.ok(fn.includes("sanchit-gandhi-musicgen-streaming.hf.space"));
+assert.ok(fn.includes("generate_audio"));
 assert.ok(!fn.includes("api-inference.huggingface.co"));
+assert.ok(fn.includes("playlist.m3u8") || fn.includes("isHlsUrl"));
+assert.ok(fn.includes("audio/aac"));
 assert.ok(fn.includes('Deno.env.get("HUGGINGFACE_API_KEY")'));
 assert.ok(fn.includes('error: "loading"'));
 assert.ok(fn.includes("estimated_time"));
@@ -52,7 +54,7 @@ assert.ok(ui.includes("Отправляем запрос"));
 assert.ok(ui.includes("Нейросеть сочиняет ноты"));
 assert.ok(ui.includes("Сводим трек"));
 assert.ok(ui.includes("locked?: boolean"));
-assert.ok(ui.includes("humanizeError"));
+assert.ok(ui.includes("m4a"));
 
 const access = readFileSync(path.join(root, "lib", "ai-tools-access.ts"), "utf8");
 assert.ok(access.includes('"musicgen"'));
