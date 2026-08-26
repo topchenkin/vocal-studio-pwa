@@ -1,4 +1,4 @@
--- Нейросоздание песен (songwriter) as a 7th AI tool. Safe to re-run.
+-- Client-side music lab tools. Safe to re-run.
 
 do $$
 declare r record;
@@ -19,8 +19,13 @@ end $$;
 
 alter table public.ai_tool_access
   add constraint ai_tool_access_tool_id_check
-  check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'songwriter', 'vocalfx', 'chordloop'));
+  check (tool_id in (
+    'tuner', 'remover', 'timbre', 'mixer', 'pitchshift',
+    'musicgen', 'songwriter', 'vocalfx', 'chordloop'
+  ));
 
 insert into public.ai_tool_access (tool_id, min_tier, enabled, title)
-values ('songwriter', 'premium', true, 'Нейросоздание песен')
+values
+  ('vocalfx', 'none', true, 'Голосовые FX-пресеты'),
+  ('chordloop', 'none', true, 'Генератор аккордовых лупов')
 on conflict (tool_id) do nothing;

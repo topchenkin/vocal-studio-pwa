@@ -425,7 +425,9 @@ export type AiToolId =
   | "timbre"
   | "mixer"
   | "pitchshift"
-  | "songwriter";
+  | "songwriter"
+  | "vocalfx"
+  | "chordloop";
 
 export interface AiToolAccess {
   [key: string]: unknown;

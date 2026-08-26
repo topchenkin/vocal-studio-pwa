@@ -43,6 +43,8 @@ function humanizeError(code: string | undefined, fallback?: string) {
       return "Ответ занял слишком много времени. Попробуйте ещё раз.";
     case "missing_groq_key":
       return "Сервер автора песен не настроен. Напишите преподавателю.";
+    case "llm_forbidden":
+      return "Groq отклонил API-ключ. Нужен новый ключ с console.groq.com.";
     default:
       if (fallback && /[А-Яа-яЁё]/.test(fallback)) return fallback;
       return "Не удалось получить ответ. Попробуйте ещё раз.";

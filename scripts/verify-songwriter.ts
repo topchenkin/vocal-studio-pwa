@@ -6,7 +6,7 @@ const root = process.cwd();
 const api = readFileSync(path.join(root, "deploy", "ai-api", "server.mjs"), "utf8");
 assert.ok(api.includes("/api/ai/songwriter-chat"));
 assert.ok(api.includes("https://api.groq.com/openai/v1/chat/completions"));
-assert.ok(api.includes("llama-3.1-8b-instant"));
+assert.ok(api.includes("openai/gpt-oss-20b"));
 assert.ok(api.includes("GROQ_API_KEY"));
 assert.ok(api.includes("Ты профессиональный музыкальный продюсер и автор хитов"));
 assert.ok(api.includes("Пиши только по-русски"));
@@ -43,8 +43,10 @@ const tools = readFileSync(
   "utf8"
 );
 assert.ok(tools.includes('id: "songwriter"'));
+assert.ok(tools.includes('id: "vocalfx"'));
+assert.ok(tools.includes('id: "chordloop"'));
 assert.ok(tools.includes("Нейросоздание песен"));
-assert.ok(tools.includes("lg:grid-cols-5"));
+assert.ok(tools.includes("lg:grid-cols-4"));
 assert.ok(tools.includes('locked={locked("songwriter")}'));
 assert.ok(!tools.includes("AiMusicComposer"));
 assert.ok(!tools.includes('id: "musicgen"'));
@@ -69,4 +71,15 @@ const sql = readFileSync(
 );
 assert.ok(sql.includes("'songwriter'"));
 
-console.log("songwriter via Groq + no MusicGen/Studio tab: ok");
+const fx = readFileSync(path.join(root, "lib", "vocal-fx.ts"), "utf8");
+assert.ok(fx.includes("makeReverbImpulse"));
+assert.ok(fx.includes("renderVocalFxWav"));
+assert.ok(readFileSync(path.join(root, "components", "audio", "VocalFxBox.tsx"), "utf8").includes("Wet/Dry"));
+assert.ok(
+  readFileSync(path.join(root, "components", "audio", "ChordLoopGenerator.tsx"), "utf8").includes("Tap Tempo")
+);
+assert.ok(
+  readFileSync(path.join(root, "components", "admin", "AdminAiToolsPanel.tsx"), "utf8").includes('id: "vocalfx"')
+);
+
+console.log("songwriter via Groq + music lab tools: ok");

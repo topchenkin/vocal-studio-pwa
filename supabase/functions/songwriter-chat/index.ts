@@ -11,7 +11,7 @@ const SYSTEM_PROMPT =
 const MAX_MESSAGES = 40;
 const MAX_CONTENT = 4000;
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+const GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -109,18 +109,28 @@ async function completeChat(
       body: JSON.stringify({
         model,
         temperature: 0.8,
-        max_tokens: 900,
         messages,
+        max_completion_tokens: 1200,
+        reasoning_effort: "low",
       }),
       signal: AbortSignal.timeout(45_000),
     });
     lastStatus = response.status;
     const body = (await response.json().catch(() => ({}))) as {
       error?: { message?: string };
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{
+        message?: { content?: string | Array<{ text?: string }>; reasoning?: string };
+      }>;
     };
     if (response.ok) {
-      const reply = body.choices?.[0]?.message?.content?.trim() || "";
+      const msg = body.choices?.[0]?.message;
+      const fromText =
+        typeof msg?.content === "string"
+          ? msg.content.trim()
+          : Array.isArray(msg?.content)
+            ? msg.content.map((part) => part.text || "").join("").trim()
+            : "";
+      const reply = fromText || msg?.reasoning?.trim() || "";
       if (reply) return { reply };
       lastError = "empty_reply";
       continue;

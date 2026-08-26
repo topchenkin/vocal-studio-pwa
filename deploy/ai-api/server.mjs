@@ -12,7 +12,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const HF_TOKEN = process.env.HUGGINGFACE_API_KEY?.trim() || "";
 const GROQ_API_KEY = process.env.GROQ_API_KEY?.trim() || "";
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
+const GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 const PROXY_PUBLIC_ORIGIN = (process.env.PROXY_PUBLIC_ORIGIN || "https://sb.uniquevocal.ru").replace(/\/$/, "");
 const MAX_BYTES = 10 * 1024 * 1024;
 const TIER_RANK = { none: 0, standard: 1, premium: 2, vip: 3 };
@@ -465,12 +465,30 @@ function sanitizeChatMessages(raw) {
   return out;
 }
 
+function groqReply(body) {
+  const msg = body?.choices?.[0]?.message;
+  if (!msg || typeof msg !== "object") return "";
+  if (typeof msg.content === "string" && msg.content.trim()) return msg.content.trim();
+  if (Array.isArray(msg.content)) {
+    const text = msg.content
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("")
+      .trim();
+    if (text) return text;
+  }
+  if (typeof msg.reasoning === "string" && msg.reasoning.trim()) {
+    return msg.reasoning.trim();
+  }
+  return "";
+}
+
 async function chatOnGroq(history) {
   const messages = [{ role: "system", content: SONGWRITER_SYSTEM }, ...history];
   const attempts = [];
   let lastError = "failed";
   for (const model of GROQ_MODELS) {
     console.info(`[songwriter] trying groq ${model}`);
+    const isGptOss = model.startsWith("openai/gpt-oss");
     const response = await fetch(GROQ_CHAT_URL, {
       method: "POST",
       headers: {
@@ -480,14 +498,16 @@ async function chatOnGroq(history) {
       body: JSON.stringify({
         model,
         temperature: 0.8,
-        max_tokens: 900,
         messages,
+        ...(isGptOss
+          ? { max_completion_tokens: 1200, reasoning_effort: "low" }
+          : { max_tokens: 900 }),
       }),
       signal: AbortSignal.timeout(45_000),
     });
     const body = await response.json().catch(() => ({}));
     if (response.ok) {
-      const reply = body?.choices?.[0]?.message?.content?.trim() || "";
+      const reply = groqReply(body);
       if (reply) return { reply, model };
       lastError = "empty_reply";
       attempts.push(`${model}: empty_reply`);
@@ -554,6 +574,13 @@ async function handleSongwriter(req, res) {
       return json(res, 429, {
         code,
         error: "Продюсер сейчас занят. Подождите несколько секунд и повторите.",
+        attempts: error.attempts || [],
+      });
+    }
+    if (code === "llm_forbidden") {
+      return json(res, 502, {
+        code,
+        error: "Groq отклонил API-ключ. Создайте новый ключ на console.groq.com и пришлите его.",
         attempts: error.attempts || [],
       });
     }

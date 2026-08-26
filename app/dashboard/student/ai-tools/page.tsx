@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Layers, Mic, Music2, PenLine, Stars, WandSparkles } from "lucide-react";
+import { AudioLines, Layers, Mic, Music2, PenLine, Repeat, Stars, WandSparkles } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
@@ -27,6 +27,13 @@ type ToolTab = AiToolId;
 const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
   ssr: false,
 });
+const VocalFxBox = dynamic(() => import("@/components/audio/VocalFxBox"), {
+  ssr: false,
+});
+const ChordLoopGenerator = dynamic(
+  () => import("@/components/audio/ChordLoopGenerator"),
+  { ssr: false }
+);
 
 const TABS: Array<{
   id: ToolTab;
@@ -39,6 +46,8 @@ const TABS: Array<{
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
   { id: "songwriter", label: "Нейросоздание песен", icon: PenLine },
+  { id: "vocalfx", label: "Голосовые FX-пресеты", icon: AudioLines },
+  { id: "chordloop", label: "Генератор аккордовых лупов", icon: Repeat },
 ];
 
 export default function AiToolsPage() {
@@ -93,17 +102,13 @@ export default function AiToolsPage() {
 
   return (
     <DashboardLayout
-      title="Нейросети Premium"
-      subtitle="Анализ нот, архетип, сведение и тексты песен"
+      title="Нейросети и лаборатория"
+      subtitle="Анализ нот, архетип, сведение, тексты, FX и аккордовые лупы"
       bottomInset
     >
       <StudentNav />
 
-      <div
-        className={`mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 ${
-          isAdmin ? "lg:grid-cols-6" : "lg:grid-cols-5"
-        }`}
-      >
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-4">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
           const lock = aiToolLockLabel(item.id, access);
@@ -148,6 +153,12 @@ export default function AiToolsPage() {
       )}
       {activeTab === "songwriter" && (
         <SongwriterChat locked={locked("songwriter")} />
+      )}
+      {activeTab === "vocalfx" && (
+        <VocalFxBox locked={locked("vocalfx")} />
+      )}
+      {activeTab === "chordloop" && (
+        <ChordLoopGenerator locked={locked("chordloop")} />
       )}
     </DashboardLayout>
   );
