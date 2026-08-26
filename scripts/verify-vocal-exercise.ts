@@ -186,7 +186,7 @@ const guide = readFileSync(
   "utf8"
 );
 assert.ok(guide.includes("createYinDetector"));
-assert.ok(guide.includes("detectPitchHzOctaveSafe"));
+assert.ok(guide.includes("EXERCISE_IN_TUNE_CENTS"));
 assert.ok(guide.includes("devicePixelRatio"));
 assert.ok(practice.includes("LiveMelodyGuide"));
 assert.ok(practice.includes("stream.clone"));

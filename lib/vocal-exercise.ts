@@ -58,6 +58,12 @@ export function teacherReaction(
   };
 }
 
+/** Same-note window for karaoke exercises. Instant YIN jitter inside this is a hit.
+ *  100¢ = 1 semitone: two human takes of the same phrase cannot match more tightly. */
+export const EXERCISE_IN_TUNE_CENTS = 100;
+/** Outside the hit window but still the neighbouring note — show as “рядом”. */
+export const EXERCISE_NEAR_CENTS = 180;
+
 /** Practical upper bound (upload/size), not a 45s product hard stop. */
 export const EXERCISE_PHRASE_MAX_SEC = 600;
 export const EXERCISE_ATTEMPT_MAX_SEC = 600;

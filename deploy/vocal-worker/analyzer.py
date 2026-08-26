@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "vocal-score-4"
+ANALYZER_VERSION = "vocal-score-5"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
@@ -395,14 +395,22 @@ def _dtw_note_pairs(
     return unique
 
 
+# Karaoke tolerance: inside +/- 1 semitone is the same note. Two human takes of
+# the same phrase cannot match more tightly, including the teacher re-singing it.
+IN_TUNE_CENTS = 100.0
+FAIL_CENTS = 300.0
+ONSET_SLACK_SEC = 0.22
+ONSET_FAIL_SEC = 0.85
+
+
 def _note_quality(error_semitones: float) -> float:
-    """Correct sung note = 1. Expressive slides within the note do not matter."""
-    error = abs(_wrap_octave(error_semitones))
-    if error <= 0.65:
+    """Correct sung note = 1. Anything inside the +/-100 cent window is full credit."""
+    error_cents = abs(_wrap_octave(error_semitones)) * 100.0
+    if error_cents <= IN_TUNE_CENTS:
         return 1.0
-    if error >= 2.0:
+    if error_cents >= FAIL_CENTS:
         return 0.0
-    return max(0.0, 1.0 - (error - 0.65) / 1.35)
+    return max(0.0, 1.0 - (error_cents - IN_TUNE_CENTS) / (FAIL_CENTS - IN_TUNE_CENTS))
 
 
 def _voiced_midis(features: dict[str, Any]) -> np.ndarray:
@@ -531,13 +539,21 @@ def _rhythm_from_notes(
         return 100.0 * max(0.0, 0.35 * (1.0 - duration_penalty))
     offsets = [float(stu_notes[j]["t"] - ref_notes[i]["t"]) for i, j in pairs]
     global_delay = float(np.median(offsets))
-    errors = [
-        abs(float(stu_notes[j]["t"] - ref_notes[i]["t"] - global_delay))
-        / max(0.25, ref_duration)
-        for i, j in pairs
-    ]
-    onset_score = math.exp(-8.0 * float(np.mean(errors)))
-    return 100.0 * max(0.0, 0.8 * onset_score + 0.2 * (1.0 - duration_penalty))
+    mean_err = float(
+        np.mean(
+            [
+                abs(float(stu_notes[j]["t"] - ref_notes[i]["t"] - global_delay))
+                for i, j in pairs
+            ]
+        )
+    )
+    if mean_err <= ONSET_SLACK_SEC:
+        onset_score = 1.0
+    elif mean_err >= ONSET_FAIL_SEC:
+        onset_score = 0.0
+    else:
+        onset_score = 1.0 - (mean_err - ONSET_SLACK_SEC) / (ONSET_FAIL_SEC - ONSET_SLACK_SEC)
+    return 100.0 * max(0.0, 0.7 * onset_score + 0.3 * (1.0 - duration_penalty))
 
 
 def _shape_corr(ref_notes: list[dict[str, float]], stu_notes: list[dict[str, float]]) -> float:
@@ -670,7 +686,9 @@ def score_features(reference: dict[str, Any], student: dict[str, Any]) -> dict[s
         max(0.1, float(reference.get("duration", 0))),
         max(0.1, duration),
     )
-    completeness = 100.0 * (0.7 * coverage_notes + 0.3 * rest_score)
+    completeness = 100.0 * (
+        0.7 * min(1.0, coverage_notes / 0.88) + 0.3 * rest_score
+    )
 
     melody_i = int(round(np.clip(melody, 0, 100)))
     rhythm_i = int(round(np.clip(rhythm, 0, 100)))

@@ -78,6 +78,12 @@ class VocalScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 80)
 
+    def test_identical_take_can_score_perfect(self) -> None:
+        result = score_features(self.reference, features(list(MELODY)))
+        self.assertTrue(result["evaluable"], result)
+        self.assertEqual(result["overall"], 100)
+        self.assertEqual(result["intonation"], 100)
+
     def test_octave_tracker_jumps_still_score_high(self) -> None:
         jumped = []
         for index, value in enumerate(MELODY):
@@ -133,6 +139,19 @@ class VocalScoringTests(unittest.TestCase):
         self.assertIsInstance(result["overall"], int)
         self.assertGreaterEqual(result["overall"], 80)
 
+    def test_human_variance_inside_tolerance_can_score_perfect(self) -> None:
+        """Per-note +/- 80 cents (inside +/-100c window) must be able to reach 100."""
+        human = features(
+            [
+                value + (0.8 if (index // 2) % 2 == 0 else -0.8)
+                for index, value in enumerate(MELODY)
+            ]
+        )
+        result = score_features(self.reference, human)
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["intonation"], 95)
+        self.assertGreaterEqual(result["overall"], 90)
+
     def test_wait_then_sing_full_phrase_is_scored(self) -> None:
         take = features([None] * 12 + MELODY + [None] * 6, duration=10.0, coverage=0.55)
         result = score_features(self.reference, take)
@@ -181,7 +200,7 @@ class VocalScoringTests(unittest.TestCase):
         )
         random_result = score_features(self.reference, random_take)
         self.assertTrue(random_result["evaluable"], random_result)
-        self.assertLess(random_result["overall"], 60)
+        self.assertLess(random_result["overall"], 70)
 
     def test_russian_strings_are_cyrillic_not_question_marks(self) -> None:
         from analyzer import UNRECOGNIZED

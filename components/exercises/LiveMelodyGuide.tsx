@@ -17,12 +17,16 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import type { PhrasePitchFeatures } from "@/types";
+import { EXERCISE_IN_TUNE_CENTS, EXERCISE_NEAR_CENTS } from "@/lib/vocal-exercise";
 
 export type MelodyGuidePhase = "idle" | "listening" | "armed" | "live";
 
 const FFT_SIZE = 4096;
-const IN_TUNE = 0.55;
-const NEAR = 1.15;
+const IN_TUNE = EXERCISE_IN_TUNE_CENTS / 100;
+const NEAR = EXERCISE_NEAR_CENTS / 100;
+const HINT = `Допуск ±${EXERCISE_IN_TUNE_CENTS}¢ · внутри зелёного коридора это попадание`;
+const STATUS_CLASS =
+  "flex h-7 w-[7.5rem] shrink-0 items-center justify-center truncate rounded-full bg-white/5 px-2 text-center text-[11px] font-medium leading-none ring-1 ring-white/10 ";
 
 type Point = { t: number; midi: number };
 type LivePoint = { t: number; midi: number | null; rms: number };
@@ -60,11 +64,8 @@ function midiAtTime(points: Point[], time: number, maxGap = 0.32): number | null
   return a.midi + (b.midi - a.midi) * u;
 }
 
-function midiRange(points: Point[], live: LivePoint[]): { min: number; max: number } {
-  const values = [
-    ...points.map((point) => point.midi),
-    ...live.map((point) => point.midi).filter((value): value is number => value != null),
-  ];
+function midiRange(points: Point[]): { min: number; max: number } {
+  const values = points.map((point) => point.midi);
   if (values.length === 0) return { min: 50, max: 74 };
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -127,7 +128,6 @@ export default function LiveMelodyGuide({
   const targetEl = useRef<HTMLSpanElement>(null);
   const yoursEl = useRef<HTMLSpanElement>(null);
   const statusEl = useRef<HTMLSpanElement>(null);
-  const hintEl = useRef<HTMLSpanElement>(null);
 
   playheadRef.current = playheadSec;
   phaseRef.current = phase;
@@ -151,6 +151,7 @@ export default function LiveMelodyGuide({
       0.9,
       phraseDurationSec || Number(features?.duration) || (times.length ? Number(times[times.length - 1]) : 4)
     );
+    const range = midiRange(reference);
 
     let raf = 0;
     let ctx: AudioContext | null = null;
@@ -166,7 +167,6 @@ export default function LiveMelodyGuide({
       const drawing = canvas.getContext("2d");
       if (!drawing) return;
       const { width, height, dpr } = fitCanvas(canvas);
-      const range = midiRange(reference, liveRef.current);
       const padL = 42 * dpr;
       const padR = 16 * dpr;
       const padT = 18 * dpr;
@@ -228,38 +228,38 @@ export default function LiveMelodyGuide({
 
       if (reference.length > 1) {
         const step = duration / Math.max(160, innerW);
-        const band = drawing.createLinearGradient(0, padT, 0, padT + innerH);
-        band.addColorStop(0, "rgba(196,181,253,0.12)");
-        band.addColorStop(0.5, "rgba(124,58,237,0.28)");
-        band.addColorStop(1, "rgba(34,211,238,0.12)");
-        drawing.fillStyle = band;
-        let top: Array<{ x: number; y: number }> = [];
-        let bot: Array<{ x: number; y: number }> = [];
-        const flushBand = () => {
-          if (top.length < 2) {
+        const fillCorridor = (half: number, fill: string | CanvasGradient) => {
+          drawing.fillStyle = fill;
+          let top: Array<{ x: number; y: number }> = [];
+          let bot: Array<{ x: number; y: number }> = [];
+          const flushBand = () => {
+            if (top.length < 2) {
+              top = [];
+              bot = [];
+              return;
+            }
+            drawing.beginPath();
+            drawing.moveTo(top[0].x, top[0].y);
+            for (let i = 1; i < top.length; i += 1) drawing.lineTo(top[i].x, top[i].y);
+            for (let i = bot.length - 1; i >= 0; i -= 1) drawing.lineTo(bot[i].x, bot[i].y);
+            drawing.closePath();
+            drawing.fill();
             top = [];
             bot = [];
-            return;
+          };
+          for (let time = 0; time <= duration; time += step) {
+            const midi = midiAtTime(reference, time);
+            if (midi == null) {
+              flushBand();
+              continue;
+            }
+            top.push({ x: xAt(time), y: yAt(midi + half) });
+            bot.push({ x: xAt(time), y: yAt(midi - half) });
           }
-          drawing.beginPath();
-          drawing.moveTo(top[0].x, top[0].y);
-          for (let i = 1; i < top.length; i += 1) drawing.lineTo(top[i].x, top[i].y);
-          for (let i = bot.length - 1; i >= 0; i -= 1) drawing.lineTo(bot[i].x, bot[i].y);
-          drawing.closePath();
-          drawing.fill();
-          top = [];
-          bot = [];
+          flushBand();
         };
-        for (let time = 0; time <= duration; time += step) {
-          const midi = midiAtTime(reference, time);
-          if (midi == null) {
-            flushBand();
-            continue;
-          }
-          top.push({ x: xAt(time), y: yAt(midi + NEAR) });
-          bot.push({ x: xAt(time), y: yAt(midi - NEAR) });
-        }
-        flushBand();
+        fillCorridor(NEAR, "rgba(167,139,250,0.16)");
+        fillCorridor(IN_TUNE, "rgba(52,211,153,0.22)");
 
         drawing.save();
         drawing.shadowColor = "rgba(196,181,253,0.85)";
@@ -469,33 +469,22 @@ export default function LiveMelodyGuide({
         if (statusEl.current) {
           const cents = centsRef.current;
           const live = phaseRef.current === "live" || phaseRef.current === "armed";
+          const inZone = cents != null && Math.abs(cents) <= EXERCISE_IN_TUNE_CENTS;
           statusEl.current.textContent = !live
             ? phaseRef.current === "listening"
-              ? "Фонограмма"
+              ? "Слушайте"
               : "Эталон"
             : liveMidiRef.current == null
-              ? "Спойте — шар появится"
+              ? "Спойте"
               : cents == null
-                ? liveNoteRef.current
-                : Math.abs(cents) <= 55
+                ? "Спойте"
+                : inZone
                   ? "В зоне"
                   : cents > 0
-                    ? `Выше · +${cents} ¢`
-                    : `Ниже · ${cents} ¢`;
+                    ? "Выше"
+                    : "Ниже";
           statusEl.current.className =
-            liveMidiRef.current != null && cents != null && Math.abs(cents) <= 55
-              ? "text-emerald-300"
-              : "text-white";
-        }
-        if (hintEl.current) {
-          hintEl.current.textContent =
-            phaseRef.current === "live"
-              ? "Зелёный — попадание, жёлтый — рядом, розовый — мимо"
-              : phaseRef.current === "armed"
-                ? "Микрофон живой. После отсчёта линия пойдёт по фразе"
-                : phaseRef.current === "listening"
-                  ? "Слушайте коридор эталона — ваш голос появится на записи"
-                  : "Нажмите «Записать»: эталон и ваш голос рисуются вместе";
+            STATUS_CLASS + (inZone ? "text-emerald-300" : "text-white");
         }
       }
       raf = window.requestAnimationFrame(tick);
@@ -537,28 +526,32 @@ export default function LiveMelodyGuide({
     };
   }, [features, phraseDurationSec, stream]);
 
-  const recording = phase === "live" || phase === "armed";
-
   return (
     <div className="relative mt-3 overflow-hidden rounded-2xl bg-[#07060f] ring-1 ring-violet-400/30">
       <div className="pointer-events-none absolute -left-10 top-0 h-32 w-32 rounded-full bg-violet-600/25 blur-3xl" />
       <div className="pointer-events-none absolute -right-8 bottom-0 h-28 w-28 rounded-full bg-emerald-400/15 blur-3xl" />
-      <div className="relative flex items-center justify-between gap-2 px-3 pt-2.5">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-violet-200/70">Эталон</p>
-          <span ref={targetEl} className="font-display text-lg font-semibold text-violet-100">
+      <div className="relative grid h-14 grid-cols-[minmax(4.75rem,1fr)_auto_minmax(4.75rem,1fr)] items-center gap-2 px-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase leading-none tracking-[0.18em] text-violet-200/70">Эталон</p>
+          <span
+            ref={targetEl}
+            className="mt-1 block h-6 truncate font-display text-lg font-semibold leading-6 text-violet-100"
+          >
             —
           </span>
         </div>
         <span
           ref={statusEl}
-          className="rounded-full bg-white/5 px-3 py-1 text-center text-[11px] font-medium text-white ring-1 ring-white/10"
+          className={`${STATUS_CLASS} text-white`}
         >
-          {recording ? "Спойте" : "Эталон"}
+          Эталон
         </span>
-        <div className="text-right">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">Ваш голос</p>
-          <span ref={yoursEl} className="font-display text-lg font-semibold text-emerald-200">
+        <div className="min-w-0 text-right">
+          <p className="text-[10px] uppercase leading-none tracking-[0.18em] text-emerald-300/80">Ваш голос</p>
+          <span
+            ref={yoursEl}
+            className="mt-1 block h-6 truncate font-display text-lg font-semibold leading-6 text-emerald-200"
+          >
             —
           </span>
         </div>
@@ -568,8 +561,8 @@ export default function LiveMelodyGuide({
         className="relative h-52 w-full sm:h-60"
         aria-label="Живой контур мелодии"
       />
-      <p className="px-3 pb-2.5 text-center text-[10px] text-zinc-400">
-        <span ref={hintEl}>Нажмите «Записать»: эталон и ваш голос рисуются вместе</span>
+      <p className="h-8 truncate px-3 text-center text-[10px] leading-8 text-zinc-400">
+        {HINT}
       </p>
     </div>
   );
