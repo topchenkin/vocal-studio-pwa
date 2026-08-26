@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import {
   computeRms,
   createYinDetector,
@@ -15,10 +15,14 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import {
+  AUTO_KEY_WINDOW_SEC,
   HITBOX_GREEN_CENTS,
+  blockAtTime,
   displayMidiForLive,
+  estimateAutoKeyCents,
+  hzToFoldedCents,
   quantizeNoteBlocks,
-  shiftNoteBlocks,
+  shiftNoteBlocksByCents,
 } from "@/lib/note-blocks";
 import type { PhrasePitchFeatures } from "@/types";
 
@@ -28,6 +32,12 @@ const FFT_SIZE = 4096;
 const HINT = "Серые блоки — ноты. Зелёный шар в блоке = попадание. Красный — фальшь.";
 const STATUS_CLASS =
   "flex h-7 w-[7.5rem] shrink-0 items-center justify-center truncate rounded-full bg-white/5 px-2 text-center text-[11px] font-medium leading-none ring-1 ring-white/10 ";
+const WINDOW_PAST_SEC = 1.2;
+const WINDOW_FUTURE_SEC = 2.8;
+const MIN_VOLUME_DB = -72;
+const MIN_VOLUME_DB_IOS = -76;
+const MIN_PEAK = 0.008;
+const FALLBACK_PEAK = 0.012;
 
 type LivePoint = { t: number; hz: number | null };
 
@@ -44,11 +54,12 @@ function yFromMidi(midi: number, range: { min: number; max: number }, top: numbe
   return bottom - ((midi - range.min) / span) * (bottom - top);
 }
 
-function fitCanvas(canvas: HTMLCanvasElement) {
+function fitCanvas(canvas: HTMLCanvasElement, host: HTMLElement | null) {
   const dpr = Math.min(2.5, window.devicePixelRatio || 1);
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(1, Math.round(rect.width * dpr));
-  const height = Math.max(1, Math.round(rect.height * dpr));
+  const cssW = Math.max(1, host?.clientWidth || canvas.getBoundingClientRect().width);
+  const cssH = Math.max(1, canvas.getBoundingClientRect().height || host?.clientHeight || 208);
+  const width = Math.max(1, Math.round(cssW * dpr));
+  const height = Math.max(1, Math.round(cssH * dpr));
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -71,18 +82,21 @@ export default function LiveMelodyGuide({
   phase,
   playheadSec = 0,
   phraseDurationSec = 0,
-  clockSynced = false,
-  transpose = 0,
+  backingAudioRef,
+  phraseStartSec = 0,
+  onAutoKey,
 }: {
   features: PhrasePitchFeatures | null;
   stream: MediaStream | null;
   phase: MelodyGuidePhase;
   playheadSec?: number;
   phraseDurationSec?: number;
-  clockSynced?: boolean;
-  transpose?: number;
+  backingAudioRef?: RefObject<HTMLAudioElement | null>;
+  phraseStartSec?: number;
+  onAutoKey?: (shiftCents: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<LivePoint[]>([]);
   const liveHzRef = useRef<number | null>(null);
   const liveNoteRef = useRef("—");
@@ -93,32 +107,52 @@ export default function LiveMelodyGuide({
   const startedAtRef = useRef(0);
   const playheadRef = useRef(playheadSec);
   const phaseRef = useRef(phase);
-  const clockRef = useRef(clockSynced);
+  const phraseStartRef = useRef(phraseStartSec);
+  const onAutoKeyRef = useRef(onAutoKey);
+  const autoShiftRef = useRef(0);
+  const autoLockedRef = useRef(false);
+  const calibRef = useRef<number[]>([]);
   const targetEl = useRef<HTMLSpanElement>(null);
   const yoursEl = useRef<HTMLSpanElement>(null);
   const statusEl = useRef<HTMLSpanElement>(null);
 
   playheadRef.current = playheadSec;
   phaseRef.current = phase;
-  clockRef.current = clockSynced;
+  phraseStartRef.current = phraseStartSec;
+  onAutoKeyRef.current = onAutoKey;
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const canvas = canvasRef.current;
+    if (!host || !canvas) return;
+    const observer = new ResizeObserver(() => {
+      fitCanvas(canvas, host);
+    });
+    observer.observe(host);
+    fitCanvas(canvas, host);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (phase === "live" || phase === "armed") {
       liveRef.current = [];
       liveHzRef.current = null;
       startedAtRef.current = performance.now();
+      autoShiftRef.current = 0;
+      autoLockedRef.current = false;
+      calibRef.current = [];
     }
   }, [phase]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const blocks = shiftNoteBlocks(quantizeNoteBlocks(features), transpose);
+    const baseBlocks = quantizeNoteBlocks(features);
     const duration = Math.max(
       0.9,
-      phraseDurationSec || Number(features?.duration) || (blocks[blocks.length - 1]?.endTime ?? 4)
+      phraseDurationSec || Number(features?.duration) || (baseBlocks[baseBlocks.length - 1]?.endTime ?? 4)
     );
-    const range = midiRange(blocks.map((block) => block.midi));
+    const windowSec = WINDOW_PAST_SEC + WINDOW_FUTURE_SEC;
 
     let raf = 0;
     let ctx: AudioContext | null = null;
@@ -128,19 +162,33 @@ export default function LiveMelodyGuide({
     let detector: ReturnType<typeof createYinDetector> | null = null;
     let buffer: Float32Array<ArrayBuffer> | null = null;
     let lastHud = 0;
+    let lastSyncLog = 0;
+
+    const readPhraseTime = () => {
+      const audio = backingAudioRef?.current;
+      const start = phraseStartRef.current;
+      if (audio && !audio.paused && Number.isFinite(audio.currentTime)) {
+        return Math.max(0, Math.min(duration, audio.currentTime - start));
+      }
+      return Math.max(0, Math.min(duration, playheadRef.current));
+    };
 
     const paint = (now: number) => {
       const drawing = canvas.getContext("2d");
       if (!drawing) return;
-      const { width, height, dpr } = fitCanvas(canvas);
+      const { width, height, dpr } = fitCanvas(canvas, hostRef.current);
       const padL = 42 * dpr;
       const padR = 16 * dpr;
       const padT = 18 * dpr;
       const padB = 28 * dpr;
       const innerW = width - padL - padR;
       const innerH = height - padT - padB;
-      const tNow = Math.min(duration, Math.max(0, playheadRef.current));
-      const xAt = (time: number) => padL + (time / duration) * innerW;
+      const tNow = readPhraseTime();
+      const nowX = padL + innerW * (WINDOW_PAST_SEC / windowSec);
+      const pps = innerW / windowSec;
+      const xAt = (time: number) => nowX + (time - tNow) * pps;
+      const blocks = shiftNoteBlocksByCents(baseBlocks, autoShiftRef.current);
+      const range = midiRange(blocks.map((block) => block.midi));
       const yAt = (midi: number) => yFromMidi(midi, range, padT, padT + innerH);
       const pulse = 0.45 + 0.55 * Math.sin(now / 420);
 
@@ -159,6 +207,7 @@ export default function LiveMelodyGuide({
       for (const block of blocks) {
         const x = xAt(block.startTime);
         const w = Math.max(4 * dpr, xAt(block.endTime) - x);
+        if (x + w < padL - 8 * dpr || x > padL + innerW + 8 * dpr) continue;
         const yTop = yAt(block.midi + HITBOX_GREEN_CENTS / 100);
         const yBot = yAt(block.midi - HITBOX_GREEN_CENTS / 100);
         const h = Math.max(10 * dpr, yBot - yTop);
@@ -188,11 +237,15 @@ export default function LiveMelodyGuide({
         drawing.lineWidth = 3.2 * dpr;
         let prev: { x: number; y: number; color: string } | null = null;
         for (const point of live) {
+          if (point.t < tNow - WINDOW_PAST_SEC - 0.05 || point.t > tNow + 0.08) {
+            prev = null;
+            continue;
+          }
           if (point.hz == null) {
             prev = null;
             continue;
           }
-          const shown = displayMidiForLive(point.hz, point.t, blocks);
+          const shown = displayMidiForLive(point.hz, point.t, baseBlocks, autoShiftRef.current);
           if (!shown) {
             prev = null;
             continue;
@@ -213,19 +266,18 @@ export default function LiveMelodyGuide({
         drawing.shadowBlur = 0;
       }
 
-      const headX = xAt(tNow);
       drawing.strokeStyle = `rgba(251,191,36,${0.55 + pulse * 0.35})`;
       drawing.lineWidth = 2 * dpr;
       drawing.beginPath();
-      drawing.moveTo(headX, padT);
-      drawing.lineTo(headX, padT + innerH);
+      drawing.moveTo(nowX, padT);
+      drawing.lineTo(nowX, padT + innerH);
       drawing.stroke();
 
       const liveHz = liveHzRef.current;
       if (liveHz && (phaseRef.current === "live" || phaseRef.current === "armed")) {
-        const shown = displayMidiForLive(liveHz, tNow, blocks);
+        const shown = displayMidiForLive(liveHz, tNow, baseBlocks, autoShiftRef.current);
         if (shown) {
-          const orbX = phaseRef.current === "armed" ? padL + innerW * 0.12 : headX;
+          const orbX = phaseRef.current === "armed" ? padL + innerW * 0.12 : nowX;
           const orbY = yAt(shown.midi);
           const color = shown.snapped ? "#4ade80" : shown.block ? "#fb7185" : "#e5e7eb";
           drawing.shadowColor = color;
@@ -269,15 +321,23 @@ export default function LiveMelodyGuide({
       }
     };
 
-    const pushLive = (hz: number | null) => {
+    const pushLive = (hz: number | null, time: number) => {
       if (phaseRef.current !== "live") return;
-      const elapsed = (performance.now() - startedAtRef.current) / 1000;
-      const time = clockRef.current ? playheadRef.current : elapsed;
       liveRef.current.push({ t: Math.max(0, time), hz });
       if (liveRef.current.length > 2400) liveRef.current.splice(0, liveRef.current.length - 2400);
     };
 
+    const lockAutoKey = () => {
+      if (autoLockedRef.current) return;
+      const shift = estimateAutoKeyCents(calibRef.current);
+      autoShiftRef.current = shift;
+      autoLockedRef.current = true;
+      if (shift !== 0) onAutoKeyRef.current?.(shift);
+    };
+
     const tick = (now: number) => {
+      const tNow = readPhraseTime();
+      let hz: number | null = null;
       if (analyser && detector && buffer && stream) {
         readAnalyserTimeDomain(analyser, buffer);
         waveRef.current = buffer;
@@ -285,25 +345,51 @@ export default function LiveMelodyGuide({
         const db = dbFromRms(rms);
         const peak = peakOf(buffer);
         rmsRef.current = rms;
-        const skipDb = isAppleWebKit() ? -64 : -58;
-        const hasVoice = db > skipDb || peak > 0.018;
-        let hz = hasVoice ? detector(buffer) : null;
-        if (!hz && peak > 0.02) {
+        const minVolumeDb = isAppleWebKit() ? MIN_VOLUME_DB_IOS : MIN_VOLUME_DB;
+        const hasVoice = db > minVolumeDb || peak > MIN_PEAK;
+        hz = hasVoice ? detector(buffer) : null;
+        if (!hz && peak > FALLBACK_PEAK) {
           const fallback = detectPitchHzOctaveSafe(buffer, ctx?.sampleRate ?? 44100);
           hz = fallback > 0 ? fallback : null;
         }
         liveHzRef.current = hz;
-        const shown = hz ? displayMidiForLive(hz, playheadRef.current, blocks) : null;
+        const shown = hz ? displayMidiForLive(hz, tNow, baseBlocks, autoShiftRef.current) : null;
         liveNoteRef.current = shown ? noteLabelFromMidi(shown.midi) : "—";
         centsRef.current = shown?.cents ?? null;
         snappedRef.current = Boolean(shown?.snapped);
-        pushLive(hz);
+        pushLive(hz, tNow);
+
+        const activeBlock = blockAtTime(baseBlocks, tNow, 0);
+        if (phaseRef.current === "live" && !autoLockedRef.current && hz && activeBlock) {
+          if (tNow <= AUTO_KEY_WINDOW_SEC) {
+            calibRef.current.push(hzToFoldedCents(hz, activeBlock.startHz));
+          }
+        }
+        if (phaseRef.current === "live" && !autoLockedRef.current && tNow >= Math.min(AUTO_KEY_WINDOW_SEC, duration - 0.02)) {
+          lockAutoKey();
+        }
+
+        if (phaseRef.current === "live" && now - lastSyncLog > 250) {
+          lastSyncLog = now;
+          const audio = backingAudioRef?.current;
+          console.log("[SYNC DEBUG]", {
+            audioTime: tNow,
+            currentTime: audio?.currentTime ?? null,
+            userHz: hz,
+            activeBlock: activeBlock
+              ? { note: activeBlock.note, start: activeBlock.startTime, end: activeBlock.endTime }
+              : null,
+            autoShift: autoShiftRef.current,
+          });
+        }
       }
       paint(now);
       if (now - lastHud > 80) {
         lastHud = now;
-        const current = blocks.find(
-          (block) => playheadRef.current >= block.startTime && playheadRef.current <= block.endTime
+        const current = blockAtTime(
+          shiftNoteBlocksByCents(baseBlocks, autoShiftRef.current),
+          tNow,
+          0
         );
         if (targetEl.current) targetEl.current.textContent = current?.note ?? "—";
         if (yoursEl.current) yoursEl.current.textContent = liveNoteRef.current;
@@ -361,10 +447,10 @@ export default function LiveMelodyGuide({
       }
       void ctx?.close().catch(() => undefined);
     };
-  }, [features, phraseDurationSec, stream, transpose]);
+  }, [backingAudioRef, features, phraseDurationSec, stream]);
 
   return (
-    <div className="relative mt-3 overflow-hidden rounded-2xl bg-[#07060f] ring-1 ring-violet-400/30">
+    <div className="relative mt-3 min-w-0 overflow-hidden rounded-2xl bg-[#07060f] ring-1 ring-violet-400/30">
       <div className="pointer-events-none absolute -left-10 top-0 h-32 w-32 rounded-full bg-violet-600/25 blur-3xl" />
       <div className="pointer-events-none absolute -right-8 bottom-0 h-28 w-28 rounded-full bg-emerald-400/15 blur-3xl" />
       <div className="relative grid h-14 grid-cols-[minmax(4.75rem,1fr)_auto_minmax(4.75rem,1fr)] items-center gap-2 px-3">
@@ -390,11 +476,13 @@ export default function LiveMelodyGuide({
           </span>
         </div>
       </div>
-      <canvas
-        ref={canvasRef}
-        className="relative h-52 w-full sm:h-60"
-        aria-label="Хитбоксы нот и живой голос"
-      />
+      <div ref={hostRef} className="relative w-full min-w-0 overflow-x-auto">
+        <canvas
+          ref={canvasRef}
+          className="relative block h-52 w-full max-w-full sm:h-60"
+          aria-label="Хитбоксы нот и живой голос"
+        />
+      </div>
       <p className="h-8 truncate px-3 text-center text-[10px] leading-8 text-zinc-400">{HINT}</p>
     </div>
   );

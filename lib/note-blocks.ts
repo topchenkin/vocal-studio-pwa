@@ -10,13 +10,42 @@ const MIN_BLOCK_SEC = 0.08;
 const VIBRATO_CENTS = 80;
 const GAP_MERGE_SEC = 0.12;
 
+export const AUTO_KEY_WINDOW_SEC = 2;
+export const AUTO_KEY_MAX_CENTS = 600;
+
 export function hzToCents(userHz: number, targetHz: number): number {
   if (userHz <= 0 || targetHz <= 0) return 9999;
   return 1200 * Math.log2(userHz / targetHz);
 }
 
+/** Wrap cents into (−600, 600]: 1200¢ / 2400¢ (octave) count as a perfect hit. */
+export function foldOctaveCents(cents: number): number {
+  if (!Number.isFinite(cents) || Math.abs(cents) >= 9000) return cents;
+  let wrapped = cents % 1200;
+  if (wrapped > 600) wrapped -= 1200;
+  if (wrapped <= -600) wrapped += 1200;
+  return wrapped;
+}
+
+export function hzToFoldedCents(userHz: number, targetHz: number): number {
+  return foldOctaveCents(hzToCents(userHz, targetHz));
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+}
+
+export function estimateAutoKeyCents(samples: number[], minSamples = 8): number {
+  if (samples.length < minSamples) return 0;
+  const rounded = Math.round(median(samples.map(foldOctaveCents)) / 100) * 100;
+  return Math.max(-AUTO_KEY_MAX_CENTS, Math.min(AUTO_KEY_MAX_CENTS, rounded));
+}
+
 export function shiftNoteBlocks(blocks: NoteBlock[], semitones: number): NoteBlock[] {
-  const shift = Math.max(-2, Math.min(2, Math.round(semitones)));
+  const shift = Math.round(semitones);
   if (shift === 0) return blocks;
   const factor = 2 ** (shift / 12);
   return blocks.map((block) => {
@@ -28,6 +57,10 @@ export function shiftNoteBlocks(blocks: NoteBlock[], semitones: number): NoteBlo
       startHz: Math.round(block.startHz * factor * 100) / 100,
     };
   });
+}
+
+export function shiftNoteBlocksByCents(blocks: NoteBlock[], cents: number): NoteBlock[] {
+  return shiftNoteBlocks(blocks, cents / 100);
 }
 
 export function blockAtTime(
@@ -146,18 +179,32 @@ export function quantizeNoteBlocks(features: PhrasePitchFeatures | null | undefi
   return merged.filter((block) => block.endTime - block.startTime >= MIN_BLOCK_SEC);
 }
 
+function foldMidiToward(midi: number, around: number): number {
+  let folded = midi;
+  while (folded - around > 6) folded -= 12;
+  while (around - folded > 6) folded += 12;
+  return folded;
+}
+
 export function displayMidiForLive(
   liveHz: number | null,
   time: number,
-  blocks: NoteBlock[]
+  blocks: NoteBlock[],
+  autoShiftCents = 0
 ): { midi: number; snapped: boolean; cents: number | null; block: NoteBlock | null } | null {
   if (liveHz == null || liveHz <= 0) return null;
   const block = blockAtTime(blocks, time);
   const liveMidi = midiFromFrequency(liveHz);
   if (!block) return { midi: liveMidi, snapped: false, cents: null, block: null };
-  const cents = hzToCents(liveHz, block.startHz);
+  const targetHz = block.startHz * 2 ** (autoShiftCents / 1200);
+  const cents = hzToFoldedCents(liveHz, targetHz);
   if (Math.abs(cents) <= HITBOX_GREEN_CENTS) {
-    return { midi: block.midi, snapped: true, cents, block };
+    return { midi: Math.round(block.midi + autoShiftCents / 100), snapped: true, cents, block };
   }
-  return { midi: liveMidi, snapped: false, cents, block };
+  return {
+    midi: foldMidiToward(liveMidi, block.midi + autoShiftCents / 100),
+    snapped: false,
+    cents,
+    block,
+  };
 }

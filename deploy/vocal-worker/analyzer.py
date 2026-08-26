@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-ANALYZER_VERSION = "hitbox-1"
+ANALYZER_VERSION = "hitbox-2"
 SAMPLE_RATE = 16_000
 DEFAULT_NUMBA_CACHE = "/var/cache/vocal-worker/numba"
 
@@ -26,6 +26,9 @@ NEAR_CENTS = 120.0
 MIN_BLOCK_SEC = 0.08
 VIBRATO_CENTS = 80.0
 GAP_MERGE_SEC = 0.12
+AUTO_KEY_WINDOW_SEC = 2.0
+AUTO_KEY_MAX_CENTS = 600.0
+AUTO_KEY_MIN_SAMPLES = 6
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 _librosa = None
@@ -104,6 +107,27 @@ def hz_to_cents(user_hz: float, target_hz: float) -> float:
     if user_hz <= 0 or target_hz <= 0:
         return 9999.0
     return 1200.0 * math.log2(user_hz / target_hz)
+
+
+def fold_cents(cents: float) -> float:
+    """Wrap cents into (-600, 600]: one octave (1200?) is a perfect hit."""
+    if abs(cents) >= 9000:
+        return cents
+    wrapped = cents % 1200.0
+    if wrapped > 600.0:
+        wrapped -= 1200.0
+    if wrapped <= -600.0:
+        wrapped += 1200.0
+    return wrapped
+
+
+def estimate_auto_key_cents(samples: list[float]) -> float:
+    if len(samples) < AUTO_KEY_MIN_SAMPLES:
+        return 0.0
+    folded = [fold_cents(value) for value in samples]
+    median = float(np.median(folded))
+    rounded = round(median / 100.0) * 100.0
+    return float(np.clip(rounded, -AUTO_KEY_MAX_CENTS, AUTO_KEY_MAX_CENTS))
 
 
 def extract_features(
@@ -324,7 +348,7 @@ def quantize_note_blocks(features: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def shift_blocks(blocks: list[dict[str, Any]], semitones: int) -> list[dict[str, Any]]:
-    shift = int(np.clip(semitones, -2, 2))
+    shift = int(semitones)
     if shift == 0:
         return blocks
     factor = 2.0 ** (shift / 12.0)
@@ -458,9 +482,10 @@ def frame_points(cents: float | None) -> int:
 def score_features(
     reference: dict[str, Any],
     student: dict[str, Any],
-    transpose: int = 0,
+    *,
+    auto_key: bool = True,
 ) -> dict[str, Any]:
-    """Score a take against quantized teacher hitboxes. No DTW, no auto-transpose."""
+    """Score a take against quantized teacher hitboxes. Octave-blind, auto-key."""
     coverage = float(student.get("voiced_coverage", 0))
     rms_db = float(student.get("rms_db", -120))
     clipping = float(student.get("clipping_ratio", 0))
@@ -478,7 +503,6 @@ def score_features(
 
     raw_blocks = reference.get("blocks")
     blocks = list(raw_blocks) if isinstance(raw_blocks, list) and raw_blocks else quantize_note_blocks(reference)
-    blocks = shift_blocks(blocks, int(transpose))
     if len(blocks) < 1:
         return _unevaluable(WEAK_REFERENCE, blocks=0)
 
@@ -492,6 +516,18 @@ def score_features(
         duration,
         max((float(block["endTime"]) for block in blocks), default=0.0),
     )
+
+    calib: list[float] = []
+    t = 0.0
+    while t <= min(AUTO_KEY_WINDOW_SEC, end) + 1e-9:
+        block = block_at(blocks, t, slack=0)
+        if block is not None:
+            hz = _student_hz_at(times, student_hz, t)
+            if hz is not None:
+                calib.append(fold_cents(hz_to_cents(hz, float(block["startHz"]))))
+        t += FRAME_SEC
+    auto_shift = estimate_auto_key_cents(calib) if auto_key else 0.0
+
     earned = 0
     possible = 0
     green = 0
@@ -511,7 +547,7 @@ def score_features(
             t += FRAME_SEC
             continue
         voiced_hits += 1
-        cents = hz_to_cents(hz, float(block["startHz"]))
+        cents = fold_cents(hz_to_cents(hz, float(block["startHz"])) - auto_shift)
         points = frame_points(cents)
         earned += points
         if points >= 100:
@@ -542,7 +578,7 @@ def score_features(
         "intonation": int(np.clip(intonation, 0, 100)),
         "rhythm": rhythm,
         "completeness": int(np.clip(completeness, 0, 100)),
-        "global_shift_semitones": int(np.clip(int(transpose), -2, 2)),
+        "global_shift_semitones": int(round(auto_shift / 100.0)),
         "feedback": FEEDBACK[weakest],
         "confidence": {
             "blocks": len(blocks),
@@ -552,6 +588,7 @@ def score_features(
             "near_frames": near,
             "miss_frames": miss,
             "voiced_hits": voiced_hits,
+            "auto_shift_cents": auto_shift,
         },
     }
 
@@ -560,8 +597,7 @@ def score_with_anchors(
     reference: dict[str, Any],
     student: dict[str, Any],
     anchors: dict[str, dict[str, Any]] | None = None,
-    transpose: int = 0,
 ) -> dict[str, Any]:
     """Hitbox scoring ignores few-shot anchors; kept for worker call compatibility."""
     _ = anchors
-    return score_features(reference, student, transpose=transpose)
+    return score_features(reference, student)

@@ -12,7 +12,6 @@ from analyzer import (
     quantize_note_blocks,
     score_features,
     score_with_anchors,
-    shift_blocks,
 )
 
 
@@ -75,14 +74,14 @@ class HitboxScoringTests(unittest.TestCase):
 
     def test_near_zone_gets_half_points(self) -> None:
         near = [value + 0.9 for value in MELODY]
-        result = score_features(self.reference, features(near))
+        result = score_features(self.reference, features(near), auto_key=False)
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 40)
         self.assertLessEqual(result["overall"], 60)
 
     def test_wrong_notes_score_low(self) -> None:
         wrong = [value + 4 for value in MELODY]
-        result = score_features(self.reference, features(wrong))
+        result = score_features(self.reference, features(wrong), auto_key=False)
         self.assertTrue(result["evaluable"], result)
         self.assertLess(result["overall"], 20)
 
@@ -94,24 +93,26 @@ class HitboxScoringTests(unittest.TestCase):
         self.assertTrue(result["evaluable"], result)
         self.assertGreaterEqual(result["overall"], 90)
 
-    def test_manual_transpose_shifts_hitboxes(self) -> None:
+    def test_auto_key_shifts_hitboxes(self) -> None:
         shifted = features([value + 2 for value in MELODY])
-        miss = score_features(self.reference, shifted, transpose=0)
-        hit = score_features(self.reference, shifted, transpose=2)
-        self.assertTrue(hit["evaluable"], hit)
-        self.assertGreaterEqual(hit["overall"], 90)
-        self.assertLess(miss["overall"], 40)
-        self.assertEqual(hit["global_shift_semitones"], 2)
+        result = score_features(self.reference, shifted)
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["overall"], 90)
+        self.assertEqual(result["global_shift_semitones"], 2)
+        self.assertEqual(result["confidence"]["auto_shift_cents"], 200)
 
-    def test_no_automatic_octave_transpose(self) -> None:
+    def test_octave_down_scores_as_perfect_hit(self) -> None:
+        octave = features([value - 12 for value in MELODY])
+        result = score_features(self.reference, octave)
+        self.assertTrue(result["evaluable"], result)
+        self.assertGreaterEqual(result["overall"], 90)
+        self.assertEqual(result["global_shift_semitones"], 0)
+
+    def test_octave_up_scores_as_perfect_hit(self) -> None:
         octave = features([value + 12 for value in MELODY])
         result = score_features(self.reference, octave)
         self.assertTrue(result["evaluable"], result)
-        self.assertLess(result["overall"], 25)
-
-    def test_dropdown_clamped_to_two_semitones(self) -> None:
-        blocks = shift_blocks(self.reference["blocks"], 9)
-        self.assertEqual(blocks[0]["midi"], self.reference["blocks"][0]["midi"] + 2)
+        self.assertGreaterEqual(result["overall"], 90)
 
     def test_silence_and_noise_are_rejected(self) -> None:
         silence = features([None] * 24, coverage=0.0, rms_db=-80)

@@ -62,7 +62,6 @@ export function teacherReaction(
 export const EXERCISE_IN_TUNE_CENTS = 60;
 /** Neighbouring-note band used for half-points. */
 export const EXERCISE_NEAR_CENTS = 120;
-export const EXERCISE_TRANSPOSE_OPTIONS = [-2, -1, 0, 1, 2] as const;
 
 /** Practical upper bound (upload/size), not a 45s product hard stop. */
 export const EXERCISE_PHRASE_MAX_SEC = 600;

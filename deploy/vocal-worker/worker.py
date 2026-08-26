@@ -433,7 +433,6 @@ def process_attempt(attempt: dict[str, Any]) -> None:
             feature_rows[0]["features"],
             student,
             anchor_map,
-            int(attempt.get("global_shift_semitones") or 0),
         )
         if not result["evaluable"]:
             patch(

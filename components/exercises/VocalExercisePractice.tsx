@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
 import { renderExerciseResultPng } from "@/lib/exercise-result-card";
@@ -21,7 +22,6 @@ import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@
 import { supabase } from "@/lib/supabase";
 import {
   EXERCISE_ATTEMPT_MAX_SEC,
-  EXERCISE_TRANSPOSE_OPTIONS,
   sanitizeAttemptFeedback,
   teacherReaction,
   weakestDimension,
@@ -69,7 +69,7 @@ export default function VocalExercisePractice({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [phraseFeatures, setPhraseFeatures] = useState<PhrasePitchFeatures | null>(null);
   const [playheadSec, setPlayheadSec] = useState(0);
-  const [transpose, setTranspose] = useState(0);
+  const [keyToast, setKeyToast] = useState(false);
 
   stageRef.current = stage;
   selectedRef.current = selected;
@@ -216,6 +216,7 @@ export default function VocalExercisePractice({
     stopCaptureOnly();
     setError("");
     setAttempt(null);
+    setKeyToast(false);
     try {
       const stream = await getSingingMicStream();
       streamRef.current = stream;
@@ -277,7 +278,6 @@ export default function VocalExercisePractice({
           media_mime: "audio/wav",
           duration_sec: Number(buffer.duration.toFixed(2)),
           status: "queued",
-          global_shift_semitones: transpose,
         })
         .select("*")
         .single();
@@ -470,7 +470,7 @@ export default function VocalExercisePractice({
         stage === "recording" ||
         stage === "failed") &&
         (phraseFeatures || liveStream) && (
-        <div className="relative">
+        <div className="relative min-w-0">
           <LiveMelodyGuide
             features={phraseFeatures}
             stream={liveStream}
@@ -487,8 +487,12 @@ export default function VocalExercisePractice({
             phraseDurationSec={
               selected ? Math.max(0.9, Number(selected.end_sec) - Number(selected.start_sec)) : 0
             }
-            clockSynced={guideOn}
-            transpose={transpose}
+            backingAudioRef={audioRef}
+            phraseStartSec={selected ? Number(selected.start_sec) : 0}
+            onAutoKey={() => {
+              setKeyToast(true);
+              window.setTimeout(() => setKeyToast(false), 4200);
+            }}
           />
           {stage === "counting" && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -523,31 +527,14 @@ export default function VocalExercisePractice({
               </Button>
             )}
           </div>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <label className="flex items-center gap-2 text-xs text-studio-muted">
-              <input
-                type="checkbox"
-                checked={countIn}
-                onChange={(event) => setCountIn(event.target.checked)}
-              />
-              Отсчёт 3–2–1 перед записью
-            </label>
-            <label className="flex items-center gap-2 text-xs text-studio-muted">
-              Тональность
-              <select
-                className="rounded-lg bg-studio-surface px-2 py-1 text-xs text-studio-text ring-1 ring-studio-border"
-                value={transpose}
-                disabled={!["idle", "listening", "failed"].includes(stage)}
-                onChange={(event) => setTranspose(Number(event.target.value))}
-              >
-                {EXERCISE_TRANSPOSE_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {value > 0 ? `+${value}` : value} пт
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="mt-3 flex items-center gap-2 text-xs text-studio-muted">
+            <input
+              type="checkbox"
+              checked={countIn}
+              onChange={(event) => setCountIn(event.target.checked)}
+            />
+            Отсчёт 3–2–1 перед записью
+          </label>
         </>
       )}
       {stage === "recording" && (
@@ -601,7 +588,7 @@ export default function VocalExercisePractice({
           </div>
           {attempt.global_shift_semitones !== null && attempt.global_shift_semitones !== 0 && (
             <p className="text-center text-xs text-studio-muted">
-              Тональность упражнения: {attempt.global_shift_semitones > 0 ? "+" : ""}
+              Тональность автоматически подстроена: {attempt.global_shift_semitones > 0 ? "+" : ""}
               {attempt.global_shift_semitones} полутона
             </p>
           )}
@@ -635,6 +622,11 @@ export default function VocalExercisePractice({
       )}
 
       {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+      <Toast
+        open={keyToast}
+        message="Тональность автоматически подстроена под ваш голос!"
+        onClose={() => setKeyToast(false)}
+      />
       <p className="mt-4 flex items-center gap-2 text-[11px] text-studio-muted">
         <Headphones className="h-4 w-4 shrink-0" />
         Лучше использовать наушники: так фонограмма не попадёт в микрофон и не завысит оценку. Неотправленная запись удалится максимум через час.

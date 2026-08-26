@@ -188,9 +188,14 @@ const guide = readFileSync(
 assert.ok(guide.includes("createYinDetector"));
 assert.ok(guide.includes("HITBOX_GREEN_CENTS") || guide.includes("quantizeNoteBlocks"));
 assert.ok(guide.includes("devicePixelRatio"));
+assert.ok(guide.includes("ResizeObserver"));
+assert.ok(guide.includes("[SYNC DEBUG]"));
+assert.ok(guide.includes("currentTime"));
+assert.ok(guide.includes("estimateAutoKeyCents") || guide.includes("AUTO_KEY_WINDOW_SEC"));
 assert.ok(practice.includes("LiveMelodyGuide"));
-assert.ok(practice.includes("transpose"));
-assert.ok(practice.includes("EXERCISE_TRANSPOSE_OPTIONS"));
+assert.ok(practice.includes("onAutoKey"));
+assert.ok(practice.includes("Тональность автоматически подстроена под ваш голос"));
+assert.ok(!practice.includes("EXERCISE_TRANSPOSE_OPTIONS"));
 assert.ok(practice.includes("sanitizeAttemptFeedback"));
 assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
 
