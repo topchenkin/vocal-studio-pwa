@@ -22,6 +22,7 @@ export const AI_TOOL_IDS: AiToolId[] = [
   "mixer",
   "pitchshift",
   "musicgen",
+  "songwriter",
 ];
 
 /** Defaults used until DB rows load (and as seed values). */
@@ -39,6 +40,11 @@ export const DEFAULT_AI_TOOL_ACCESS: Record<
     title: "Изменение тональности",
   },
   musicgen: { min_tier: "premium", enabled: true, title: "ИИ-композитор" },
+  songwriter: {
+    min_tier: "premium",
+    enabled: true,
+    title: "Нейросоздание песен",
+  },
 };
 
 export type AiToolAccessMap = Record<
@@ -54,6 +60,7 @@ export function defaultAiToolAccessMap(): AiToolAccessMap {
     mixer: { ...DEFAULT_AI_TOOL_ACCESS.mixer },
     pitchshift: { ...DEFAULT_AI_TOOL_ACCESS.pitchshift },
     musicgen: { ...DEFAULT_AI_TOOL_ACCESS.musicgen },
+    songwriter: { ...DEFAULT_AI_TOOL_ACCESS.songwriter },
   };
 }
 
@@ -73,7 +80,8 @@ function isToolId(value: string): value is AiToolId {
     value === "timbre" ||
     value === "mixer" ||
     value === "pitchshift" ||
-    value === "musicgen"
+    value === "musicgen" ||
+    value === "songwriter"
   );
 }
 

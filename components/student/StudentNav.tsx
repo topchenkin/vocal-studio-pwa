@@ -40,7 +40,8 @@ export default function StudentNav() {
             ? pathname === item.href
             : item.href === "/dashboard/student/ai-tools"
               ? pathname.startsWith(item.href) ||
-                pathname.startsWith("/dashboard/student/ai-music")
+                pathname.startsWith("/dashboard/student/ai-music") ||
+                pathname.startsWith("/dashboard/student/songwriter")
               : pathname.startsWith(item.href);
 
         return (

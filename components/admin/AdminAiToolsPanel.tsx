@@ -1,12 +1,13 @@
 "use client";
 
-import { Layers, Mic, Music2, Shield, Sparkles, Stars, WandSparkles } from "lucide-react";
+import { Layers, Mic, Music2, PenLine, Shield, Sparkles, Stars, WandSparkles } from "lucide-react";
 import dynamic from "next/dynamic";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalRemover from "@/components/ai/VocalRemover";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import AiMusicComposer from "@/components/ai/AiMusicComposer";
+import SongwriterChat from "@/components/ai/SongwriterChat";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
 import type { AiToolId } from "@/lib/ai-tools-access";
 
@@ -28,6 +29,7 @@ const SUB_TABS: Array<{
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
   { id: "musicgen", label: "ИИ-композитор", icon: Sparkles },
+  { id: "songwriter", label: "Нейросоздание песен", icon: PenLine },
 ];
 
 export function isAdminAiSubTab(value: string | null): value is AdminAiSubTab {
@@ -42,7 +44,7 @@ export function AdminAiSubNav({
   onChange: (id: AdminAiSubTab) => void;
 }) {
   return (
-    <div className="mt-2 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-7">
+    <div className="mt-2 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
       {SUB_TABS.map((item) => {
         const Icon = item.icon;
         return (
@@ -75,6 +77,7 @@ export default function AdminAiToolBody({ active }: { active: AdminAiSubTab }) {
       {active === "mixer" && <MultitrackMixer />}
       {active === "pitchshift" && <PitchShiftStudio />}
       {active === "musicgen" && <AiMusicComposer />}
+      {active === "songwriter" && <SongwriterChat />}
     </>
   );
 }

@@ -32,7 +32,7 @@ const tools = readFileSync(
 );
 assert.ok(tools.includes('id: "musicgen"'));
 assert.ok(tools.includes("ИИ-композитор"));
-assert.ok(tools.includes("lg:grid-cols-6"));
+assert.ok(tools.includes("lg:grid-cols-7"));
 assert.ok(tools.includes('locked={locked("musicgen")}'));
 assert.ok(!tools.includes('href="/dashboard/student/ai-music"'));
 

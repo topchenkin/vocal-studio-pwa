@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Layers, Mic, Music2, Sparkles, Stars, WandSparkles } from "lucide-react";
+import { Layers, Mic, Music2, PenLine, Sparkles, Stars, WandSparkles } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
@@ -10,6 +10,7 @@ import VocalRemover from "@/components/ai/VocalRemover";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import AiMusicComposer from "@/components/ai/AiMusicComposer";
+import SongwriterChat from "@/components/ai/SongwriterChat";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -39,6 +40,7 @@ const TABS: Array<{
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
   { id: "musicgen", label: "ИИ-композитор", icon: Sparkles },
+  { id: "songwriter", label: "Нейросоздание песен", icon: PenLine },
 ];
 
 export default function AiToolsPage() {
@@ -93,12 +95,12 @@ export default function AiToolsPage() {
   return (
     <DashboardLayout
       title="Нейросети Premium"
-      subtitle="Анализ нот, тональность, минусовка, архетип, сведение и ИИ-композитор"
+      subtitle="Анализ нот, минусовка, архетип, сведение, ИИ-композитор и тексты песен"
       bottomInset
     >
       <StudentNav />
 
-      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-7">
         {visibleTabs.map((item) => {
           const Icon = item.icon;
           const lock = aiToolLockLabel(item.id, access);
@@ -143,6 +145,9 @@ export default function AiToolsPage() {
       )}
       {activeTab === "musicgen" && (
         <AiMusicComposer locked={locked("musicgen")} />
+      )}
+      {activeTab === "songwriter" && (
+        <SongwriterChat locked={locked("songwriter")} />
       )}
     </DashboardLayout>
   );

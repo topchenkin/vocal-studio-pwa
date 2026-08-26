@@ -14,6 +14,7 @@
     "test:vocal-exercise": "tsx scripts/verify-vocal-exercise.ts && node scripts/run-python-vocal-tests.mjs",
     "test:pocket-studio": "tsx scripts/verify-pocket-studio.ts",
     "test:ai-music": "tsx scripts/verify-ai-music.ts",
+    "test:songwriter": "tsx scripts/verify-songwriter.ts",
     "start": "next start",
     "lint": "next lint",
     "generate-vapid": "web-push generate-vapid-keys",
