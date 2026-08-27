@@ -2,7 +2,7 @@
  * Static export (Timeweb production + GitHub CI check) cannot include
  * Route Handlers or middleware. Stash them for `next build`, then restore.
  */
-import { access, cp, mkdir, rm } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,16 @@ async function main() {
     await restoreIncompatible();
   }
   if (code !== 0) process.exit(code);
+
+  const sw = await readFile(path.join(root, "out", "sw.js"), "utf8");
+  if (sw.includes("start-url")) {
+    console.error("out/sw.js still registers a start-url cache — iOS will keep stale HTML");
+    process.exit(1);
+  }
+  if (!sw.includes("NetworkOnly")) {
+    console.error("out/sw.js is missing NetworkOnly handlers for HTML/JS");
+    process.exit(1);
+  }
 }
 
 main().catch(async (err) => {

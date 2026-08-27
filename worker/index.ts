@@ -43,12 +43,62 @@ async function storePendingNav(url: string) {
   }
 }
 
+function isScriptLike(request: Request, path: string) {
+  const dest = request.destination;
+  return (
+    dest === "script" ||
+    dest === "style" ||
+    dest === "worker" ||
+    path.startsWith("/_next/static/") ||
+    /\.(?:js|css|mjs)$/i.test(path)
+  );
+}
+
 self.addEventListener("install", () => {
   void self.skipWaiting();
 });
 
 self.addEventListener("activate", (event: ExtendableEvent) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      await self.clients.claim();
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter(
+            (key) =>
+              key.includes("start-url") ||
+              key.includes("next-static-assets") ||
+              /-pages$/.test(key) ||
+              key.endsWith("-pages")
+          )
+          .map((key) => caches.delete(key))
+      );
+    })()
+  );
+});
+
+self.addEventListener("fetch", (event: FetchEvent) => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/api/")) return;
+  if (!isScriptLike(request, url.pathname)) return;
+
+  event.respondWith(
+    (async () => {
+      const response = await fetch(request);
+      const type = (response.headers.get("content-type") || "").toLowerCase();
+      if (type.includes("text/html")) {
+        return new Response("", {
+          status: 404,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+      return response;
+    })()
+  );
 });
 
 self.addEventListener("push", (event: PushEvent) => {

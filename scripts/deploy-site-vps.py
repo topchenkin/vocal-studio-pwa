@@ -85,6 +85,9 @@ def main() -> None:
             client,
             f"rm -rf {REMOTE_SITE}.new && mkdir -p {REMOTE_SITE}.new "
             f"&& tar xzf /tmp/uniquevocal-out.tgz -C {REMOTE_SITE}.new "
+            f"&& mkdir -p {REMOTE_SITE}.new/_next/static "
+            f"&& if [ -d {REMOTE_SITE}/_next/static ]; then "
+            f"cp -a --update=none {REMOTE_SITE}/_next/static/. {REMOTE_SITE}.new/_next/static/; fi "
             f"&& rm -rf {REMOTE_SITE} && mv {REMOTE_SITE}.new {REMOTE_SITE} "
             f"&& rm -f /tmp/uniquevocal-out.tgz",
         )

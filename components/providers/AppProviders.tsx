@@ -16,7 +16,32 @@ export default function AppProviders({
 }) {
   useEffect(() => {
     document.documentElement.setAttribute("data-uvs-ready", "1");
+    document.documentElement.removeAttribute("data-uvs-busting");
     document.getElementById("uvs-boot-fail")?.remove();
+    const ver = document.documentElement.getAttribute("data-uvs-ver");
+    if (ver) {
+      try {
+        localStorage.setItem("uvs-sw-bust", ver);
+      } catch {
+        /* private mode */
+      }
+    }
+    try {
+      sessionStorage.removeItem("uvs-sw-hold");
+      sessionStorage.removeItem("uvs-boot-reloads");
+    } catch {
+      /* private mode */
+    }
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("_uvs") || url.searchParams.has("_t")) {
+        url.searchParams.delete("_uvs");
+        url.searchParams.delete("_t");
+        window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   return (

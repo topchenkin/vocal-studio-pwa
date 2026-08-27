@@ -136,6 +136,13 @@ const caddy = readFileSync(
 assert.ok(caddy.includes("protocols tls1.2 tls1.2"));
 assert.ok(caddy.includes("protocols h1 h2"));
 assert.ok(!/^\s*protocols h1 h2 h3/m.test(caddy));
+assert.ok(caddy.includes("@assetFiles"));
+assert.ok(caddy.includes('header Cache-Control "no-store, no-cache, must-revalidate"'));
+const caddyApi = caddy.indexOf("handle /api/");
+const caddyHtmlFallback = caddy.lastIndexOf(
+  "try_files {path} {path}.html {path}/index.html /index.html"
+);
+assert.ok(caddyApi > 0 && caddyHtmlFallback > caddyApi, "API routes must stay above HTML SPA fallback");
 
 assert.equal(EXERCISE_PHRASE_MAX_SEC, 600);
 assert.equal(EXERCISE_ATTEMPT_MAX_SEC, 600);

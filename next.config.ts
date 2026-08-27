@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { NextConfig } from "next";
 import withPWAInit from "@ducanh2912/next-pwa";
+import { APP_RELEASE } from "./lib/app-release";
 
 /**
  * Timeweb Next.js Apps (and a plain `next build`) fail with
@@ -58,9 +59,9 @@ if (process.env.NEXT_PHASE === "phase-production-build") {
 const DAY = 24 * 60 * 60;
 
 /**
- * Static hashed assets are NetworkFirst so a poisoned HTML-as-JS cache
- * (Timeweb SPA fallback) cannot stick. HTML stays NetworkFirst with a short
- * timeout so updates appear without hanging.
+ * Do not cache JS/CSS or HTML in the service worker. iOS PWAs otherwise keep a
+ * stale document that points at deleted /_next chunks, or cache homepage HTML
+ * as a script (SPA fallback). Fonts/icons may stay CacheFirst.
  * Default next-pwa rules also cache Google Fonts and ALL cross-origin
  * traffic (including supabase.co) — that makes a blocked API look like a
  * hung PWA. Same-origin only; never cache the API.
@@ -72,16 +73,23 @@ const withPWA = withPWAInit({
   cacheOnFrontEndNav: false,
   reloadOnOnline: false,
   cacheStartUrl: false,
+  dynamicStartUrl: false,
   fallbacks: {
     document: "/offline",
   },
   extendDefaultRuntimeCaching: false,
   workboxOptions: {
-    cacheId: "uvs-moscow-v60",
+    cacheId: `uvs-moscow-v${APP_RELEASE}`,
     skipWaiting: true,
     clientsClaim: true,
     cleanupOutdatedCaches: true,
-    navigateFallbackDenylist: [/^\/api\//, /^\/uvs-push/],
+    navigateFallbackDenylist: [
+      /^\/api\//,
+      /^\/uvs-push/,
+      /^\/_next\//,
+      /\/sw\.js$/,
+      /\.(?:js|css|map|mjs|woff2)$/i,
+    ],
     exclude: [
       /\.map$/,
       /^manifest.*\.js$/,
@@ -92,12 +100,7 @@ const withPWA = withPWAInit({
     runtimeCaching: [
       {
         urlPattern: /\/_next\/static.+\.(js|css)$/i,
-        handler: "StaleWhileRevalidate",
-        options: {
-          cacheName: "next-static-assets",
-          expiration: { maxEntries: 64, maxAgeSeconds: DAY * 7 },
-          cacheableResponse: { statuses: [200] },
-        },
+        handler: "NetworkOnly",
       },
       {
         urlPattern: /\/_next\/static\/media.+\.woff2$/i,
@@ -133,8 +136,13 @@ const withPWA = withPWAInit({
         urlPattern: ({ url: { pathname }, sameOrigin, request }: { url: { pathname: string }; sameOrigin: boolean; request: Request }) =>
           sameOrigin &&
           !pathname.startsWith("/api/") &&
+          !pathname.startsWith("/_next/") &&
+          !/\.(?:js|css|mjs|map)$/i.test(pathname) &&
           request.mode !== "navigate" &&
-          request.destination !== "document",
+          request.destination !== "document" &&
+          request.destination !== "script" &&
+          request.destination !== "style" &&
+          request.destination !== "worker",
         handler: "NetworkFirst",
         options: {
           cacheName: "pages",
