@@ -64,12 +64,19 @@ export function cancelArmedIosCapture() {
 /** Call after every live audio track is stopped. */
 export function endIosCapture() {
   captureCount = Math.max(0, captureCount - 1);
-  if (captureCount === 0) apply("playback");
+  apply("playback");
 }
 
-/** Loudspeaker playback. Safe to call on every play() if the mic is idle. */
+/**
+ * Loudspeaker. Safe during capture too: leaving play-and-record on after
+ * getUserMedia makes iPhone send every sound to the earpiece.
+ */
 export function preferIosPlayback() {
-  if (captureCount > 0) return;
+  apply("playback");
+}
+
+/** Same as preferIosPlayback — name used at overdub start. */
+export function routeIosToSpeaker() {
   apply("playback");
 }
 
@@ -88,7 +95,12 @@ export function holdIosCapture(stream: MediaStream) {
   } else {
     beginIosCapture();
   }
-  apply("play-and-record");
+  // Mic is open. Stay in playback so monitor / Web Audio use the speaker.
+  apply("playback");
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => apply("playback"), 0);
+    window.setTimeout(() => apply("playback"), 80);
+  }
 }
 
 export function releaseIosCapture(stream: MediaStream | null | undefined) {

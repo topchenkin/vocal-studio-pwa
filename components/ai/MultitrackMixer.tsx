@@ -32,8 +32,12 @@ import {
   mixAudioBuffersWithOffsets,
 } from "@/lib/wav-client";
 import { AUDIO_FILE_ACCEPT } from "@/lib/file-accept";
-import { getSingingMicStream } from "@/lib/mic-audio";
-import { preferIosPlayback, releaseIosCapture } from "@/lib/ios-audio-session";
+import { getSingingMicStream, isAppleWebKit } from "@/lib/mic-audio";
+import {
+  preferIosPlayback,
+  releaseIosCapture,
+  routeIosToSpeaker,
+} from "@/lib/ios-audio-session";
 import MediaAudio from "@/components/media/MediaAudio";
 
 const MAX_TRACKS = 10;
@@ -126,7 +130,18 @@ function formatTime(sec: number) {
   return `${m}:${String(r).padStart(2, "0")}.${String(ms).padStart(2, "0")}`;
 }
 
+function htmlMonitorPlayable(track: Track) {
+  if (clampPitch(track.pitchSemitones) !== 0) return false;
+  const type = track.blob.type || "";
+  if (/webm/i.test(type) && isAppleWebKit()) return false;
+  return Boolean(track.url);
+}
+
 function pickRecorderMime(): string {
+  if (isAppleWebKit()) {
+    if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+    if (MediaRecorder.isTypeSupported("audio/aac")) return "audio/aac";
+  }
   if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
     return "audio/webm;codecs=opus";
   }
@@ -460,8 +475,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const tracksRef = useRef<Track[]>([]);
   const stoppingRecRef = useRef(false);
   const resumeAfterSeekRef = useRef(false);
-  const monitorElRef = useRef<HTMLAudioElement | null>(null);
-  const monitorDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const htmlMonitorRef = useRef<HTMLAudioElement[]>([]);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -489,33 +503,50 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const selected = tracks.find((t) => t.id === selectedId) ?? null;
 
-  const stopMonitorSpeaker = () => {
-    const el = monitorElRef.current;
-    if (el) {
-      el.pause();
-      el.srcObject = null;
-    }
-    monitorDestRef.current = null;
-    endAudioKeepAlive();
+  const stopHtmlMonitor = () => {
+    htmlMonitorRef.current.forEach((el) => {
+      try {
+        el.pause();
+        el.removeAttribute("src");
+        el.load();
+        el.remove();
+      } catch {
+        /* ignore */
+      }
+    });
+    htmlMonitorRef.current = [];
   };
 
-  const ensureMonitorSpeaker = (ctx: AudioContext) => {
-    let el = monitorElRef.current;
-    if (!el) {
-      el = document.createElement("audio");
+  /** iPhone speaker: HTML media follows playback session; Web Audio often does not. */
+  const startHtmlMonitor = (list: Track[], fromSec: number) => {
+    stopHtmlMonitor();
+    const cue = Math.max(0, fromSec);
+    for (const track of list) {
+      if (!htmlMonitorPlayable(track)) continue;
+      const clipStart = Math.max(0, track.offsetSec);
+      const playDur = clipDuration(track);
+      if (cue >= clipStart + playDur - 0.0005) continue;
+      const el = new Audio();
+      el.preload = "auto";
       el.setAttribute("playsinline", "true");
       el.setAttribute("webkit-playsinline", "true");
-      el.autoplay = true;
       el.volume = 1;
-      el.style.display = "none";
-      document.body.appendChild(el);
-      monitorElRef.current = el;
+      el.muted = true;
+      el.src = track.url;
+      const startAt = track.trimStartSec + Math.max(0, cue - clipStart);
+      const seek = () => {
+        try {
+          const dur = Number.isFinite(el.duration) ? el.duration : startAt + playDur;
+          el.currentTime = Math.max(0, Math.min(startAt, Math.max(0, dur - 0.02)));
+        } catch {
+          /* ignore */
+        }
+        el.muted = false;
+      };
+      el.addEventListener("loadedmetadata", seek, { once: true });
+      void el.play().then(seek).catch(() => undefined);
+      htmlMonitorRef.current.push(el);
     }
-    const dest = ctx.createMediaStreamDestination();
-    monitorDestRef.current = dest;
-    el.srcObject = dest.stream;
-    void el.play().catch(() => undefined);
-    return dest;
   };
 
   const stopPlayback = (opts?: { keepPlayhead?: boolean }) => {
@@ -523,13 +554,20 @@ export default function MultitrackMixer({ locked = false }: Props) {
     playRafRef.current = null;
     sourcesRef.current.forEach((source) => {
       try {
+        source.onended = null;
         source.stop();
+      } catch {
+        /* ignore */
+      }
+      try {
+        source.disconnect();
       } catch {
         /* ignore */
       }
     });
     sourcesRef.current = [];
-    stopMonitorSpeaker();
+    stopHtmlMonitor();
+    endAudioKeepAlive();
     setPlaying(false);
     if (!opts?.keepPlayhead) {
       setPlayheadSec(0);
@@ -639,9 +677,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
       const source = ctx.createBufferSource();
       source.buffer = track.buffer;
+      source.loop = false;
       const pitch = clampPitch(track.pitchSemitones);
       if (pitch !== 0) source.detune.value = pitch * 100;
       source.connect(dest);
+      source.onended = () => {
+        try {
+          source.disconnect();
+        } catch {
+          /* ignore */
+        }
+      };
 
       if (cue <= clipStart) {
         source.start(
@@ -745,6 +791,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
     try {
       const ctx = await ensureAudioCtx();
       const stream = await ensureMic();
+      if (monitorTracks.length > 0) {
+        stream.getAudioTracks().forEach((track) => {
+          void track
+            .applyConstraints({
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: false,
+            })
+            .catch(() => undefined);
+        });
+      }
       // Per-take chunk list (closure) — never share with the next recording
       const chunks: Blob[] = [];
       chunksRef.current = chunks;
@@ -772,11 +829,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
         void (async () => {
           if (take !== takeIdRef.current) return;
           stoppingRecRef.current = false;
-          // Stop monitor after capture fully finalized — avoids glitches mid-stop
-          stopPlayback();
+          stopPlayback({ keepPlayhead: true });
           setRecordingId(null);
           recorderRef.current = null;
           releaseMicFully();
+          preferIosPlayback();
 
           if (chunks.length === 0) {
             setError("Пустая запись — микрофон не отдал данные. Попробуйте снова.");
@@ -854,21 +911,17 @@ export default function MultitrackMixer({ locked = false }: Props) {
         })();
       };
 
-      // Start monitor slightly ahead so first buffer is scheduled cleanly.
-      // Route through HTML audio so iPhone does not send previous lanes
-      // to the earpiece while the mic is in play-and-record.
-      beginAudioKeepAlive();
-      const speaker = ensureMonitorSpeaker(ctx);
-      const t0 = ctx.currentTime + 0.03;
-      const monitorDuration = playLanes(
-        ctx,
-        monitorTracks,
-        t0,
-        cueSec,
-        speaker
-      );
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
+      routeIosToSpeaker();
+      if (ctx.state === "suspended") await ctx.resume();
+      beginAudioKeepAlive();
+      startHtmlMonitor(monitorTracks, cueSec);
+      const webAudioTracks = monitorTracks.filter(
+        (track) => !htmlMonitorPlayable(track)
+      );
+      const t0 = ctx.currentTime + 0.08;
+      const monitorDuration = playLanes(ctx, webAudioTracks, t0, cueSec);
       setRecordingId(id);
       startPlayhead(ctx, Math.max(monitorDuration, cueSec + 3600), t0, cueSec);
     } catch {
@@ -883,8 +936,10 @@ export default function MultitrackMixer({ locked = false }: Props) {
     if (recorder && recorder.state === "recording") {
       if (stoppingRecRef.current) return;
       stoppingRecRef.current = true;
+      // Kill monitor first. Leaving Web Audio running while MediaRecorder
+      // flushes is what stuck a looping quantum on iPhone.
+      stopPlayback({ keepPlayhead: true });
       try {
-        // Flush final bytes before stop — prevents truncated takes
         if (typeof recorder.requestData === "function") {
           recorder.requestData();
         }
@@ -896,10 +951,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
       } catch {
         stoppingRecRef.current = false;
         setRecordingId(null);
+        releaseMicFully();
+        preferIosPlayback();
       }
       return;
     }
     stopPlayback();
+    preferIosPlayback();
   };
 
   const removeTrack = (id: string) => {
