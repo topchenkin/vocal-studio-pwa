@@ -70,6 +70,9 @@ export function endIosCapture() {
 /**
  * Loudspeaker. Safe during capture too: leaving play-and-record on after
  * getUserMedia makes iPhone send every sound to the earpiece.
+ * This does NOT remount an existing AudioContext — a context created while
+ * the session was play-and-record stays on the receiver until it is closed
+ * and a new one is opened in playback.
  */
 export function preferIosPlayback() {
   apply("playback");
@@ -95,12 +98,8 @@ export function holdIosCapture(stream: MediaStream) {
   } else {
     beginIosCapture();
   }
-  // Mic is open. Stay in playback so monitor / Web Audio use the speaker.
+  // Mic is open. Leave play-and-record and use the loudspeaker.
   apply("playback");
-  if (typeof window !== "undefined") {
-    window.setTimeout(() => apply("playback"), 0);
-    window.setTimeout(() => apply("playback"), 80);
-  }
 }
 
 export function releaseIosCapture(stream: MediaStream | null | undefined) {

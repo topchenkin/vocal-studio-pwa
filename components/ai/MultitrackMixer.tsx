@@ -32,7 +32,7 @@ import {
   mixAudioBuffersWithOffsets,
 } from "@/lib/wav-client";
 import { AUDIO_FILE_ACCEPT } from "@/lib/file-accept";
-import { getSingingMicStream, isAppleWebKit } from "@/lib/mic-audio";
+import { getStudioMicStream, isAppleWebKit } from "@/lib/mic-audio";
 import {
   preferIosPlayback,
   releaseIosCapture,
@@ -130,11 +130,24 @@ function formatTime(sec: number) {
   return `${m}:${String(r).padStart(2, "0")}.${String(ms).padStart(2, "0")}`;
 }
 
+function createLiveAudioContext(): AudioContext {
+  const Ctor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext })
+      .webkitAudioContext;
+  return new Ctor({ latencyHint: "interactive" });
+}
+
+/** Unpitched clips that Safari can play as HTML media (speaker-routed). */
 function htmlMonitorPlayable(track: Track) {
   if (clampPitch(track.pitchSemitones) !== 0) return false;
   const type = track.blob.type || "";
   if (/webm/i.test(type) && isAppleWebKit()) return false;
   return Boolean(track.url);
+}
+
+function htmlElAudible(el: HTMLAudioElement) {
+  return !el.paused && !el.muted && el.volume > 0 && el.readyState >= 2;
 }
 
 function pickRecorderMime(): string {
@@ -475,7 +488,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const tracksRef = useRef<Track[]>([]);
   const stoppingRecRef = useRef(false);
   const resumeAfterSeekRef = useRef(false);
-  const htmlMonitorRef = useRef<HTMLAudioElement[]>([]);
+  const htmlMonitorRef = useRef<
+    { id: string; el: HTMLAudioElement; playOk: Promise<boolean> }[]
+  >([]);
+  const htmlMonitorHostRef = useRef<HTMLDivElement>(null);
+  const ctxTaintedRef = useRef(false);
+  const monitorIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -486,6 +504,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   useEffect(() => {
     playheadSecRef.current = playheadSec;
   }, [playheadSec]);
+  useEffect(() => {
+    monitorIdsRef.current = monitorIds;
+  }, [monitorIds]);
 
   const monitorTracks = useMemo(
     () => tracks.filter((track) => monitorIds.includes(track.id)),
@@ -504,7 +525,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const selected = tracks.find((t) => t.id === selectedId) ?? null;
 
   const stopHtmlMonitor = () => {
-    htmlMonitorRef.current.forEach((el) => {
+    htmlMonitorRef.current.forEach(({ el }) => {
       try {
         el.pause();
         el.removeAttribute("src");
@@ -517,21 +538,28 @@ export default function MultitrackMixer({ locked = false }: Props) {
     htmlMonitorRef.current = [];
   };
 
-  /** iPhone speaker: HTML media follows playback session; Web Audio often does not. */
+  /**
+   * In-DOM HTML media (not `new Audio()`). Must be started in a user gesture
+   * *before* getUserMedia — after the mic opens, iOS often drops play().
+   * Never mute-then-seek: Safari leaves the element silent.
+   */
   const startHtmlMonitor = (list: Track[], fromSec: number) => {
     stopHtmlMonitor();
+    const host = htmlMonitorHostRef.current;
+    if (!host) return;
     const cue = Math.max(0, fromSec);
     for (const track of list) {
       if (!htmlMonitorPlayable(track)) continue;
       const clipStart = Math.max(0, track.offsetSec);
       const playDur = clipDuration(track);
       if (cue >= clipStart + playDur - 0.0005) continue;
-      const el = new Audio();
+      const el = document.createElement("audio");
       el.preload = "auto";
       el.setAttribute("playsinline", "true");
       el.setAttribute("webkit-playsinline", "true");
+      el.controls = false;
       el.volume = 1;
-      el.muted = true;
+      el.muted = false;
       el.src = track.url;
       const startAt = track.trimStartSec + Math.max(0, cue - clipStart);
       const seek = () => {
@@ -541,13 +569,50 @@ export default function MultitrackMixer({ locked = false }: Props) {
         } catch {
           /* ignore */
         }
-        el.muted = false;
       };
       el.addEventListener("loadedmetadata", seek, { once: true });
-      void el.play().then(seek).catch(() => undefined);
-      htmlMonitorRef.current.push(el);
+      seek();
+      host.appendChild(el);
+      const playOk = el
+        .play()
+        .then(() => true)
+        .catch(() => false);
+      htmlMonitorRef.current.push({ id: track.id, el, playOk });
     }
   };
+
+  const reviveHtmlMonitor = async () => {
+    preferIosPlayback();
+    await Promise.all(
+      htmlMonitorRef.current.map(async (item) => {
+        try {
+          if (item.el.paused) {
+            item.playOk = item.el
+              .play()
+              .then(() => true)
+              .catch(() => false);
+          }
+          await item.playOk;
+        } catch {
+          /* ignore */
+        }
+      })
+    );
+  };
+
+  const htmlOwnedTrackIds = async () => {
+    const owned = new Set<string>();
+    for (const item of htmlMonitorRef.current) {
+      const ok = await item.playOk;
+      if (ok && htmlElAudible(item.el)) owned.add(item.id);
+    }
+    return owned;
+  };
+
+  const monitoredTracks = () =>
+    tracksRef.current.filter((track) =>
+      monitorIdsRef.current.includes(track.id)
+    );
 
   const stopPlayback = (opts?: { keepPlayhead?: boolean }) => {
     if (playRafRef.current) cancelAnimationFrame(playRafRef.current);
@@ -607,7 +672,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const ensureAudioCtx = async () => {
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      audioCtxRef.current = new AudioContext({ latencyHint: "interactive" });
+      audioCtxRef.current = createLiveAudioContext();
     }
     if (audioCtxRef.current.state === "suspended") {
       await audioCtxRef.current.resume();
@@ -615,12 +680,96 @@ export default function MultitrackMixer({ locked = false }: Props) {
     return audioCtxRef.current;
   };
 
+  const redecodeTracks = async (ctx: AudioContext) => {
+    const rebuilt: Track[] = [];
+    for (const track of tracksRef.current) {
+      try {
+        const buffer = await decodeWithCtx(ctx, track.blob);
+        const duration = buffer.duration;
+        const trimStart = Math.min(
+          track.trimStartSec,
+          Math.max(0, duration - MIN_CLIP_SEC)
+        );
+        const trimEnd = Math.min(
+          Math.max(track.trimEndSec, trimStart + MIN_CLIP_SEC),
+          duration
+        );
+        rebuilt.push({
+          ...track,
+          buffer,
+          sourceDurationSec: duration,
+          trimStartSec: trimStart,
+          trimEndSec: trimEnd,
+          peaks: buildPeaks(buffer),
+        });
+      } catch {
+        rebuilt.push(track);
+      }
+    }
+    tracksRef.current = rebuilt;
+    setTracks(rebuilt);
+  };
+
+  /**
+   * An AudioContext created or used while Safari is in play-and-record stays
+   * glued to the earpiece. Setting audioSession to "playback" does not move
+   * it. Close + new context + re-decode blobs after playback is armed.
+   * If the new context cannot resume (gesture gone after getUserMedia), keep
+   * the old one so monitor is never absolute silence.
+   */
+  const unlockSpeakerContext = async () => {
+    preferIosPlayback();
+    routeIosToSpeaker();
+    const prev = audioCtxRef.current;
+    const tainted = ctxTaintedRef.current;
+    if (prev && prev.state !== "closed" && !tainted) {
+      if (prev.state === "suspended") await prev.resume();
+      return prev;
+    }
+
+    const next = createLiveAudioContext();
+    try {
+      await next.resume();
+    } catch {
+      /* gesture may be gone after getUserMedia */
+    }
+
+    if (next.state !== "running" && prev && prev.state !== "closed") {
+      try {
+        await next.close();
+      } catch {
+        /* ignore */
+      }
+      if (prev.state === "suspended") {
+        await prev.resume().catch(() => undefined);
+      }
+      return prev;
+    }
+
+    if (prev && prev.state !== "closed") {
+      try {
+        await prev.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    audioCtxRef.current = next;
+    ctxTaintedRef.current = false;
+    await redecodeTracks(next);
+    if (next.state === "suspended") {
+      await next.resume().catch(() => undefined);
+    }
+    return next;
+  };
+
   const ensureMic = async () => {
     const existing = streamRef.current;
     if (existing?.getAudioTracks().some((t) => t.readyState === "live")) {
+      ctxTaintedRef.current = true;
       return existing;
     }
-    const stream = await getSingingMicStream();
+    const stream = await getStudioMicStream();
+    ctxTaintedRef.current = true;
     streamRef.current = stream;
     return stream;
   };
@@ -676,7 +825,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
       if (cue >= clipEnd - 0.0005) continue;
 
       const source = ctx.createBufferSource();
-      source.buffer = track.buffer;
+      try {
+        source.buffer = track.buffer;
+      } catch {
+        continue;
+      }
       source.loop = false;
       const pitch = clampPitch(track.pitchSemitones);
       if (pitch !== 0) source.detune.value = pitch * 100;
@@ -747,10 +900,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
     preferIosPlayback();
     setError("");
     try {
-      const ctx = await ensureAudioCtx();
+      // Fresh context in this click — no getUserMedia, so resume() binds to speaker.
+      const ctx = await unlockSpeakerContext();
       beginAudioKeepAlive();
+      const monitors = monitoredTracks();
       const t0 = ctx.currentTime + 0.02;
-      const duration = playLanes(ctx, monitorTracks, t0, fromSec);
+      const duration = playLanes(ctx, monitors, t0, fromSec);
       startPlayhead(ctx, duration, t0, fromSec);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось воспроизвести");
@@ -785,13 +940,22 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setError("");
     const cueSec = playheadSecRef.current;
     stopPlayback({ keepPlayhead: true });
+    preferIosPlayback();
 
     const take = ++takeIdRef.current;
+    const monitorsAtStart = monitoredTracks();
+    // Warm a live context in this gesture so unlock() can fall back to it
+    // if the post-mic context cannot resume.
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      audioCtxRef.current = createLiveAudioContext();
+    }
+    void audioCtxRef.current.resume();
+    // Gesture is still hot — start in-DOM HTML now, before any await.
+    startHtmlMonitor(monitorsAtStart, cueSec);
 
     try {
-      const ctx = await ensureAudioCtx();
       const stream = await ensureMic();
-      if (monitorTracks.length > 0) {
+      if (monitorsAtStart.length > 0) {
         stream.getAudioTracks().forEach((track) => {
           void track
             .applyConstraints({
@@ -848,10 +1012,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
             return;
           }
 
+          const liveCtx =
+            audioCtxRef.current && audioCtxRef.current.state !== "closed"
+              ? audioCtxRef.current
+              : await ensureAudioCtx();
+
           try {
-            // Decode on the SAME AudioContext — avoids device reset / audio jumps
-            // that happen when opening a throwaway AudioContext per take.
-            const buffer = await decodeWithCtx(ctx, blob);
+            const buffer = await decodeWithCtx(liveCtx, blob);
             const url = URL.createObjectURL(blob);
             const peaks = buildPeaks(buffer);
             setTracks((current) => {
@@ -877,7 +1044,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
               return next;
             });
           } catch (err) {
-            // Fallback decode path
             try {
               const buffer = await decodeBlobToAudioBuffer(blob);
               const url = URL.createObjectURL(blob);
@@ -913,17 +1079,54 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
-      routeIosToSpeaker();
-      if (ctx.state === "suspended") await ctx.resume();
-      beginAudioKeepAlive();
-      startHtmlMonitor(monitorTracks, cueSec);
-      const webAudioTracks = monitorTracks.filter(
-        (track) => !htmlMonitorPlayable(track)
-      );
-      const t0 = ctx.currentTime + 0.08;
-      const monitorDuration = playLanes(ctx, webAudioTracks, t0, cueSec);
       setRecordingId(id);
-      startPlayhead(ctx, Math.max(monitorDuration, cueSec + 3600), t0, cueSec);
+      routeIosToSpeaker();
+      beginAudioKeepAlive();
+      try {
+        await reviveHtmlMonitor();
+        const graphCtx = await unlockSpeakerContext();
+        if (graphCtx.state === "suspended") {
+          await graphCtx.resume().catch(() => undefined);
+        }
+
+        const monitors = monitoredTracks();
+        const speakerFresh =
+          !ctxTaintedRef.current && graphCtx.state === "running";
+        let webList = monitors;
+        if (speakerFresh) {
+          stopHtmlMonitor();
+        } else {
+          const owned = await htmlOwnedTrackIds();
+          webList =
+            owned.size > 0
+              ? monitors.filter((track) => !owned.has(track.id))
+              : monitors;
+          if (owned.size === 0) stopHtmlMonitor();
+        }
+
+        const t0 = graphCtx.currentTime + 0.08;
+        const monitorDuration = playLanes(graphCtx, webList, t0, cueSec);
+        const htmlEnd = Math.max(
+          0,
+          ...monitors.map((track) => track.offsetSec + clipDuration(track))
+        );
+        startPlayhead(
+          graphCtx,
+          Math.max(monitorDuration, htmlEnd, cueSec + 3600),
+          t0,
+          cueSec
+        );
+      } catch {
+        const fallback = audioCtxRef.current;
+        if (fallback && fallback.state !== "closed") {
+          startPlayhead(
+            fallback,
+            cueSec + 3600,
+            fallback.currentTime,
+            cueSec
+          );
+        }
+      }
     } catch {
       setError("Не удалось получить доступ к микрофону");
       releaseMicFully();
@@ -1129,8 +1332,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
             слушать или писать (punch-in).
           </li>
           <li>
-            «Слушать» воспроизводит с курсора. «Запись с прослушкой» пишет
-            новый слой, пока в наушниках играют остальные дорожки.
+            «Слушать» воспроизводит с курсора через динамик. «Запись с
+            прослушкой» пишет новый слой, пока играют остальные дорожки.
           </li>
           <li>
             Клип на дорожке: потяните середину — сдвиг по времени, края —
@@ -1145,6 +1348,12 @@ export default function MultitrackMixer({ locked = false }: Props) {
           </li>
         </ol>
       </div>
+
+      <div
+        ref={htmlMonitorHostRef}
+        aria-hidden
+        className="pointer-events-none fixed left-0 top-0 h-px w-px overflow-hidden opacity-0"
+      />
 
       <input
         ref={fileInputRef}
@@ -1161,6 +1370,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
             size="lg"
             disabled={tracks.length >= MAX_TRACKS || importing}
             onPointerDown={() => {
+              preferIosPlayback();
               void ensureAudioCtx();
             }}
             onClick={() => void startOverdub()}
@@ -1193,6 +1403,10 @@ export default function MultitrackMixer({ locked = false }: Props) {
           size="lg"
           variant="secondary"
           disabled={monitorTracks.length === 0 || Boolean(recordingId)}
+          onPointerDown={() => {
+            preferIosPlayback();
+            void ensureAudioCtx();
+          }}
           onClick={() =>
             playing && !recordingId
               ? stopPlayback({ keepPlayhead: true })

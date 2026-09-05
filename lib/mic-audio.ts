@@ -101,6 +101,31 @@ export async function getSingingMicStream(): Promise<MediaStream> {
 }
 
 /**
+ * Mixer / overdub mic. One getUserMedia — the singing path's unlock-then-
+ * re-open cycle flips Safari between play-and-record and playback and kills
+ * monitor audio. Echo cancellation is applied by the caller when speakers
+ * are playing previous takes.
+ */
+export async function getStudioMicStream(): Promise<MediaStream> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Микрофон недоступен");
+  }
+
+  armIosCapture();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
+    });
+    holdIosCapture(stream);
+    return stream;
+  } catch (error) {
+    cancelArmedIosCapture();
+    throw error;
+  }
+}
+
+/**
  * Safari will not fill AnalyserNode buffers unless the node is in a graph
  * that reaches `destination`. Mute so the student never hears themselves.
  */
