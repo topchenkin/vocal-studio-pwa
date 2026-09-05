@@ -302,6 +302,72 @@ async function grantDueLessonXp() {
   }
 }
 
+async function autoCompleteStartedLessons() {
+  const response = await sb("/rest/v1/rpc/auto_complete_started_lessons", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "auto-complete lessons failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("auto-completed lessons", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
+async function sendEmailFallbacks() {
+  const resendKey = process.env.RESEND_API_KEY || "";
+  const emailFrom = process.env.EMAIL_FROM || "";
+  if (!resendKey || !emailFrom) return;
+
+  const due = await sb(
+    `/rest/v1/notifications?is_read=eq.false&email_sent_at=is.null&recipient_id=not.is.null&email_fallback_at=lte.${encodeURIComponent(new Date().toISOString())}&select=id,recipient_id,title,message,action_url&order=email_fallback_at.asc&limit=20`
+  );
+  if (!due.ok) return;
+  const rows = await due.json();
+  const list = Array.isArray(rows) ? rows : [];
+  for (const row of list) {
+    const profileRes = await sb(
+      `/rest/v1/profiles?id=eq.${encodeURIComponent(row.recipient_id)}&select=email,full_name&limit=1`
+    );
+    const profiles = profileRes.ok ? await profileRes.json() : [];
+    const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+    const email = String(profile?.email || "").trim();
+    if (!email) continue;
+    try {
+      const sent = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${resendKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          from: emailFrom,
+          to: [email],
+          subject: row.title || "Unique Vocal Studio",
+          text: `${row.message || ""}\n\n${APP_ORIGIN}${row.action_url || ""}`,
+        }),
+      });
+      if (!sent.ok) continue;
+      await sb(`/rest/v1/notifications?id=eq.${encodeURIComponent(row.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ email_sent_at: new Date().toISOString() }),
+      });
+    } catch (error) {
+      console.error("email fallback failed", error?.message || error);
+    }
+  }
+}
+
 async function notifyUnpaidEndedLessons() {
   const response = await sb("/rest/v1/rpc/notify_unpaid_ended_lessons", {
     method: "POST",
@@ -335,6 +401,8 @@ async function tick() {
       await remindSubscriptionExpiring();
       await grantDueLessonXp();
       await notifyUnpaidEndedLessons();
+      await autoCompleteStartedLessons();
+      await sendEmailFallbacks();
     }
   } catch (error) {
     console.error("push poll failed", error?.message || error);

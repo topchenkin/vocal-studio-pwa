@@ -249,31 +249,42 @@ function raceFirst<T>(left: Promise<T>, right: Promise<T>): Promise<T> {
   });
 }
 
+function preferredRoute(): "direct" | "proxy" | null {
+  const chosen = getChosenRoute();
+  // Direct supabase.co often hangs TLS in RU, especially on iOS. Never
+  // start a race against it while the proxy can answer.
+  if (isIosDevice() && chosen === "direct") return null;
+  return chosen;
+}
+
 async function chooseRoute(): Promise<"direct" | "proxy"> {
   if (supabaseOriginsMatch() || !SUPABASE_PROJECT_URL) {
     markProxyReachable();
     return "proxy";
   }
-  const existing = getChosenRoute();
+  const existing = preferredRoute();
   if (existing) return existing;
   if (choosePromise) return choosePromise;
-  choosePromise = raceFirst(
-    probeOrigin(SUPABASE_PROXY_URL).then((ok) => {
-      if (!ok) throw new Error("proxy unreachable");
+  choosePromise = (async () => {
+    const proxyOk = await probeOrigin(SUPABASE_PROXY_URL);
+    if (proxyOk) {
+      rememberRoute("proxy");
       return "proxy" as const;
-    }),
-    probeOrigin(SUPABASE_PROJECT_URL).then((ok) => {
-      if (!ok) throw new Error("direct unreachable");
+    }
+    if (isIosDevice()) {
+      rememberRoute("proxy");
+      return "proxy" as const;
+    }
+    const directOk = await probeOrigin(SUPABASE_PROJECT_URL);
+    if (directOk) {
+      rememberRoute("direct");
       return "direct" as const;
-    })
-  )
-    .then((route) => {
-      rememberRoute(route);
-      return route;
-    })
-    .finally(() => {
-      choosePromise = null;
-    });
+    }
+    rememberRoute("proxy");
+    return "proxy" as const;
+  })().finally(() => {
+    choosePromise = null;
+  });
   return choosePromise;
 }
 
@@ -440,7 +451,7 @@ async function fetchWithFallback(
     throw callerSignal?.reason ?? new DOMException("Aborted", "AbortError");
   }
 
-  if (isIdempotent(method) && !getChosenRoute()) {
+  if (isIdempotent(method) && !preferredRoute() && !isIosDevice()) {
     const proxyAbort = new AbortController();
     const directAbort = new AbortController();
     bindCallerAbort(proxyAbort, callerSignal);
@@ -481,7 +492,7 @@ async function fetchWithFallback(
   }
 
   const dest =
-    getChosenRoute() ??
+    preferredRoute() ??
     (await chooseRoute().catch(() => "proxy" as const));
   const firstUrl = dest === "direct" ? directUrl : url;
   const secondUrl = dest === "direct" ? url : directUrl;

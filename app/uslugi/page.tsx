@@ -15,8 +15,8 @@ export const metadata: Metadata = {
 
 const INDIVIDUAL = [
   { title: "Standard", price: APP_TIER_PRICES.standard, note: "1 месяц · ИИ-анализатор, чат, часть упражнений" },
-  { title: "Premium", price: APP_TIER_PRICES.premium, note: "1 месяц · отзывы преподавателя, ИИ-минусовки, распевки" },
-  { title: "VIP", price: APP_TIER_PRICES.vip, note: "1 месяц · студийный трек, безлимитный ИИ, всё из Premium" },
+  { title: "Premium", price: APP_TIER_PRICES.premium, note: "1 месяц · больше упражнений, обработка голоса и аккорды" },
+  { title: "VIP", price: APP_TIER_PRICES.vip, note: "1 месяц · студийный трек, всё из Premium" },
 ];
 
 const DUO = [

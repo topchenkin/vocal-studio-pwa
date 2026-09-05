@@ -186,9 +186,9 @@ export default function PitchAnalyzer({
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
             Инструмент доступен по тарифу, заданному администратором.
           </p>
-          <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
+          <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
-              К тарифам
+              Купить премиум
             </Button>
           </Link>
         </div>

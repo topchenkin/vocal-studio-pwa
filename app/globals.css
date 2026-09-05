@@ -76,3 +76,12 @@ html.light {
     @apply bg-gradient-to-r from-studio-accent-light via-studio-accent to-studio-gold bg-clip-text text-transparent;
   }
 }
+
+html[data-uvs-keyboard] [data-student-bottom-nav] {
+  display: none !important;
+}
+
+html[data-uvs-keyboard] [data-dashboard-shell="compact"][data-dashboard-inset] {
+  height: var(--uvs-vv-height, 100dvh) !important;
+  padding-bottom: 0 !important;
+}

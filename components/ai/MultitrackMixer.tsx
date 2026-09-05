@@ -23,7 +23,9 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import Link from "next/link";
 import Button from "@/components/ui/Button";
+import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import {
   decodeBlobToAudioBuffer,
@@ -458,6 +460,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
   const tracksRef = useRef<Track[]>([]);
   const stoppingRecRef = useRef(false);
   const resumeAfterSeekRef = useRef(false);
+  const monitorElRef = useRef<HTMLAudioElement | null>(null);
+  const monitorDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   useEffect(() => {
     tracksRef.current = tracks;
@@ -485,6 +489,35 @@ export default function MultitrackMixer({ locked = false }: Props) {
 
   const selected = tracks.find((t) => t.id === selectedId) ?? null;
 
+  const stopMonitorSpeaker = () => {
+    const el = monitorElRef.current;
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+    }
+    monitorDestRef.current = null;
+    endAudioKeepAlive();
+  };
+
+  const ensureMonitorSpeaker = (ctx: AudioContext) => {
+    let el = monitorElRef.current;
+    if (!el) {
+      el = document.createElement("audio");
+      el.setAttribute("playsinline", "true");
+      el.setAttribute("webkit-playsinline", "true");
+      el.autoplay = true;
+      el.volume = 1;
+      el.style.display = "none";
+      document.body.appendChild(el);
+      monitorElRef.current = el;
+    }
+    const dest = ctx.createMediaStreamDestination();
+    monitorDestRef.current = dest;
+    el.srcObject = dest.stream;
+    void el.play().catch(() => undefined);
+    return dest;
+  };
+
   const stopPlayback = (opts?: { keepPlayhead?: boolean }) => {
     if (playRafRef.current) cancelAnimationFrame(playRafRef.current);
     playRafRef.current = null;
@@ -496,6 +529,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       }
     });
     sourcesRef.current = [];
+    stopMonitorSpeaker();
     setPlaying(false);
     if (!opts?.keepPlayhead) {
       setPlayheadSec(0);
@@ -585,7 +619,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
     ctx: AudioContext,
     list: Track[],
     when: number,
-    fromSec = 0
+    fromSec = 0,
+    output?: AudioNode
   ) => {
     const cue = Math.max(0, fromSec);
     if (list.length === 0) return cue + 0.1;
@@ -594,6 +629,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       cue + 0.1,
       0.1
     );
+    const dest = output ?? ctx.destination;
     const sources: AudioBufferSourceNode[] = [];
     for (const track of list) {
       const clipStart = Math.max(0, track.offsetSec);
@@ -605,7 +641,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       source.buffer = track.buffer;
       const pitch = clampPitch(track.pitchSemitones);
       if (pitch !== 0) source.detune.value = pitch * 100;
-      source.connect(ctx.destination);
+      source.connect(dest);
 
       if (cue <= clipStart) {
         source.start(
@@ -666,6 +702,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setError("");
     try {
       const ctx = await ensureAudioCtx();
+      beginAudioKeepAlive();
       const t0 = ctx.currentTime + 0.02;
       const duration = playLanes(ctx, monitorTracks, t0, fromSec);
       startPlayhead(ctx, duration, t0, fromSec);
@@ -817,9 +854,19 @@ export default function MultitrackMixer({ locked = false }: Props) {
         })();
       };
 
-      // Start monitor slightly ahead so first buffer is scheduled cleanly
+      // Start monitor slightly ahead so first buffer is scheduled cleanly.
+      // Route through HTML audio so iPhone does not send previous lanes
+      // to the earpiece while the mic is in play-and-record.
+      beginAudioKeepAlive();
+      const speaker = ensureMonitorSpeaker(ctx);
       const t0 = ctx.currentTime + 0.03;
-      const monitorDuration = playLanes(ctx, monitorTracks, t0, cueSec);
+      const monitorDuration = playLanes(
+        ctx,
+        monitorTracks,
+        t0,
+        cueSec,
+        speaker
+      );
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
       setRecordingId(id);
@@ -979,9 +1026,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
         </h2>
         <p className="mt-2 text-sm text-studio-muted">
           Сведите голос с минусовкой как в студии: несколько дорожек, запись
-          поверх трека и готовый микс в одно нажатие. Откройте доступ — и
-          первый дубль можно записать уже сегодня.
+          поверх трека и готовый микс в одно нажатие. Доступно с Premium.
         </p>
+        <Link href="/dashboard/student/subscription" className="mt-5 inline-flex">
+          <Button>Купить премиум</Button>
+        </Link>
       </section>
     );
   }

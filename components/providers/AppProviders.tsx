@@ -8,12 +8,15 @@ import IosAudioSession from "@/components/pwa/IosAudioSession";
 import PullToRefresh from "@/components/pwa/PullToRefresh";
 import RegisterServiceWorker from "@/components/pwa/RegisterServiceWorker";
 import RouteStatusChip from "@/components/pwa/RouteStatusChip";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 
 export default function AppProviders({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  useKeyboardInset();
+
   useEffect(() => {
     document.documentElement.setAttribute("data-uvs-ready", "1");
     document.documentElement.removeAttribute("data-uvs-busting");

@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   Fish,
+  History,
   List,
   Snowflake,
 } from "lucide-react";
@@ -21,20 +22,13 @@ import SbpPaymentSheet, {
 import MonthCalendar, { localDateKey } from "@/components/calendar/MonthCalendar";
 import { useAuth } from "@/context/AuthContext";
 import { realtimeTopic } from "@/lib/client-instance";
+import {
+  studioDateKey,
+  studioDateTimeParts,
+  studioWallToUtcIso,
+} from "@/lib/studio-tz";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
-
-const STUDIO_TZ = "Asia/Yekaterinburg";
-
-function yekatDateKey(value: Date | string) {
-  const date = value instanceof Date ? value : new Date(value);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: STUDIO_TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
 
 function formatRub(amount: number) {
   return `${amount.toLocaleString("ru-RU")} ₽`;
@@ -51,6 +45,7 @@ export default function UpcomingLessons() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [note, setNote] = useState("");
+  const [scope, setScope] = useState<"upcoming" | "history">("upcoming");
   const [view, setView] = useState<"list" | "calendar">("list");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
@@ -64,27 +59,20 @@ export default function UpcomingLessons() {
   const loadLessons = useCallback(async () => {
     if (!user) return;
 
-    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const since = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
     const { data, error: queryError } = await supabase
       .from("lessons")
       .select("*")
       .eq("student_id", user.id)
-      .eq("status", "scheduled")
       .gte("datetime", since)
       .order("datetime", { ascending: true })
-      .limit(20);
+      .limit(80);
 
     if (queryError) {
       setError("Не удалось загрузить расписание");
       console.error("Unable to load lessons:", queryError.message);
     } else {
-      const now = Date.now();
-      const rows = (data ?? []).filter((lesson) => {
-        const at = new Date(lesson.datetime).getTime();
-        if (at >= now) return true;
-        return payType === "one_time" && !lesson.paid_at;
-      });
-      setLessons(rows);
+      setLessons(data ?? []);
       setError("");
     }
     setLoading(false);
@@ -143,32 +131,54 @@ export default function UpcomingLessons() {
     };
   }, [loadLessons, refreshProfile, user]);
 
-  const upcomingFuture = useMemo(
-    () => lessons.filter((lesson) => new Date(lesson.datetime).getTime() >= Date.now()),
+  const upcomingLessons = useMemo(() => {
+    const now = Date.now();
+    return lessons.filter((lesson) => {
+      if (lesson.status !== "scheduled") return false;
+      const at = new Date(lesson.datetime).getTime();
+      if (at >= now) return true;
+      return payType === "one_time" && !lesson.paid_at;
+    });
+  }, [lessons, payType]);
+  const historyLessons = useMemo(
+    () =>
+      lessons
+        .filter(
+          (lesson) =>
+            lesson.status === "completed" || lesson.status === "cancelled"
+        )
+        .slice()
+        .reverse(),
     [lessons]
   );
-  const firstUpcomingId = upcomingFuture[0]?.id ?? lessons[0]?.id ?? null;
-  const todayKey = yekatDateKey(new Date());
+  const scopedLessons =
+    scope === "history" ? historyLessons : upcomingLessons;
+  const upcomingFuture = useMemo(
+    () =>
+      upcomingLessons.filter(
+        (lesson) => new Date(lesson.datetime).getTime() >= Date.now()
+      ),
+    [upcomingLessons]
+  );
+  const firstUpcomingId = upcomingFuture[0]?.id ?? upcomingLessons[0]?.id ?? null;
+  const todayKey = studioDateKey(new Date());
   const nearestUnpaidOneTime = useMemo(
     () =>
       payType === "one_time"
-        ? lessons.find((lesson) => !lesson.paid_at) ?? null
+        ? upcomingLessons.find((lesson) => !lesson.paid_at) ?? null
         : null,
-    [lessons, payType]
+    [upcomingLessons, payType]
   );
   const highlightUnpaidToday =
     Boolean(nearestUnpaidOneTime) &&
-    yekatDateKey(nearestUnpaidOneTime!.datetime) === todayKey;
+    studioDateKey(nearestUnpaidOneTime!.datetime) === todayKey;
 
   const openReschedule = (lesson: Lesson) => {
-    const current = new Date(lesson.datetime);
+    const parts = studioDateTimeParts(lesson.datetime);
     setRescheduleLesson(lesson);
-    setPreferredDate(current.toISOString().slice(0, 10));
+    setPreferredDate(studioDateKey(lesson.datetime));
     setPreferredTime(
-      current.toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+      `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`
     );
     setNote("");
   };
@@ -180,9 +190,9 @@ export default function UpcomingLessons() {
 
     let preferredDatetime: string | null = null;
     if (preferredDate && preferredTime) {
-      const preferred = new Date(`${preferredDate}T${preferredTime}`);
-      if (!Number.isNaN(preferred.getTime())) {
-        preferredDatetime = preferred.toISOString();
+      const preferred = studioWallToUtcIso(preferredDate, preferredTime);
+      if (!Number.isNaN(new Date(preferred).getTime())) {
+        preferredDatetime = preferred;
       }
     }
     const studentNote = note.trim().slice(0, 200) || null;
@@ -257,25 +267,91 @@ export default function UpcomingLessons() {
     setRequestingId(null);
   };
 
+  const withdrawRequest = async (lesson: Lesson) => {
+    setRequestingId(lesson.id);
+    setError("");
+    try {
+      const { error: rpcError } = await supabase.rpc("withdraw_lesson_request", {
+        lesson_id: lesson.id,
+      });
+      if (rpcError) {
+        setError("Не удалось снять запрос");
+        setRequestingId(null);
+        return;
+      }
+      setLessons((current) =>
+        current.map((item) =>
+          item.id === lesson.id
+            ? {
+                ...item,
+                reschedule_request: "none",
+                preferred_reschedule_at: null,
+                reschedule_note: null,
+                cancel_request: "none",
+                cancel_note: null,
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка запроса");
+    }
+    setRequestingId(null);
+  };
+
   if (!user) return null;
 
-  const lessonDates = new Set(lessons.map((lesson) => localDateKey(lesson.datetime)));
+  const lessonDates = new Set(
+    scopedLessons.map((lesson) => localDateKey(lesson.datetime))
+  );
   const visibleLessons =
     view === "calendar" && selectedDate
-      ? lessons.filter((lesson) => localDateKey(lesson.datetime) === selectedDate)
-      : lessons;
+      ? scopedLessons.filter(
+          (lesson) => localDateKey(lesson.datetime) === selectedDate
+        )
+      : scopedLessons;
 
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-display text-lg font-semibold">Ближайшие занятия</h3>
+          <h3 className="font-display text-lg font-semibold">
+            {scope === "history" ? "История занятий" : "Ближайшие занятия"}
+          </h3>
           <p className="text-xs text-studio-muted">
-            Запись делает преподаватель. Здесь можно оплатить, запросить перенос
-            или отмену.
+            Время студии — Екатеринбург. Запись делает преподаватель.
           </p>
         </div>
-        <div className="flex shrink-0 rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
+        <div className="flex shrink-0 flex-col items-end gap-2">
+        <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
+          <button
+            type="button"
+            onClick={() => setScope("upcoming")}
+            className={`flex min-h-11 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+              scope === "upcoming"
+                ? "bg-studio-accent/20 text-studio-accent-light"
+                : "text-studio-muted"
+            }`}
+          >
+            Ближайшие
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setScope("history");
+              setSelectedDate(null);
+            }}
+            className={`flex min-h-11 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+              scope === "history"
+                ? "bg-studio-accent/20 text-studio-accent-light"
+                : "text-studio-muted"
+            }`}
+          >
+            <History className="h-3.5 w-3.5" />
+            История
+          </button>
+        </div>
+        <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
           <button
             type="button"
             onClick={() => {
@@ -304,9 +380,10 @@ export default function UpcomingLessons() {
             Календарь
           </button>
         </div>
+        </div>
       </div>
 
-      {view === "calendar" && !loading && lessons.length > 0 && (
+      {view === "calendar" && !loading && scopedLessons.length > 0 && (
         <MonthCalendar
           availableDates={lessonDates}
           selectedDate={selectedDate}
@@ -322,7 +399,9 @@ export default function UpcomingLessons() {
           <p className="mt-2 text-sm text-studio-muted">
             {view === "calendar" && selectedDate
               ? "В этот день занятий нет — выберите дату с точкой"
-              : "Нет запланированных уроков — преподаватель добавит их в расписание"}
+              : scope === "history"
+                ? "Пока нет завершённых или отменённых уроков"
+                : "Нет запланированных уроков — преподаватель добавит их в расписание"}
           </p>
         </div>
       ) : (
@@ -524,13 +603,23 @@ export default function UpcomingLessons() {
                 </div>
               </div>
 
-              {requestPending ? (
-                <p className="relative mt-4 flex items-center gap-2 rounded-xl bg-studio-accent/10 px-3 py-2.5 text-sm text-studio-accent-light">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" />
-                  {cancelPending
-                    ? "Запрос на отмену отправлен преподавателю"
-                    : "Запрос на перенос отправлен преподавателю"}
-                </p>
+              {scope === "history" ? null : requestPending ? (
+                <div className="relative mt-4 space-y-2">
+                  <p className="flex items-center gap-2 rounded-xl bg-studio-accent/10 px-3 py-2.5 text-sm text-studio-accent-light">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    {cancelPending
+                      ? "Запрос на отмену отправлен преподавателю"
+                      : "Запрос на перенос отправлен преподавателю"}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={requestingId === lesson.id}
+                    onClick={() => void withdrawRequest(lesson)}
+                  >
+                    Снять запрос
+                  </Button>
+                </div>
               ) : (
                 <div className={`relative mt-4 ${frozen ? "opacity-70" : ""}`}>
                   {lesson.reschedule_request === "rejected" && (
@@ -656,6 +745,14 @@ export default function UpcomingLessons() {
             Преподаватель получит уведомление и сам решит, отменить занятие или
             оставить его в расписании.
           </p>
+          {cancelLesson &&
+          new Date(cancelLesson.datetime).getTime() - Date.now() <
+            24 * 60 * 60 * 1000 ? (
+            <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-200 ring-1 ring-amber-400/20">
+              До урока меньше 24 часов: при подтверждении отмены занятие
+              спишется с абонемента или уйдёт в задолженность.
+            </p>
+          ) : null}
           <label>
             <span className="mb-1.5 block text-xs text-studio-muted">
               Комментарий (необязательно)

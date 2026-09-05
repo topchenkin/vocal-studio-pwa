@@ -329,13 +329,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (data.session && data.user) {
           // Ensure name is on the profile before client-side redeem fallback.
-          await supabase
-            .from("profiles")
-            .update({
-              full_name: fullName.trim(),
-              phone: phone?.trim() || null,
-            })
-            .eq("id", data.user.id);
+          await supabase.rpc("update_own_profile", {
+            p_full_name: fullName.trim(),
+            p_phone: phone?.trim() || null,
+          });
 
           if (compactGift.length === 12) {
             const { error: redeemError } = await supabase.rpc(

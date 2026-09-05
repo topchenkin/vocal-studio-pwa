@@ -20,13 +20,15 @@ export default function DashboardLayout({
 }) {
   return (
     <div
+      data-dashboard-shell={compact ? "compact" : "page"}
+      data-dashboard-inset={bottomInset ? "1" : undefined}
       className={cn(
         "relative max-w-[100vw] overflow-x-hidden",
         compact ? "flex min-h-0 flex-col" : "min-h-screen",
         compact && bottomInset
-          ? "h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))]"
+          ? "h-[calc(var(--uvs-vv-height,100dvh)-4.5rem-env(safe-area-inset-bottom))]"
           : compact
-            ? "h-[100dvh]"
+            ? "h-[var(--uvs-vv-height,100dvh)]"
             : bottomInset
               ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
               : ""

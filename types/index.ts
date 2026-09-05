@@ -928,6 +928,18 @@ export interface Database {
         Args: { lesson_id: string };
         Returns: undefined;
       };
+      update_own_profile: {
+        Args: { p_full_name?: string | null; p_phone?: string | null };
+        Returns: undefined;
+      };
+      withdraw_lesson_request: {
+        Args: { lesson_id: string };
+        Returns: undefined;
+      };
+      auto_complete_started_lessons: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
       notify_unpaid_ended_lessons: {
         Args: Record<string, never>;
         Returns: number;

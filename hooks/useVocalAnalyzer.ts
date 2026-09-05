@@ -34,6 +34,7 @@ import {
   readAnalyserTimeDomain,
   singingInputGainValue,
 } from "@/lib/mic-audio";
+import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import { releaseIosCapture } from "@/lib/ios-audio-session";
 
 export type { PitchFrame } from "@/lib/pitch";
@@ -196,6 +197,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     testResolveRef.current = null;
     testRejectRef.current = null;
 
+    endAudioKeepAlive();
     setListening(false);
     setTesting(false);
     setTestProgress(0);
@@ -338,6 +340,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     rollingDbRef.current = [];
 
     setListening(true);
+    beginAudioKeepAlive();
     rafRef.current = requestAnimationFrame(tick);
   }, [tick]);
 

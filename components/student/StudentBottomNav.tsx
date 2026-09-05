@@ -42,6 +42,7 @@ export default function StudentBottomNav() {
 
   return (
     <nav
+      data-student-bottom-nav
       className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
       aria-label="Быстрый доступ"
     >
@@ -52,7 +53,7 @@ export default function StudentBottomNav() {
             "page" in item && item.page
               ? onSubscription
               : onCabinet && tab === item.id;
-          const className = `flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition ${
+          const className = `flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition ${
             active
               ? "text-studio-accent-light"
               : "text-studio-muted hover:text-studio-text"

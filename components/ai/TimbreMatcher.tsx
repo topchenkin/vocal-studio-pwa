@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Mic, ShieldCheck, Sparkles, Square } from "lucide-react";
+import Link from "next/link";
 import Button from "@/components/ui/Button";
 import {
   CELEBRITY_GENRES,
@@ -577,9 +578,12 @@ function RepresentativeList({
 
 function LockedCard({ title, text }: { title: string; text: string }) {
   return (
-    <section className="rounded-3xl bg-studio-surface p-6 ring-1 ring-studio-border">
+    <section className="rounded-3xl bg-studio-surface p-6 text-center ring-1 ring-studio-border">
       <h2 className="font-display text-2xl font-semibold">{title}</h2>
       <p className="mt-2 text-sm text-studio-muted">{text}</p>
+      <Link href="/dashboard/student/subscription" className="mt-5 inline-flex">
+        <Button>Купить премиум</Button>
+      </Link>
     </section>
   );
 }

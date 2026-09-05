@@ -2,18 +2,23 @@
 
 import { motion } from "framer-motion";
 import { Lock } from "lucide-react";
+import Link from "next/link";
 import Button from "./Button";
 
 interface PaywallOverlayProps {
   title?: string;
   description?: string;
   onUpgrade?: () => void;
+  href?: string;
+  buttonLabel?: string;
 }
 
 export default function PaywallOverlay({
-  title = "Премиум контент",
-  description = "Оформите абонемент для доступа к этому разделу",
+  title = "Доступно по подписке",
+  description = "Оформите Standard или выше, чтобы открыть этот раздел",
   onUpgrade,
+  href = "/dashboard/student/subscription",
+  buttonLabel = "Купить премиум",
 }: PaywallOverlayProps) {
   return (
     <motion.div
@@ -28,10 +33,14 @@ export default function PaywallOverlay({
       <p className="mt-2 max-w-xs text-center text-sm text-studio-muted">
         {description}
       </p>
-      {onUpgrade && (
-        <Button className="mt-5" onClick={onUpgrade}>
-          Купить абонемент
+      {onUpgrade ? (
+        <Button className="mt-5 min-h-11" onClick={onUpgrade}>
+          {buttonLabel}
         </Button>
+      ) : (
+        <Link href={href} className="mt-5">
+          <Button className="min-h-11">{buttonLabel}</Button>
+        </Link>
       )}
     </motion.div>
   );

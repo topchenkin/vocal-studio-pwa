@@ -55,6 +55,8 @@ def env_file_bytes() -> bytes:
         f"VAPID_PRIVATE_KEY={local.get('VAPID_PRIVATE_KEY', '')}",
         f"VAPID_SUBJECT={local.get('VAPID_SUBJECT', 'mailto:iris.jar008@gmail.com')}",
         "NEXT_PUBLIC_APP_URL=https://www.uniquevocal.ru",
+        f"RESEND_API_KEY={local.get('RESEND_API_KEY', '')}",
+        f"EMAIL_FROM={local.get('EMAIL_FROM', '')}",
         "",
     ]
     return "\n".join(lines).encode("utf-8")

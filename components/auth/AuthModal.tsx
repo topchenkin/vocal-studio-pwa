@@ -68,10 +68,9 @@ export default function AuthModal({
     } = await supabase.auth.getUser();
     if (!user) return "Сессия ещё не готова — войдите и активируйте код в кабинете";
 
-    await supabase
-      .from("profiles")
-      .update({ full_name: name.trim() })
-      .eq("id", user.id);
+    await supabase.rpc("update_own_profile", {
+      p_full_name: name.trim(),
+    });
 
     const { error: redeemError } = await supabase.rpc(
       "redeem_gift_certificate",
@@ -151,6 +150,26 @@ export default function AuthModal({
     }
 
     onClose();
+  };
+
+  const handleForgot = async () => {
+    setError("");
+    setMessage("");
+    if (!email.trim()) {
+      setError("Введите email, чтобы восстановить пароль");
+      return;
+    }
+    setSubmitting(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      email.trim(),
+      { redirectTo: `${window.location.origin}/auth/reset` }
+    );
+    setSubmitting(false);
+    if (resetError) {
+      setError(resetError.message);
+      return;
+    }
+    setMessage("Если аккаунт есть, отправили ссылку на почту. Откройте её с этого телефона.");
   };
 
   const switchMode = () => {
@@ -281,6 +300,17 @@ export default function AuthModal({
               ? "Войти"
               : "Создать аккаунт"}
         </Button>
+
+        {mode === "login" ? (
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void handleForgot()}
+            className="w-full text-center text-sm text-studio-muted transition hover:text-studio-text"
+          >
+            Забыли пароль?
+          </button>
+        ) : null}
 
         <button
           type="button"

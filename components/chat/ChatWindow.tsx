@@ -549,7 +549,7 @@ export default function ChatWindow({
       </div>
 
       {!disabled && (
-        <div className="shrink-0 border-t border-studio-border p-3">
+        <div className="shrink-0 border-t border-studio-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {panel === "emoji" && (
             <div className="mb-2 grid max-h-32 grid-cols-8 gap-1 overflow-y-auto rounded-xl bg-studio-card p-2">
               {CHAT_EMOJIS.map((emoji) => (
@@ -617,7 +617,7 @@ export default function ChatWindow({
                   type="button"
                   onClick={cancelRecording}
                   disabled={phase === "sending"}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-red-400 transition hover:bg-red-500/15 disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-red-400 transition hover:bg-red-500/15 disabled:opacity-40"
                   aria-label="Отменить"
                   title="Отменить"
                 >
@@ -627,7 +627,7 @@ export default function ChatWindow({
                   type="button"
                   onClick={phase === "paused" ? resumeRecording : pauseRecording}
                   disabled={phase === "sending"}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-studio-text transition hover:bg-studio-card disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text transition hover:bg-studio-card disabled:opacity-40"
                   aria-label={phase === "paused" ? "Продолжить" : "Стоп / пауза"}
                   title={phase === "paused" ? "Продолжить" : "Стоп"}
                 >
@@ -664,7 +664,7 @@ export default function ChatWindow({
                   type="button"
                   onClick={sendRecording}
                   disabled={phase === "sending"}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-studio-accent text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
                   aria-label="Отправить"
                   title="Отправить"
                 >
@@ -739,14 +739,14 @@ export default function ChatWindow({
                     placeholder={
                       editingId ? "Измените текст..." : placeholder
                     }
-                    className="w-full rounded-xl bg-studio-card px-4 py-2.5 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+                    className="min-h-11 w-full rounded-xl bg-studio-card px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
                   />
                 </div>
                 {canSendText ? (
                   <button
                     type="button"
                     onClick={handleSendText}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-studio-accent text-white transition hover:opacity-90"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent text-white transition hover:opacity-90"
                     aria-label="Отправить"
                     title="Отправить"
                   >
@@ -756,7 +756,7 @@ export default function ChatWindow({
                   <button
                     type="button"
                     onClick={() => void startRecording("voice")}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-studio-accent text-white transition hover:opacity-90"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-accent text-white transition hover:opacity-90"
                     aria-label="Записать голосовое"
                     title="Голосовое"
                   >
@@ -816,7 +816,7 @@ function ComposerIcon({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`rounded-lg p-2 transition ${
+      className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2.5 transition ${
         active
           ? "bg-studio-accent/20 text-studio-accent-light"
           : "text-studio-muted hover:bg-studio-card hover:text-studio-text"

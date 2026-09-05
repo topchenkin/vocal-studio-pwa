@@ -281,10 +281,10 @@ export default function PitchShiftStudio({ locked = false }: Props) {
             вас:{" "}
             <span className="font-medium text-studio-text">{tier}</span>.
           </p>
-          <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
+          <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              Перейти на Premium
+              Купить премиум
             </Button>
           </Link>
         </div>

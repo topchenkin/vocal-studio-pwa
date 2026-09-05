@@ -19,6 +19,7 @@ import LibraryTrackPicker from "@/components/student/LibraryTrackPicker";
 import { useAuth } from "@/context/AuthContext";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import { getSingingMicStream } from "@/lib/mic-audio";
+import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import { cancelArmedIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
 import { downloadAudioUrl, saveAudioFromUrl } from "@/lib/student-audio";
 import { decodeBlobToAudioBuffer, encodeWavBlob } from "@/lib/wav-client";
@@ -141,6 +142,7 @@ export default function VocalFxBox({ locked = false }: Props) {
     closeGraph();
     playingRef.current = false;
     setPlaying(false);
+    endAudioKeepAlive();
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
@@ -212,6 +214,7 @@ export default function VocalFxBox({ locked = false }: Props) {
           offsetRef.current = 0;
           playingRef.current = false;
           setPlaying(false);
+          endAudioKeepAlive();
         }
       };
       sourcesRef.current.push(source);
@@ -226,6 +229,7 @@ export default function VocalFxBox({ locked = false }: Props) {
       offsetRef.current = offset;
       playingRef.current = true;
       setPlaying(true);
+      beginAudioKeepAlive();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(drawWave);
     },
@@ -449,10 +453,10 @@ export default function VocalFxBox({ locked = false }: Props) {
             Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
             <span className="font-medium text-studio-text">{tier}</span>.
           </p>
-          <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
+          <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              В кабинет
+              Купить премиум
             </Button>
           </Link>
         </div>

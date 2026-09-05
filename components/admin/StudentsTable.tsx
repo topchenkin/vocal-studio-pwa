@@ -484,7 +484,7 @@ function StudentEditor({
                     Math.max(0, draft.lessons_balance - 1)
                   )
                 }
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-studio-card text-studio-muted hover:text-studio-text"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-studio-card text-studio-muted hover:text-studio-text"
               >
                 <Minus className="h-4 w-4" />
               </button>
@@ -498,7 +498,7 @@ function StudentEditor({
                 onClick={() =>
                   updateDraft("lessons_balance", draft.lessons_balance + 1)
                 }
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-studio-accent/20 text-studio-accent hover:bg-studio-accent/30"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-studio-accent/20 text-studio-accent hover:bg-studio-accent/30"
               >
                 <Plus className="h-4 w-4" />
               </button>

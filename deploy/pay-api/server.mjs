@@ -355,6 +355,47 @@ async function handleInitGift(req, res) {
   });
 }
 
+function samePaymentIntent(tx, purpose, metadata) {
+  const meta = tx.metadata || {};
+  if (purpose === "lesson_one_time") {
+    return String(meta.lesson_id || "") === String(metadata.lesson_id || "");
+  }
+  if (purpose === "app_subscription") {
+    return (
+      String(meta.tier || "") === String(metadata.tier || "") &&
+      Number(meta.months || 1) === Number(metadata.months || 1) &&
+      Boolean(meta.is_duo) === Boolean(metadata.is_duo)
+    );
+  }
+  if (purpose === "lesson_package") {
+    return Number(meta.lessons_count || 0) === Number(metadata.lessons_count || 0);
+  }
+  return purpose === "lesson_debt" || purpose === "test_payment";
+}
+
+async function findReusableInvoice(studentId, purpose, metadata, amount) {
+  const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const res = await sb(
+    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(studentId)}&purpose=eq.${encodeURIComponent(purpose)}&status=eq.pending&amount_rub=eq.${encodeURIComponent(String(amount))}&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,metadata&order=created_at.desc&limit=20`
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  const list = Array.isArray(rows) ? rows : [];
+  const tx = list.find((row) => samePaymentIntent(row, purpose, metadata));
+  if (!tx?.external_id || !tx.invoice_no) return null;
+  try {
+    const payment = await yookassa.fetchPayment(tx.external_id);
+    const url = payment?.confirmation?.confirmation_url;
+    if (!url) return null;
+    if (payment.status === "canceled" || payment.status === "succeeded") {
+      return null;
+    }
+    return { paymentUrl: url, invoiceNo: Number(tx.invoice_no) };
+  } catch {
+    return null;
+  }
+}
+
 async function handleInit(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
@@ -472,6 +513,19 @@ async function handleInit(req, res) {
   metadata.description = description;
 
   const outSum = money(amount);
+  const reusable = await findReusableInvoice(user.id, purpose, metadata, Number(outSum));
+  if (reusable) {
+    return json(res, 200, {
+      paymentUrl: reusable.paymentUrl,
+      invoiceNo: reusable.invoiceNo,
+      amount: Number(outSum),
+      isTest: yookassa.isTest,
+      provider: "yookassa",
+      months,
+      reused: true,
+    });
+  }
+
   const insert = await sb("/rest/v1/payment_transactions", {
     method: "POST",
     headers: { prefer: "return=representation" },

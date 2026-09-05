@@ -115,14 +115,8 @@ export default function ExerciseLibrary() {
     let mounted = true;
 
     const loadExercises = async () => {
-      const [exerciseResult, phraseResult, progressResult] = await Promise.all([
+      const [exerciseResult, progressResult] = await Promise.all([
         supabase.from("exercises").select("*").order("title"),
-        supabase
-          .from("exercise_phrases")
-          .select("*")
-          .order("sort_order")
-          .order("created_at")
-          .limit(EXERCISE_PHRASE_LIST_LIMIT),
         user
           ? supabase
               .from("vocal_phrase_progress")
@@ -135,6 +129,18 @@ export default function ExerciseLibrary() {
       if (exerciseResult.error) {
         console.error("Unable to load exercises:", exerciseResult.error.message);
       }
+      const visibleExercises = exerciseResult.data ?? [];
+      const visibleIds = visibleExercises.map((exercise) => exercise.id);
+      const phraseResult = visibleIds.length
+        ? await supabase
+            .from("exercise_phrases")
+            .select("*")
+            .in("exercise_id", visibleIds)
+            .order("sort_order")
+            .order("created_at")
+            .limit(EXERCISE_PHRASE_LIST_LIMIT)
+        : { data: [], error: null };
+
       if (phraseResult.error) {
         console.warn("Interactive phrases are unavailable:", phraseResult.error.message);
       } else {

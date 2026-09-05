@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   List,
   CalendarClock,
+  History,
   UserPlus,
   XCircle,
 } from "lucide-react";
@@ -24,14 +25,25 @@ import MonthCalendar, {
   localDateKey,
 } from "@/components/calendar/MonthCalendar";
 import { useAuth } from "@/context/AuthContext";
+import {
+  formatStudioDate,
+  studioWallToUtcIso,
+} from "@/lib/studio-tz";
 import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
-const WEEKDAY_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const;
 const VIEW_STORAGE = "uvs-admin-schedule-view";
 
 function weekdayShort(date: Date) {
-  return WEEKDAY_SHORT[date.getDay()] ?? "—";
+  return formatStudioDate(date, { weekday: "short" });
+}
+
+function rangesOverlap(a: string, b: string) {
+  const a0 = new Date(a).getTime();
+  const a1 = a0 + 60 * 60 * 1000;
+  const b0 = new Date(b).getTime();
+  const b1 = b0 + 60 * 60 * 1000;
+  return a0 < b1 && b0 < a1;
 }
 
 function statusBadge(status: Lesson["status"], hasStudent: boolean) {
@@ -49,6 +61,7 @@ function ScheduleCard({
   studentLabel,
   completingId,
   highlighted,
+  conflict,
   onComplete,
   onOpenReschedule,
   onRejectReschedule,
@@ -61,6 +74,7 @@ function ScheduleCard({
   studentLabel: (studentId: string | null) => string;
   completingId: string | null;
   highlighted?: boolean;
+  conflict?: boolean;
   onComplete: (lessonId: string) => Promise<void>;
   onOpenReschedule: (lesson: Lesson) => void;
   onRejectReschedule: (lessonId: string) => Promise<void>;
@@ -76,7 +90,9 @@ function ScheduleCard({
     <article
       id={`lesson-${lesson.id}`}
       className={`scroll-mt-28 rounded-2xl bg-studio-surface p-4 ring-1 transition ${
-        highlighted
+        conflict
+          ? "ring-2 ring-amber-400/80"
+          : highlighted
           ? "ring-2 ring-studio-accent shadow-glow"
           : "ring-studio-border hover:ring-studio-accent/30"
       }`}
@@ -91,14 +107,14 @@ function ScheduleCard({
           </div>
           <div>
             <p className="font-medium">
-              {lessonDate.toLocaleDateString("ru-RU", {
+              {formatStudioDate(lessonDate, {
                 day: "numeric",
                 month: "long",
               })}
             </p>
             <p className="flex items-center gap-1 text-sm text-studio-muted">
               <Clock3 className="h-3.5 w-3.5" />
-              {lessonDate.toLocaleTimeString("ru-RU", {
+              {formatStudioDate(lessonDate, {
                 hour: "2-digit",
                 minute: "2-digit",
               })}
@@ -114,6 +130,12 @@ function ScheduleCard({
           {studentLabel(lesson.student_id)}
         </span>
       </div>
+
+      {conflict ? (
+        <p className="mt-3 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200 ring-1 ring-amber-400/25">
+          Конфликт слота: в это же время есть другое занятие
+        </p>
+      ) : null}
 
       {lesson.is_recurring ? (
         <p className="mt-3 text-xs text-studio-accent-light">
@@ -249,16 +271,43 @@ export default function ScheduleGrid() {
   const [assignLesson, setAssignLesson] = useState<Lesson | null>(null);
   const [assignStudentId, setAssignStudentId] = useState("");
   const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
+  const [scope, setScope] = useState<"upcoming" | "history">("upcoming");
   const appliedFocus = useRef<string | null>(null);
+
+  const scopedLessons = useMemo(
+    () =>
+      lessons.filter((lesson) =>
+        scope === "history"
+          ? lesson.status === "completed" || lesson.status === "cancelled"
+          : lesson.status === "scheduled"
+      ),
+    [lessons, scope]
+  );
+
+  const overlappingIds = useMemo(() => {
+    const ids = new Set<string>();
+    const scheduled = lessons.filter((lesson) => lesson.status === "scheduled");
+    for (let i = 0; i < scheduled.length; i += 1) {
+      for (let j = i + 1; j < scheduled.length; j += 1) {
+        const left = scheduled[i];
+        const right = scheduled[j];
+        if (rangesOverlap(left.datetime, right.datetime)) {
+          ids.add(left.id);
+          ids.add(right.id);
+        }
+      }
+    }
+    return ids;
+  }, [lessons]);
 
   const lessonsByDate = useMemo(
     () =>
-      lessons.reduce<Record<string, Lesson[]>>((result, lesson) => {
+      scopedLessons.reduce<Record<string, Lesson[]>>((result, lesson) => {
         const key = localDateKey(lesson.datetime);
         result[key] = [...(result[key] ?? []), lesson];
         return result;
       }, {}),
-    [lessons]
+    [scopedLessons]
   );
 
   const pendingDates = useMemo(
@@ -422,7 +471,7 @@ export default function ScheduleGrid() {
 
     setSaving(true);
     setError("");
-    const start = new Date(`${date}T${time}`);
+    const start = new Date(studioWallToUtcIso(date, time));
     if (Number.isNaN(start.getTime())) {
       setSaving(false);
       setError("Некорректные дата или время");
@@ -433,9 +482,17 @@ export default function ScheduleGrid() {
       ? Math.max(1, Math.min(52, Number(weeklyCount) || 8))
       : 1;
     const seriesId = weeklyRepeat ? crypto.randomUUID() : null;
+    const clash = lessons.some(
+      (lesson) =>
+        lesson.status === "scheduled" &&
+        rangesOverlap(lesson.datetime, start.toISOString())
+    );
+    if (clash) {
+      setError("В это время уже есть занятие — слот будет подсвечен как конфликт.");
+    }
+
     const rows = Array.from({ length: weeks }, (_, index) => {
-      const when = new Date(start);
-      when.setDate(when.getDate() + index * 7);
+      const when = new Date(start.getTime() + index * 7 * 86_400_000);
       return {
         student_id: createStudentId,
         datetime: when.toISOString(),
@@ -542,7 +599,14 @@ export default function ScheduleGrid() {
     setCompletingId(null);
 
     if (completeError) {
-      setError("Не удалось завершить урок");
+      const raw = completeError.message || "";
+      setError(
+        /future/i.test(raw)
+          ? "Нельзя закрыть урок, который ещё не начался"
+          : /pending/i.test(raw)
+            ? "Сначала разберите запрос на перенос или отмену"
+            : "Не удалось завершить урок"
+      );
       console.error("Unable to complete lesson:", completeError.message);
       return;
     }
@@ -566,7 +630,7 @@ export default function ScheduleGrid() {
     setRescheduleLesson(lesson);
     setRescheduleDate(localDateKey(current));
     setRescheduleTime(
-      current.toLocaleTimeString("ru-RU", {
+      formatStudioDate(current, {
         hour: "2-digit",
         minute: "2-digit",
       })
@@ -576,7 +640,7 @@ export default function ScheduleGrid() {
   const resolveReschedule = async (lessonId: string, approve: boolean) => {
     const newDatetime =
       approve && rescheduleDate && rescheduleTime
-        ? new Date(`${rescheduleDate}T${rescheduleTime}`).toISOString()
+        ? studioWallToUtcIso(rescheduleDate, rescheduleTime)
         : null;
     if (approve && !newDatetime) return;
 
@@ -733,10 +797,35 @@ export default function ScheduleGrid() {
           <div>
             <h3 className="font-display text-xl font-semibold">Расписание</h3>
             <p className="text-sm text-studio-muted">
-              Уроки назначает преподаватель · ученик может запросить перенос или отмену
+              Время студии — Екатеринбург. Ученик может запросить перенос или отмену.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
+              <button
+                type="button"
+                onClick={() => setScope("upcoming")}
+                className={`min-h-11 rounded-lg px-3 text-xs font-medium transition ${
+                  scope === "upcoming"
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "text-studio-muted"
+                }`}
+              >
+                Расписание
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope("history")}
+                className={`flex min-h-11 items-center gap-1 rounded-lg px-3 text-xs font-medium transition ${
+                  scope === "history"
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "text-studio-muted"
+                }`}
+              >
+                <History className="h-3.5 w-3.5" />
+                История
+              </button>
+            </div>
             <div className="flex rounded-xl bg-studio-surface p-1 ring-1 ring-studio-border">
               <button
                 type="button"
@@ -774,6 +863,11 @@ export default function ScheduleGrid() {
           </div>
         </div>
 
+        {overlappingIds.size > 0 && scope === "upcoming" && (
+          <div className="rounded-2xl bg-amber-500/10 px-4 py-3 text-sm text-amber-200 ring-1 ring-amber-400/25">
+            Есть пересекающиеся слоты — карточки подсвечены янтарным.
+          </div>
+        )}
         {lessons.some((l) => l.reschedule_request === "pending") && (
           <div className="rounded-2xl bg-studio-gold/10 px-4 py-3 text-sm text-studio-gold ring-1 ring-studio-gold/25">
             Есть запросы на перенос — в календаре такие дни с жёлтой точкой.
@@ -805,10 +899,11 @@ export default function ScheduleGrid() {
             <div>
               <p className="mb-3 font-medium capitalize">
                 {selectedDate
-                  ? new Date(`${selectedDate}T12:00:00`).toLocaleDateString(
-                      "ru-RU",
-                      { weekday: "long", day: "numeric", month: "long" }
-                    )
+                  ? formatStudioDate(`${selectedDate}T12:00:00+05:00`, {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })
                   : "Выберите день"}
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -820,6 +915,7 @@ export default function ScheduleGrid() {
                       studentLabel={studentLabel}
                       completingId={completingId}
                       highlighted={focusLessonId === lesson.id}
+                      conflict={overlappingIds.has(lesson.id)}
                       onComplete={completeLesson}
                       onOpenReschedule={openReschedule}
                       onRejectReschedule={(lessonId) =>
@@ -847,8 +943,8 @@ export default function ScheduleGrid() {
         {view === "list" && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
-              ...lessons.filter((lesson) => lesson.id === focusLessonId),
-              ...lessons.filter((lesson) => lesson.id !== focusLessonId),
+              ...scopedLessons.filter((lesson) => lesson.id === focusLessonId),
+              ...scopedLessons.filter((lesson) => lesson.id !== focusLessonId),
             ].map((lesson) => (
               <ScheduleCard
                 key={lesson.id}
@@ -856,6 +952,7 @@ export default function ScheduleGrid() {
                 studentLabel={studentLabel}
                 completingId={completingId}
                 highlighted={focusLessonId === lesson.id}
+                conflict={overlappingIds.has(lesson.id)}
                 onComplete={completeLesson}
                 onOpenReschedule={openReschedule}
                 onRejectReschedule={(lessonId) =>
@@ -873,7 +970,7 @@ export default function ScheduleGrid() {
           </div>
         )}
 
-        {lessons.length === 0 && (
+        {scopedLessons.length === 0 && (
           <div className="rounded-2xl bg-studio-surface p-10 text-center ring-1 ring-studio-border">
             <CalendarDays className="mx-auto h-9 w-9 text-studio-muted" />
             <p className="mt-3 text-sm text-studio-muted">

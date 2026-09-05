@@ -27,6 +27,7 @@ import {
   playDrumHit,
   playInstrumentNote,
 } from "@/lib/chord-synth";
+import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import { ensureChordSamples } from "@/lib/chord-sampler";
 import {
   deleteChordLoopPreset,
@@ -149,6 +150,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     setSampleBusy(false);
     playingRef.current = false;
     setPlaying(false);
+    endAudioKeepAlive();
     if (intervalRef.current) {
       window.clearInterval(intervalRef.current);
       intervalRef.current = 0;
@@ -358,6 +360,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     nextTimeRef.current = ctx.currentTime + 0.06;
     playingRef.current = true;
     setPlaying(true);
+    beginAudioKeepAlive();
     setActiveIndex(0);
     tick();
     if (intervalRef.current) window.clearInterval(intervalRef.current);
@@ -479,10 +482,10 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
             Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
             <span className="font-medium text-studio-text">{tier}</span>.
           </p>
-          <Link href="/dashboard/student" className="mt-6 w-full max-w-xs">
+          <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              В кабинет
+              Купить премиум
             </Button>
           </Link>
         </div>
