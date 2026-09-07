@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Cinema loop (Киностудия): performant stills crossfade + Ken Burns.
- * Sequence: microphone → guitar → piano → gold flash → wordmark.
+ * Sequence: microphone → guitar → piano → gold flash.
  * Not a filmed WebM; poster (mic) paints first for LCP.
  */
 const FRAMES = [
@@ -12,10 +12,9 @@ const FRAMES = [
   { src: "/hero/cinema-guitar.jpg", alt: "" },
   { src: "/hero/cinema-piano.jpg", alt: "" },
   { src: "/hero/cinema-flash.jpg", alt: "" },
-  { src: "/hero/cinema-wordmark.jpg", alt: "Unique Vocal Studio" },
 ] as const;
 
-const HOLD_MS = [5200, 5200, 5200, 2800, 5600];
+const HOLD_MS = [5200, 5200, 5200, 2800];
 
 export default function CinemaHeroLoop() {
   const [index, setIndex] = useState(0);
