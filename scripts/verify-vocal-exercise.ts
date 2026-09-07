@@ -219,6 +219,27 @@ assert.ok(practice.includes("LiveMelodyGuide"));
 assert.ok(practice.includes("flex-wrap justify-center gap-2 px-2"));
 assert.ok(practice.includes("max-w-[100vw]"));
 assert.ok(practice.includes("overflow-hidden"));
+assert.ok(!practice.includes("flex h-full w-full max-w-[100vw] flex-col overflow-hidden"));
+const exercisesPage = readFileSync(
+  path.join(process.cwd(), "app", "dashboard", "student", "exercises", "page.tsx"),
+  "utf8"
+);
+assert.ok(exercisesPage.includes("<StudentNav />"));
+assert.ok(exercisesPage.includes("<ExerciseLibrary />"));
+assert.ok(!exercisesPage.includes("overflow-x-hidden"));
+assert.ok(!exercisesPage.includes("max-w-[100vw]"));
+const library = readFileSync(
+  path.join(process.cwd(), "components", "exercises", "ExerciseLibrary.tsx"),
+  "utf8"
+);
+assert.ok(library.includes("grid w-full min-w-0 gap-4"));
+assert.ok(!library.includes("lg:grid-cols-2"));
+const dashboardLayout = readFileSync(
+  path.join(process.cwd(), "components", "dashboard", "DashboardLayout.tsx"),
+  "utf8"
+);
+assert.ok(dashboardLayout.includes("overflow-x-clip"));
+assert.ok(!dashboardLayout.includes("overflow-x-hidden"));
 assert.ok(practice.includes("w-full sm:w-auto") || practice.includes("sm:w-auto"));
 assert.ok(practice.includes("/ 100"));
 assert.ok(!practice.includes("onAutoKey"));

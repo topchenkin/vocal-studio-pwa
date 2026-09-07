@@ -23,7 +23,7 @@ export default function DashboardLayout({
       data-dashboard-shell={compact ? "compact" : "page"}
       data-dashboard-inset={bottomInset ? "1" : undefined}
       className={cn(
-        "relative max-w-[100vw] overflow-x-hidden",
+        "relative max-w-[100vw] overflow-x-clip",
         compact ? "flex min-h-0 flex-col" : "min-h-screen",
         compact && bottomInset
           ? "h-[calc(var(--uvs-vv-height,100dvh)-4.5rem-env(safe-area-inset-bottom))]"
@@ -42,7 +42,7 @@ export default function DashboardLayout({
 
       <div
         className={cn(
-          "relative mx-auto flex w-full min-w-0 max-w-6xl flex-col overflow-x-hidden box-border px-2 sm:px-4",
+          "relative mx-auto flex w-full min-w-0 max-w-6xl flex-col overflow-x-clip box-border px-2 sm:px-4",
           compact ? "min-h-0 flex-1 pb-3 pt-3" : "pb-10 pt-6"
         )}
       >

@@ -376,7 +376,7 @@ export default function LiveMelodyGuide({
   }, [backingAudioRef, features, phraseDurationSec, stream]);
 
   return (
-    <div className="relative mt-3 flex h-full w-full max-w-[100vw] flex-col overflow-hidden">
+    <div className="relative mt-3 w-full min-w-0 max-w-[100vw]">
       <div className="relative grid h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 px-2">
         <div className="min-w-0">
           <p className="truncate text-[10px] uppercase leading-none tracking-[0.18em] text-violet-200/70">

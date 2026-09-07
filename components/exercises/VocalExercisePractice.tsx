@@ -397,7 +397,7 @@ export default function VocalExercisePractice({
     selected?.feature_status === "ready" && ["idle", "listening", "failed"].includes(stage);
 
   return (
-    <div className="mt-3 flex h-full w-full max-w-[100vw] flex-col overflow-hidden">
+    <div className="mt-3 w-full min-w-0 max-w-[100vw]">
       <div className="min-w-0 w-full max-w-full overflow-hidden rounded-2xl bg-studio-card p-3 ring-1 ring-studio-accent/25 sm:p-4">
       <audio
         ref={audioRef}

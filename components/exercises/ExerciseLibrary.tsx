@@ -223,7 +223,7 @@ export default function ExerciseLibrary() {
             Доступны всем ученикам. Настройте комфортную скорость.
           </p>
         </div>
-        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <div className="grid w-full min-w-0 gap-4">
           {audioExercises.map((exercise) => {
             const exercisePhrases = phrasesForExercise(phrases, exercise.id);
             const passed = countPassedPhrases(
@@ -232,7 +232,7 @@ export default function ExerciseLibrary() {
             );
             const percent = phraseProgressPercent(exercisePhrases.length, passed);
             return (
-            <div key={exercise.id} className="min-w-0 w-full max-w-full overflow-x-hidden">
+            <div key={exercise.id} className="min-w-0 w-full">
               <div className="mb-2">
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>

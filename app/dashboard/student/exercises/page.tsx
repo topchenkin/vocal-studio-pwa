@@ -9,10 +9,8 @@ export default function StudentExercisesPage() {
       subtitle="Распевки и видео-уроки для ежедневной практики"
       bottomInset
     >
-      <div className="flex w-full max-w-[100vw] flex-col box-border overflow-x-hidden px-2 sm:px-4">
-        <StudentNav />
-        <ExerciseLibrary />
-      </div>
+      <StudentNav />
+      <ExerciseLibrary />
     </DashboardLayout>
   );
 }
