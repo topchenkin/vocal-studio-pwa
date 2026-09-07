@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Lock, Play, Video } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { awardCatXp } from "@/lib/cat-xp";
+import StudentActivityStrip from "@/components/student/StudentActivityStrip";
+import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import {
   bestScoreMap,
   countPassedPhrases,
@@ -105,6 +108,7 @@ const demoExercises: Exercise[] = [
 
 export default function ExerciseLibrary() {
   const { user, tier, refreshProfile } = useAuth();
+  const { progress } = useCabinetProgress();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [bestScores, setBestScores] = useState<Record<string, number>>({});
@@ -177,6 +181,13 @@ export default function ExerciseLibrary() {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    void awardCatXp("practice").then((result) => {
+      if (result?.awarded) void refreshProfile();
+    });
+  }, [refreshProfile, user]);
+
   const audioExercises = useMemo(
     () => exercises.filter((exercise) => exercise.type === "audio"),
     [exercises]
@@ -214,6 +225,7 @@ export default function ExerciseLibrary() {
 
   return (
     <>
+      <StudentActivityStrip progress={progress} variant="exercises" />
       <section>
         <div className="mb-4">
           <h2 className="font-display text-2xl font-semibold">

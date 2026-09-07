@@ -13,6 +13,7 @@ import {
 } from "@/lib/chat-media";
 import { realtimeTopic } from "@/lib/client-instance";
 import { supabase } from "@/lib/supabase";
+import { awardCatXp } from "@/lib/cat-xp";
 import type { ChatMessage as LegacyChatMessage } from "@/lib/types";
 
 export function useGroupChatMessages(groupId: string | null) {
@@ -131,6 +132,9 @@ export function useGroupChatMessages(groupId: string | null) {
           { ...created, threadId: groupId },
         ]);
         mergeLegacy(mapped);
+        if (!isAdmin) {
+          void awardCatXp("chat");
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Не удалось отправить сообщение"

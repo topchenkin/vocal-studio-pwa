@@ -5,6 +5,10 @@ export type CatXpKind =
   | "checkin"
   | "analyzer"
   | "exercise_share"
+  | "exercise"
+  | "mixer"
+  | "chat"
+  | "practice"
   | "pro_test"
   | "streak"
   | "lesson";
@@ -18,7 +22,28 @@ export type CatXpResult = {
   exam_ready?: boolean;
   streak?: number;
   streak_bonus?: number;
+  lesson_xp?: number;
 };
+
+const TOAST_LINE: Partial<Record<CatXpKind, string>> = {
+  checkin: "Зашли в кабинет. Серия обновлена.",
+  analyzer: "Практика в анализаторе.",
+  exercise_share: "Фраза ушла преподавателю.",
+  exercise: "Фраза закрыта.",
+  mixer: "Запись в студии.",
+  chat: "Сообщение ушло преподавателю.",
+  practice: "Практика началась.",
+};
+
+function toastLine(kind: CatXpKind, result: CatXpResult): string {
+  if (Number(result.lesson_xp) > 0) {
+    return "Занятие засчитано. Опыт добавлен к прогрессу.";
+  }
+  if (Number(result.streak_bonus) > 0) {
+    return "Серия держится — небольшой бонус котику.";
+  }
+  return TOAST_LINE[kind] ?? "Опыт добавлен к прогрессу.";
+}
 
 export async function awardCatXp(
   kind: CatXpKind,
@@ -40,8 +65,17 @@ export async function awardCatXp(
     return null;
   }
   const result = (data ?? null) as CatXpResult | null;
-  if (result && Number(result.awarded) > 0) {
-    emitXpToast(Number(result.awarded) + Number(result.streak_bonus || 0));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("uvs-cabinet-progress"));
+  }
+  if (result) {
+    const shown =
+      Number(result.awarded) +
+      Number(result.streak_bonus || 0) +
+      Number(result.lesson_xp || 0);
+    if (shown > 0) {
+      emitXpToast(shown, toastLine(kind, result));
+    }
   }
   return result;
 }

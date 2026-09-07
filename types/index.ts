@@ -901,6 +901,14 @@ export interface Database {
         Args: { p_kind: string; p_source_id?: string | null };
         Returns: Record<string, unknown>;
       };
+      log_practice_seconds: {
+        Args: { p_kind: string; p_seconds: number };
+        Returns: Record<string, unknown>;
+      };
+      student_cabinet_progress: {
+        Args: Record<string, never>;
+        Returns: Record<string, unknown>;
+      };
       submit_vocal_test_for_review: {
         Args: { p_result_id: string };
         Returns: undefined;

@@ -34,6 +34,9 @@ import {
 } from "@/lib/wav-client";
 import { AUDIO_FILE_ACCEPT } from "@/lib/file-accept";
 import { getStudioMicStream, isAppleWebKit } from "@/lib/mic-audio";
+import { awardCatXp } from "@/lib/cat-xp";
+import { useAuth } from "@/context/AuthContext";
+import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
 import {
   preferIosPlayback,
   releaseIosCapture,
@@ -461,9 +464,11 @@ function TimelineScrubber({
 }
 
 export default function MultitrackMixer({ locked = false }: Props) {
+  const { isAdmin, refreshProfile } = useAuth();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [monitorIds, setMonitorIds] = useState<string[]>([]);
   const [recordingId, setRecordingId] = useState<string | null>(null);
+  usePracticeHeartbeat("mixer", Boolean(recordingId) && !isAdmin);
   const [playing, setPlaying] = useState(false);
   const [playheadSec, setPlayheadSec] = useState(0);
   const [mixing, setMixing] = useState(false);
@@ -1081,6 +1086,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
       setRecordingId(id);
+      if (!isAdmin) {
+        void awardCatXp("mixer").then((result) => {
+          if (result?.awarded) void refreshProfile();
+        });
+      }
       routeIosToSpeaker();
       beginAudioKeepAlive();
       try {

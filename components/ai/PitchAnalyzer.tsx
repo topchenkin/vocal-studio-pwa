@@ -40,6 +40,7 @@ import {
 } from "@/lib/vocal-test-results";
 import { awardCatXp, submitVocalTestForReview } from "@/lib/cat-xp";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
+import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
@@ -56,6 +57,7 @@ export default function PitchAnalyzer({
 }) {
   const { user, profile, isAdmin, refreshProfile } = useAuth();
   const analyzer = useVocalAnalyzer();
+  usePracticeHeartbeat("analyzer", analyzer.listening && !isAdmin && !locked);
 
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
   const [targetNote, setTargetNote] = useState("G4");

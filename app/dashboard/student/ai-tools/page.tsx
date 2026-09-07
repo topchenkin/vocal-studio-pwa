@@ -11,6 +11,8 @@ import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import StudentActivityStrip from "@/components/student/StudentActivityStrip";
+import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import { LayoutGroup } from "framer-motion";
 import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
 import {
@@ -53,6 +55,7 @@ export default function AiToolsPage() {
   const router = useRouter();
   const [tab, setTab] = useState<ToolTab>("tuner");
   const [access, setAccess] = useState<AiToolAccessMap>(defaultAiToolAccessMap);
+  const { progress } = useCabinetProgress();
 
   useEffect(() => {
     if (loading) return;
@@ -104,6 +107,7 @@ export default function AiToolsPage() {
       bottomInset
     >
       <StudentNav />
+      <StudentActivityStrip progress={progress} variant="lab" />
 
       <LayoutGroup id="student-ai-tools">
         <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-4">

@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
+import { logPracticeSeconds } from "@/lib/practice-log";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
 import { renderExerciseResultPng } from "@/lib/exercise-result-card";
 import {
@@ -312,6 +313,10 @@ export default function VocalExercisePractice({
         setAttempt({ ...evaluated, overall_score: score });
       }
       setPracticeStage("result");
+      void logPracticeSeconds("exercise", Math.round(buffer.duration));
+      void awardCatXp("exercise", evaluated.id).then((result) => {
+        if (result?.awarded) void refreshProfile();
+      });
     } catch (caught) {
       stopEverything();
       setError(caught instanceof Error ? caught.message : "Не удалось записать попытку");

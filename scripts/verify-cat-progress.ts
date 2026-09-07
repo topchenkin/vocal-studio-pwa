@@ -32,6 +32,18 @@ assert.ok(sql.includes("when 'beginner' then 48"));
 assert.ok(sql.includes("when 'basic' then 280"));
 assert.ok(sql.includes("when 'pro' then 1100"));
 
+const progressSql = readFileSync(
+  path.join(root, "supabase-migrations", "2026-09-07-student-cabinet-progress.sql"),
+  "utf8"
+);
+assert.ok(progressSql.includes("student_cabinet_progress"));
+assert.ok(progressSql.includes("log_practice_seconds"));
+assert.ok(progressSql.includes("'practice'"));
+assert.ok(progressSql.includes("'mixer'"));
+assert.ok(progressSql.includes("'chat'"));
+assert.ok(progressSql.includes("12 - public.cat_today_activity_xp"));
+assert.ok(progressSql.includes("streak3-"));
+
 const nav = readFileSync(
   path.join(root, "components", "student", "StudentNav.tsx"),
   "utf8"
@@ -44,6 +56,7 @@ const home = readFileSync(
   "utf8"
 );
 assert.ok(!home.includes("VocalProgressSection"));
+assert.ok(home.includes("StudentHomeHub"));
 assert.ok(
   readFileSync(
     path.join(root, "components", "student", "SubscriptionStatus.tsx"),
@@ -51,11 +64,19 @@ assert.ok(
   ).includes("Готов перейти на следующий уровень")
 );
 
+const toast = readFileSync(
+  path.join(root, "components", "xp", "XpToastStack.tsx"),
+  "utf8"
+);
+assert.ok(toast.includes("text-studio-gold"));
+assert.ok(toast.includes("+{item.amount} XP"));
+
 const analyzer = readFileSync(
   path.join(root, "components", "ai", "PitchAnalyzer.tsx"),
   "utf8"
 );
 assert.ok(analyzer.includes('variant === "exam"'));
 assert.ok(analyzer.includes('awardCatXp("analyzer")'));
+assert.ok(analyzer.includes("usePracticeHeartbeat"));
 
 console.log("cat progress: ok");

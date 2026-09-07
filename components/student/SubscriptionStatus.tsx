@@ -13,6 +13,7 @@ import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
 import { CAT_LEVEL_LABELS } from "@/lib/cat-levels";
 import {
+  CAT_XP_THRESHOLDS,
   catNextLabel,
   catProgressPercent,
   catProgressPhrase,
@@ -80,7 +81,17 @@ export default function SubscriptionStatus() {
             </Badge>
           </div>
 
-          <div className="mt-4 flex items-center gap-2 text-sm text-studio-muted">
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-studio-muted">
+            <span className="font-display text-lg font-semibold text-studio-gold">
+              {level === "star" || !CAT_XP_THRESHOLDS[level]
+                ? `${xp} XP`
+                : `${xp} / ${CAT_XP_THRESHOLDS[level]} XP`}
+            </span>
+            {streak > 0 ? (
+              <span className="text-studio-accent-light">Серия {streak} дн.</span>
+            ) : null}
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-sm text-studio-muted">
             <CalendarDays className="h-4 w-4 text-studio-accent-light" />
             {active && expiry
               ? `Подписка до ${expiry}`

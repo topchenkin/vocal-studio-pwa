@@ -11,6 +11,9 @@ import GiftRedeemCard from "@/components/student/GiftRedeemCard";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import StudentNav from "@/components/student/StudentNav";
+import StudentHomeHub from "@/components/student/StudentHomeHub";
+import StudentActivityStrip from "@/components/student/StudentActivityStrip";
+import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -40,6 +43,7 @@ export default function StudentDashboardClient() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [retrying, setRetrying] = useState(false);
+  const { progress } = useCabinetProgress();
 
   useEffect(() => {
     if (loading) return;
@@ -141,7 +145,9 @@ export default function StudentDashboardClient() {
           : `Привет, ${firstName}!`;
 
   const subtitle =
-    activeTab === "home" ? "Личный кабинет ученика" : undefined;
+    activeTab === "home"
+      ? "Голос растёт, когда вы возвращаетесь."
+      : undefined;
 
   return (
     <DashboardLayout
@@ -167,6 +173,7 @@ export default function StudentDashboardClient() {
           >
             {activeTab === "home" && (
               <div className="space-y-8">
+                <StudentHomeHub progress={progress} />
                 <SubscriptionStatus />
                 <GiftRedeemCard />
                 <section>
@@ -180,7 +187,12 @@ export default function StudentDashboardClient() {
                 </section>
               </div>
             )}
-            {activeTab === "lessons" && <UpcomingLessons />}
+            {activeTab === "lessons" && (
+              <>
+                <StudentActivityStrip progress={progress} variant="lessons" />
+                <UpcomingLessons />
+              </>
+            )}
             {activeTab === "audio" && <MyAudioLibrary />}
           </motion.div>
         </AnimatePresence>
