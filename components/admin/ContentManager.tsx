@@ -14,6 +14,7 @@ import {
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import PhraseEditor from "@/components/admin/PhraseEditor";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { useAuth } from "@/context/AuthContext";
 import {
   isAllowedAudioFile,
@@ -457,13 +458,17 @@ export default function ContentManager() {
                 {item.description || "Без описания"}
               </p>
               <p className="mt-3 text-[10px] uppercase tracking-wide text-studio-accent">
-                {item.min_tier_required} · {CAT_LEVEL_LABELS[item.min_cat_level]}{" "}
+                {item.min_tier_required} ·{" "}
+                {straightDashNodes(CAT_LEVEL_LABELS[item.min_cat_level])}{" "}
                 · {item.audience_mode}
               </p>
               {childPhrases.length > 0 && (
                 <p className="mt-2 text-xs text-studio-muted">
                   {childPhrases.length}{" "}
-                  {childPhrases.length === 1 ? "фраза-потомок" : "фраз-потомков"} этого упражнения
+                  {childPhrases.length === 1
+                    ? straightDashNodes("фраза-потомок")
+                    : straightDashNodes("фраз-потомков")}{" "}
+                  этого упражнения
                 </p>
               )}
               {item.type === "audio" && item.storage_path && (

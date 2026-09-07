@@ -130,7 +130,7 @@ export default function SubscriptionStatus() {
               </p>
               {level !== "star" && (
                 <p className="mt-1 text-[11px] text-studio-muted">
-                  Дальше: {nextLabel}
+                  Дальше: <CatLevelText label={nextLabel} />
                 </p>
               )}
             </div>

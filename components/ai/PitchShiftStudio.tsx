@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import { StraightHyphen, straightDashNodes } from "@/components/ui/StraightDashText";
 import { useAuth } from "@/context/AuthContext";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
@@ -82,7 +83,7 @@ function NumberStepper({
         onClick={() => onChange(Math.max(min, value - step))}
         className="px-3 py-2 text-sm font-semibold text-studio-muted transition hover:text-studio-text disabled:opacity-30"
       >
-        −
+        <StraightHyphen className="mx-0" />
       </button>
       <input
         type="text"
@@ -381,7 +382,7 @@ export default function PitchShiftStudio({ locked = false }: Props) {
             </div>
             <p className="mt-2 text-[11px] text-studio-muted">
               Полутона, от {PITCH_SHIFT_MIN} до {PITCH_SHIFT_MAX}. Можно ввести
-              число вручную или шагать кнопками (±0,5). {formatSigned(pitch)} —{" "}
+              число вручную или шагать кнопками (±0,5). {straightDashNodes(formatSigned(pitch))} —{" "}
               {pitch === 0
                 ? "исходная тональность"
                 : pitch > 0
@@ -466,7 +467,7 @@ export default function PitchShiftStudio({ locked = false }: Props) {
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">Готовый трек</p>
               <p className="text-[11px] text-studio-muted">
-                Тональность {formatSigned(pitch)} · темп {formatSigned(tempo)}%
+                Тональность {straightDashNodes(formatSigned(pitch))} · темп {straightDashNodes(formatSigned(tempo))}%
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">

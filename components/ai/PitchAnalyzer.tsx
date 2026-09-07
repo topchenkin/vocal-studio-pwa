@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import Link from "next/link";
 import VocalReportCard from "@/components/ai/VocalReportCard";
 import { useAuth } from "@/context/AuthContext";
@@ -504,7 +505,7 @@ export default function PitchAnalyzer({
             ? "Запись 10 секунд…"
             : testMode === "note"
               ? `Начать тест · нота ${targetNote}`
-              : "Начать тест · гамма C–E–G"}
+              : straightDashNodes("Начать тест · гамма C-E-G")}
         </Button>
       </div>
       )}

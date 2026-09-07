@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { LEGAL } from "@/lib/legal";
 
 const links = [
@@ -25,7 +26,7 @@ export default function SiteFooter({ extra }: { extra?: ReactNode }) {
           </p>
           <p>
             <a className="hover:text-studio-text" href={LEGAL.phoneHref}>
-              {LEGAL.phone}
+              {straightDashNodes(LEGAL.phone)}
             </a>
             {" · "}
             <a className="hover:text-studio-text" href={`mailto:${LEGAL.email}`}>

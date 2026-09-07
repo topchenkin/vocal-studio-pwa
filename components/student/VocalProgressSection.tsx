@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, TrendingUp } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import VocalReportCard from "@/components/ai/VocalReportCard";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import {
   listVocalTestResults,
   type VocalTestResultRow,
@@ -17,7 +18,7 @@ function groupKey(item: VocalTestResultRow): string {
 }
 
 function groupTitle(item: VocalTestResultRow): string {
-  return item.mode === "scale" ? "Гамма C–E–G" : `Нота ${item.target_label}`;
+  return item.mode === "scale" ? "Гамма C-E-G" : `Нота ${item.target_label}`;
 }
 
 function attemptsWord(count: number): string {
@@ -123,7 +124,7 @@ export default function VocalProgressSection() {
                   className="flex w-full items-center gap-3 px-4 py-3 text-left"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">{group.title}</p>
+                    <p className="font-medium">{straightDashNodes(group.title)}</p>
                     <p className="mt-0.5 text-xs text-studio-muted">
                       {group.items.length} {attemptsWord(group.items.length)}
                       {latest

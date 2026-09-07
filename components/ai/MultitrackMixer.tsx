@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import { StraightHyphen, straightDashNodes } from "@/components/ui/StraightDashText";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import {
@@ -73,7 +74,7 @@ function clampPitch(value: number) {
 function formatPitchLabel(value: number) {
   const pitch = clampPitch(value);
   if (pitch === 0) return "0";
-  return pitch > 0 ? `+${pitch}` : `−${Math.abs(pitch)}`;
+  return pitch > 0 ? `+${pitch}` : `-${Math.abs(pitch)}`;
 }
 
 type Props = { locked?: boolean };
@@ -1309,8 +1310,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Ваш голос + минусовка = готовый трек. Записывайте дубли поверх
-            музыки, собирайте подпевки и скачивайте сведение — как мини-студия
-            в телефоне.
+            музыки, собирайте подпевки и скачивайте сведение — как{" "}
+            {straightDashNodes("мини-студия")} в телефоне.
           </p>
         </div>
       </div>
@@ -1336,7 +1337,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           </li>
           <li>
             Клип на дорожке: потяните середину — сдвиг по времени, края —
-            обрезка начала и конца. Тон: крошечные − / + (±12 полутонов).
+            обрезка начала и конца. Тон: крошечные {straightDashNodes("- / +")} (±12 полутонов).
           </li>
           <li>
             Добавьте до 10 дорожек: основной вокал, подпевки, гармонии.
@@ -1450,8 +1451,8 @@ export default function MultitrackMixer({ locked = false }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-studio-muted">Сдвиг:</span>
             {[
-              { label: "−100 мс", d: -0.1 },
-              { label: "−10 мс", d: -0.01 },
+              { label: "-100 мс", d: -0.1 },
+              { label: "-10 мс", d: -0.01 },
               { label: "+10 мс", d: 0.01 },
               { label: "+100 мс", d: 0.1 },
             ].map((btn) => (
@@ -1462,7 +1463,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                 onClick={() => nudgeSelected(btn.d)}
                 className="rounded-lg bg-studio-bg px-2.5 py-1.5 text-xs font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/50 disabled:opacity-40"
               >
-                {btn.label}
+                {straightDashNodes(btn.label)}
               </button>
             ))}
             <span className="ml-auto text-xs tabular-nums text-studio-muted">
@@ -1616,10 +1617,10 @@ export default function MultitrackMixer({ locked = false }: Props) {
                       }
                       className="px-2 py-0.5 text-xs font-semibold text-studio-muted transition hover:text-studio-gold disabled:opacity-30"
                     >
-                      −
+                      <StraightHyphen className="mx-0" />
                     </button>
                     <span className="min-w-[2rem] text-center text-[11px] tabular-nums font-medium text-studio-gold">
-                      {formatPitchLabel(track.pitchSemitones)}
+                      {straightDashNodes(formatPitchLabel(track.pitchSemitones))}
                     </span>
                     <button
                       type="button"

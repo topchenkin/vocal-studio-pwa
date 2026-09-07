@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Save, Shield } from "lucide-react";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -116,7 +117,7 @@ export default function AiToolsAccessSettings() {
         </div>
         <div>
           <h2 className="text-lg font-semibold text-studio-text">
-            Доступ к ИИ-инструментам
+            Доступ к {straightDashNodes("ИИ-инструментам")}
           </h2>
           <p className="mt-1 text-sm text-studio-muted">
             Включите инструменты и задайте минимальный тариф для учеников.

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
@@ -555,7 +556,7 @@ export default function VocalExercisePractice({
               checked={countIn}
               onChange={(event) => setCountIn(event.target.checked)}
             />
-            Отсчёт 3–2–1 перед записью
+            Отсчёт {straightDashNodes("3-2-1")} перед записью
           </label>
         </>
       )}

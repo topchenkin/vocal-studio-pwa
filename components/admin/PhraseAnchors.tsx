@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic, Pause, Play, Square, Upload } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@/lib/pcm-capture";
 import { supabase } from "@/lib/supabase";
@@ -10,9 +11,9 @@ import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import type { ExercisePhrase, ExercisePhraseAnchor, PhraseAnchorBand } from "@/types";
 
 const BANDS: Array<{ band: PhraseAnchorBand; label: string; hint: string }> = [
-  { band: "high", label: "80–100", hint: "Сильный пример" },
-  { band: "mid", label: "50–79", hint: "Средний пример" },
-  { band: "low", label: "0–49", hint: "Слабый пример" },
+  { band: "high", label: "80-100", hint: "Сильный пример" },
+  { band: "mid", label: "50-79", hint: "Средний пример" },
+  { band: "low", label: "0-49", hint: "Слабый пример" },
 ];
 
 const statusLabel: Record<ExercisePhraseAnchor["feature_status"], string> = {
@@ -183,7 +184,9 @@ export default function PhraseAnchors({
           const isRecording = recording === band;
           return (
             <div key={band} className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="w-16 shrink-0 font-medium text-studio-text">{label}</span>
+              <span className="w-16 shrink-0 font-medium text-studio-text">
+                {straightDashNodes(label)}
+              </span>
               <span className="min-w-[5.5rem] text-studio-muted">
                 {row ? statusLabel[row.feature_status] : "нет"}
               </span>

@@ -3,6 +3,7 @@ import { Cat } from "lucide-react";
 import { TEST_IN_TUNE_CENTS, mentorFeedback } from "@/lib/vocal-metrics";
 import type { VocalReportPayload } from "@/lib/vocal-report-payload";
 import type { CatLevel } from "@/types";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 
 function MetricBar({ label, value }: { label: string; value: number }) {
   return (
@@ -82,7 +83,7 @@ export default function VocalReportCard({
         </p>
         <p className="mt-1 text-xs text-studio-muted">
           {payload.mode === "scale"
-            ? "Гамма C4–E4–G4"
+            ? straightDashNodes("Гамма C4-E4-G4")
             : `Нота ${payload.targetLabel}`}{" "}
           · {payload.durationSec}с
         </p>
@@ -95,7 +96,7 @@ export default function VocalReportCard({
       <div className="rounded-2xl bg-studio-bg/70 p-3 ring-1 ring-studio-border">
         <div className="mb-1.5 flex items-center gap-2 text-sm font-medium">
           <Cat className="h-4 w-4 text-amber-300" />
-          Отзыв Котика-наставника
+          Отзыв {straightDashNodes("Котика-наставника")}
         </div>
         <p className="text-sm leading-relaxed text-studio-muted">{mentor}</p>
       </div>

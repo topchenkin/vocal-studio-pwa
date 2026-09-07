@@ -4,6 +4,7 @@ import { Mail, MapPin, Phone } from "lucide-react";
 import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 
@@ -35,7 +36,7 @@ export default function ContactsPage() {
             <li className="flex items-center gap-3">
               <Phone className="h-4 w-4 shrink-0 text-studio-accent" />
               <a className="hover:text-studio-accent-light" href={LEGAL.phoneHref}>
-                {LEGAL.phone}
+                {straightDashNodes(LEGAL.phone)}
               </a>
             </li>
             <li className="flex items-center gap-3">

@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils";
 import { LayoutGroup } from "framer-motion";
 import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 
 interface TabsProps {
   tabs: { id: string; label: string; icon?: React.ReactNode }[];
@@ -34,7 +35,7 @@ export default function Tabs({ tabs, active, onChange, className }: TabsProps) {
           >
             <span className="relative z-[1] flex items-center gap-1.5">
               {tab.icon}
-              {tab.label}
+              {straightDashNodes(tab.label)}
             </span>
             <SlidingTabUnderline layoutId="admin-tabs-line" active={active === tab.id} />
           </button>

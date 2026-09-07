@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { getChatSessionToken } from "@/lib/chat-media";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import { splitStereoCenterCancel } from "@/lib/wav-client";
@@ -392,7 +393,7 @@ export default function VocalRemover({ locked = false }: Props) {
                 </div>
               ))}
               <p className="text-[11px] text-studio-muted">
-                Обычно занимает 1–3 минуты — не закрывайте страницу.
+                Обычно занимает {straightDashNodes("1-3")} минуты — не закрывайте страницу.
               </p>
             </div>
           )}

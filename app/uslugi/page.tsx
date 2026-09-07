@@ -3,6 +3,7 @@ import Link from "next/link";
 import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { APP_NAME, APP_TIER_PRICES, DUO_TIER_PRICES } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 
@@ -52,7 +53,7 @@ export default function UslugiPage() {
           </h2>
           <p className="mt-3 text-sm leading-relaxed">
             Доступ к личному кабинету Unique Vocal: упражнения, чат с
-            преподавателем, ИИ-инструменты в объёме тарифа. Срок указан у
+            преподавателем, {straightDashNodes("ИИ-инструменты")} в объёме тарифа. Срок указан у
             каждого тарифа.
           </p>
           <ul className="mt-4 space-y-2 text-sm">
@@ -63,7 +64,7 @@ export default function UslugiPage() {
               >
                 <span>
                   {plan.title}
-                  <span className="text-studio-muted"> · {plan.note}</span>
+                  <span className="text-studio-muted"> · {straightDashNodes(plan.note)}</span>
                 </span>
                 <b>{rub(plan.price)}</b>
               </li>
@@ -82,7 +83,7 @@ export default function UslugiPage() {
               >
                 <span>
                   {plan.title}
-                  <span className="text-studio-muted"> · {plan.note}</span>
+                  <span className="text-studio-muted"> · {straightDashNodes(plan.note)}</span>
                 </span>
                 <b>{rub(plan.price)}</b>
               </li>
@@ -119,7 +120,7 @@ export default function UslugiPage() {
           <p className="mt-3 text-sm leading-relaxed">
             Возврат — по законодательству РФ, включая Закон «О защите прав
             потребителей», если услуга не оказана, оказана некачественно или с
-            нарушением срока. Заявка: {LEGAL.email} или {LEGAL.phone}. Срок
+            нарушением срока. Заявка: {LEGAL.email} или {straightDashNodes(LEGAL.phone)}. Срок
             ответа — до 10 рабочих дней, перевод — вручную через платёжный
             сервис. Чек НПД при возврате корректируется.
           </p>

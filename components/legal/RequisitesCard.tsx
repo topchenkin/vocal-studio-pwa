@@ -1,3 +1,4 @@
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { LEGAL } from "@/lib/legal";
 
 export default function RequisitesCard() {
@@ -20,7 +21,7 @@ export default function RequisitesCard() {
         <dt className="text-studio-muted">Телефон</dt>
         <dd>
           <a className="text-studio-accent-light underline" href={LEGAL.phoneHref}>
-            {LEGAL.phone}
+            {straightDashNodes(LEGAL.phone)}
           </a>
         </dd>
         <dt className="text-studio-muted">Email</dt>

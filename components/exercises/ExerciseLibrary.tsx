@@ -17,6 +17,7 @@ import {
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import Badge from "@/components/ui/Badge";
 import ExerciseAudioPlayer from "@/components/exercises/ExerciseAudioPlayer";
 import VocalExercisePractice from "@/components/exercises/VocalExercisePractice";
@@ -234,7 +235,7 @@ export default function ExerciseLibrary() {
             <div key={exercise.id} className="min-w-0 w-full max-w-full overflow-x-hidden">
               <div className="mb-2">
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-medium">{exercise.title}</h3>
+                  <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>
                   {exercisePhrases.length > 0 && (
                     <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
                       {progressLabel(percent)}
@@ -242,7 +243,7 @@ export default function ExerciseLibrary() {
                   )}
                 </div>
                 <p className="text-xs text-studio-muted">
-                  {exercise.description}
+                  {straightDashNodes(exercise.description)}
                 </p>
                 {exercisePhrases.length > 0 && (
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
@@ -271,7 +272,9 @@ export default function ExerciseLibrary() {
 
       <section className="mt-10">
         <div className="mb-4">
-          <h2 className="font-display text-2xl font-semibold">Видео-уроки</h2>
+          <h2 className="font-display text-2xl font-semibold">
+            {straightDashNodes("Видео-уроки")}
+          </h2>
           <p className="text-sm text-studio-muted">
             Экспертные разборы для подписок Premium и VIP.
           </p>
@@ -312,13 +315,13 @@ export default function ExerciseLibrary() {
                   </div>
                   <div className={`p-4 ${locked ? "select-none blur-[2px]" : ""}`}>
                     <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-medium">{exercise.title}</h3>
+                      <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>
                       <Badge variant="muted">
                         {tierLabel[exercise.min_tier_required]}
                       </Badge>
                     </div>
                     <p className="mt-2 text-sm text-studio-muted">
-                      {exercise.description}
+                      {straightDashNodes(exercise.description)}
                     </p>
                   </div>
                   {locked && (

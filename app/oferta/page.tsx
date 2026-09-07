@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import SiteFooter from "@/components/legal/SiteFooter";
+import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL, executorTitle } from "@/lib/legal";
 
@@ -81,7 +82,7 @@ export default function OfertaPage() {
             </Li>
             <Li>
               <b>Услуги</b> — индивидуальные и иные занятия вокалом, доступ к
-              функциям Сайта (чат, упражнения, ИИ-инструменты в рамках тарифа),
+              функциям Сайта (чат, упражнения, {straightDashNodes("ИИ-инструменты")} в рамках тарифа),
               подписка на приложение, тариф Duo, пакеты занятий, иные услуги,
               указанные на Сайте в момент оплаты.
             </Li>
@@ -176,7 +177,7 @@ export default function OfertaPage() {
             Исполнителя возвращать оплату, если Услуга была готова к оказанию.
           </P>
           <P>
-            Цифровые функции (подписка, Duo, ИИ-инструменты, упражнения)
+            Цифровые функции (подписка, Duo, {straightDashNodes("ИИ-инструменты")}, упражнения)
             предоставляются в объёме тарифа на оплаченный период. Перерывы из‑за
             обслуживания Сайта, которые длятся разумно короткое время, не
             считаются неоказанием Услуги.
@@ -297,7 +298,7 @@ export default function OfertaPage() {
               <dt className="text-studio-muted">Телефон</dt>
               <dd>
                 <a className="text-studio-accent-light underline" href={LEGAL.phoneHref}>
-                  {LEGAL.phone}
+                  {straightDashNodes(LEGAL.phone)}
                 </a>
               </dd>
               <dt className="text-studio-muted">Email</dt>
