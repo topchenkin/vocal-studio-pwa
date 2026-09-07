@@ -9,6 +9,7 @@ import PullToRefresh from "@/components/pwa/PullToRefresh";
 import RegisterServiceWorker from "@/components/pwa/RegisterServiceWorker";
 import RouteStatusChip from "@/components/pwa/RouteStatusChip";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import XpToastStack from "@/components/xp/XpToastStack";
 
 export default function AppProviders({
   children,
@@ -54,6 +55,7 @@ export default function AppProviders({
         <IosAudioSession />
         <AppDataProvider>
           <RouteStatusChip />
+          <XpToastStack />
           <PullToRefresh>{children}</PullToRefresh>
         </AppDataProvider>
       </AuthProvider>

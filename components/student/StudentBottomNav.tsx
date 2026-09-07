@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { LayoutGroup } from "framer-motion";
 import { CalendarDays, CreditCard, MessageCircle, Music2 } from "lucide-react";
 import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
+import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
 
 const items = [
   {
@@ -41,46 +43,58 @@ export default function StudentBottomNav() {
   const onSubscription = pathname.startsWith("/dashboard/student/subscription");
 
   return (
-    <nav
-      data-student-bottom-nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
-      aria-label="Быстрый доступ"
-    >
-      <div className="mx-auto grid max-w-6xl grid-cols-4 px-2 pt-1">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active =
-            "page" in item && item.page
-              ? onSubscription
-              : onCabinet && tab === item.id;
-          const className = `flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition ${
-            active
-              ? "text-studio-accent-light"
-              : "text-studio-muted hover:text-studio-text"
-          }`;
-
-          if ("page" in item && item.page) {
-            return (
-              <Link key={item.id} href={item.href} className={className}>
-                <Icon className={`h-5 w-5 ${active ? "stroke-[2.25]" : ""}`} />
-                {item.label}
-              </Link>
+    <LayoutGroup id="student-bottom-nav">
+      <nav
+        data-student-bottom-nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
+        aria-label="Быстрый доступ"
+      >
+        <div className="mx-auto grid max-w-6xl grid-cols-4 px-2 pt-1">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const active =
+              "page" in item && item.page
+                ? onSubscription
+                : onCabinet && tab === item.id;
+            const className = `relative flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition ${
+              active
+                ? "text-studio-accent-light"
+                : "text-studio-muted hover:text-studio-text"
+            }`;
+            const body = (
+              <>
+                <Icon
+                  className={`relative z-[1] h-5 w-5 ${active ? "stroke-[2.25]" : ""}`}
+                />
+                <span className="relative z-[1]">{item.label}</span>
+                <SlidingTabUnderline
+                  layoutId="student-bottom-line"
+                  active={active}
+                />
+              </>
             );
-          }
 
-          return (
-            <CabinetTabLink
-              key={item.id}
-              href={item.href}
-              tabId={item.id}
-              className={className}
-            >
-              <Icon className={`h-5 w-5 ${active ? "stroke-[2.25]" : ""}`} />
-              {item.label}
-            </CabinetTabLink>
-          );
-        })}
-      </div>
-    </nav>
+            if ("page" in item && item.page) {
+              return (
+                <Link key={item.id} href={item.href} className={className}>
+                  {body}
+                </Link>
+              );
+            }
+
+            return (
+              <CabinetTabLink
+                key={item.id}
+                href={item.href}
+                tabId={item.id}
+                className={className}
+              >
+                {body}
+              </CabinetTabLink>
+            );
+          })}
+        </div>
+      </nav>
+    </LayoutGroup>
   );
 }

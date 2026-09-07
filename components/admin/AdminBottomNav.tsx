@@ -1,8 +1,10 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
+import { LayoutGroup } from "framer-motion";
 import { CalendarDays, Gift, MessageCircle, Music2, WalletCards } from "lucide-react";
 import CabinetTabLink from "@/components/dashboard/CabinetTabLink";
+import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
 
 const items = [
   {
@@ -44,31 +46,39 @@ export default function AdminBottomNav() {
   const onCabinet = pathname === "/dashboard/admin";
 
   return (
-    <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
-      aria-label="Быстрый доступ"
-    >
-      <div className="mx-auto grid max-w-6xl grid-cols-5 px-1 pt-1">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = onCabinet && tab === item.id;
-          return (
-            <CabinetTabLink
-              key={item.id}
-              href={item.href}
-              tabId={item.id}
-              className={`flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition sm:text-[11px] ${
-                active
-                  ? "text-studio-accent-light"
-                  : "text-studio-muted hover:text-studio-text"
-              }`}
-            >
-              <Icon className={`h-5 w-5 ${active ? "stroke-[2.25]" : ""}`} />
-              {item.label}
-            </CabinetTabLink>
-          );
-        })}
-      </div>
-    </nav>
+    <LayoutGroup id="admin-bottom-nav">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-studio-border bg-studio-bg pb-[env(safe-area-inset-bottom)]"
+        aria-label="Быстрый доступ"
+      >
+        <div className="mx-auto grid max-w-6xl grid-cols-5 px-1 pt-1">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const active = onCabinet && tab === item.id;
+            return (
+              <CabinetTabLink
+                key={item.id}
+                href={item.href}
+                tabId={item.id}
+                className={`relative flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition sm:text-[11px] ${
+                  active
+                    ? "text-studio-accent-light"
+                    : "text-studio-muted hover:text-studio-text"
+                }`}
+              >
+                <Icon
+                  className={`relative z-[1] h-5 w-5 ${active ? "stroke-[2.25]" : ""}`}
+                />
+                <span className="relative z-[1]">{item.label}</span>
+                <SlidingTabUnderline
+                  layoutId="admin-bottom-line"
+                  active={active}
+                />
+              </CabinetTabLink>
+            );
+          })}
+        </div>
+      </nav>
+    </LayoutGroup>
   );
 }

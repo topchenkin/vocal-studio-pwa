@@ -11,6 +11,8 @@ import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { LayoutGroup } from "framer-motion";
+import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
 import {
   aiToolLockLabel,
   canAccessAiTool,
@@ -103,35 +105,39 @@ export default function AiToolsPage() {
     >
       <StudentNav />
 
-      <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-4">
-        {visibleTabs.map((item) => {
-          const Icon = item.icon;
-          const lock = aiToolLockLabel(item.id, access);
-          const isLocked = locked(item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setTab(item.id)}
-              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-medium leading-tight transition sm:text-xs ${
-                activeTab === item.id
-                  ? "bg-studio-accent/20 text-studio-accent-light"
-                  : "text-studio-muted hover:text-studio-text"
-              }`}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="max-w-full break-words">
-                {access[item.id]?.title || item.label}
-              </span>
-              {isLocked && lock ? (
-                <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
-                  {lock}
+      <LayoutGroup id="student-ai-tools">
+        <div className="mb-5 grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border sm:grid-cols-3 lg:grid-cols-4">
+          {visibleTabs.map((item) => {
+            const Icon = item.icon;
+            const lock = aiToolLockLabel(item.id, access);
+            const isLocked = locked(item.id);
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                className={`relative flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2.5 text-center text-[11px] font-medium leading-tight transition sm:text-xs ${
+                  isActive
+                    ? "bg-studio-accent/20 text-studio-accent-light"
+                    : "text-studio-muted hover:text-studio-text"
+                }`}
+              >
+                <Icon className="relative z-[1] h-4 w-4 shrink-0" />
+                <span className="relative z-[1] max-w-full break-words">
+                  {access[item.id]?.title || item.label}
                 </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
+                {isLocked && lock ? (
+                  <span className="relative z-[1] rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
+                    {lock}
+                  </span>
+                ) : null}
+                <SlidingTabUnderline layoutId="student-ai-line" active={isActive} />
+              </button>
+            );
+          })}
+        </div>
+      </LayoutGroup>
 
       {activeTab === "tuner" && <PitchAnalyzer locked={locked("tuner")} />}
       {activeTab === "timbre" && (

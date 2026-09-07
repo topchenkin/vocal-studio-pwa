@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { emitXpToast } from "@/lib/xp-toast";
 
 export type CatXpKind =
   | "checkin"
@@ -38,7 +39,11 @@ export async function awardCatXp(
     console.warn("award_cat_xp", error.message);
     return null;
   }
-  return (data ?? null) as CatXpResult | null;
+  const result = (data ?? null) as CatXpResult | null;
+  if (result && Number(result.awarded) > 0) {
+    emitXpToast(Number(result.awarded) + Number(result.streak_bonus || 0));
+  }
+  return result;
 }
 
 export async function submitVocalTestForReview(resultId: string): Promise<void> {

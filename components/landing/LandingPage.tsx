@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { Bot, Check, Crown, Mic2, Sparkles } from "lucide-react";
 import Header from "@/components/Header";
 import AuthModal from "@/components/auth/AuthModal";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import SiteFooter from "@/components/legal/SiteFooter";
+import CinemaHeroLoop from "@/components/landing/CinemaHeroLoop";
+import HeadlineStagger from "@/components/landing/HeadlineStagger";
 import { APP_TIER_PRICES } from "@/lib/constants";
 import { formatPrice } from "@/lib/storage";
 import type { AppSubscriptionTier } from "@/types";
@@ -56,6 +59,7 @@ const plans: Array<{
 export default function LandingPage() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("register");
+  const reduce = useReducedMotion();
 
   const openAuth = (mode: AuthMode) => {
     setAuthMode(mode);
@@ -68,40 +72,58 @@ export default function LandingPage() {
       <div className="pointer-events-none fixed -right-40 top-48 h-96 w-96 rounded-full bg-studio-accent/10 blur-3xl" />
       <div className="pointer-events-none fixed -left-40 bottom-20 h-96 w-96 rounded-full bg-blue-500/5 blur-3xl" />
 
-      <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-5 sm:px-6">
-        <Header />
+      <div
+        className="relative isolate min-h-[100svh]"
+        style={{
+          ["--studio-text" as string]: "255 255 255",
+          ["--studio-muted" as string]: "186 186 210",
+          ["--studio-surface" as string]: "18 18 26",
+          ["--studio-card" as string]: "26 26 38",
+          ["--studio-border" as string]: "42 42 61",
+          ["--studio-accent" as string]: "192 132 252",
+          ["--studio-accent-light" as string]: "233 213 255",
+        }}
+      >
+        <CinemaHeroLoop />
 
-        <section className="flex min-h-[72vh] flex-col items-center justify-center py-16 text-center lg:py-24">
-          <div className="animate-slide-up mx-auto max-w-3xl">
-            <Badge className="mb-5">
-              Екатеринбург · живые уроки и кабинет в телефоне
-            </Badge>
-            <h1 className="font-display text-4xl font-semibold leading-[1.08] sm:text-6xl lg:text-7xl">
-              Голос раскрывается, когда рядом{" "}
-              <span className="text-gradient">наставник и умная практика</span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-studio-muted sm:text-lg">
-              Занимайтесь с преподавателем по расписанию и тренируйтесь дома в
-              том же кабинете. Регистрация ничего не стоит — подписку на
-              приложение подключаете только если захотите больше инструментов
-              между уроками.
-            </p>
-            <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-              <Button size="lg" onClick={() => openAuth("register")}>
-                Зарегистрироваться
-              </Button>
-              <Button
-                size="lg"
-                variant="ghost"
-                className="px-6 text-studio-muted ring-1 ring-studio-border/80 hover:text-studio-text"
-                onClick={() => openAuth("login")}
-              >
-                Войти
-              </Button>
+        <div className="relative z-10 mx-auto max-w-6xl px-4 pb-8 pt-5 sm:px-6">
+          <Header />
+
+          <section className="flex min-h-[72vh] flex-col items-center justify-center py-16 text-center lg:py-24">
+            <div className="mx-auto max-w-3xl">
+              <Badge className="mb-5">
+                Екатеринбург · живые уроки и кабинет в телефоне
+              </Badge>
+              <HeadlineStagger />
+              <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-studio-muted sm:text-lg">
+                Занимайтесь с преподавателем по расписанию и тренируйтесь дома в
+                том же кабинете. Регистрация ничего не стоит — подписку на
+                приложение подключаете только если захотите больше инструментов
+                между уроками.
+              </p>
+              <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+                <Button
+                  size="lg"
+                  className="cta-shimmer"
+                  onClick={() => openAuth("register")}
+                >
+                  Зарегистрироваться
+                </Button>
+                <Button
+                  size="lg"
+                  variant="ghost"
+                  className="px-6 text-studio-muted ring-1 ring-studio-border/80 hover:text-studio-text"
+                  onClick={() => openAuth("login")}
+                >
+                  Войти
+                </Button>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
+      </div>
 
+      <div className="relative z-10 mx-auto max-w-6xl px-4 pb-20 sm:px-6">
         <section className="rounded-3xl bg-gradient-to-r from-studio-accent/10 via-studio-card to-blue-500/10 p-8 text-center ring-1 ring-studio-border sm:p-12">
           <Mic2 className="mx-auto h-8 w-8 text-studio-accent" />
           <h2 className="mt-4 font-display text-3xl font-semibold">
@@ -112,7 +134,11 @@ export default function LandingPage() {
             расписание. Платить за приложение не нужно: подписка — отдельная
             возможность для домашней практики, не условие учёбы.
           </p>
-          <Button className="mt-6" size="lg" onClick={() => openAuth("register")}>
+          <Button
+            className="cta-shimmer mt-6"
+            size="lg"
+            onClick={() => openAuth("register")}
+          >
             Зарегистрироваться
           </Button>
         </section>
@@ -135,11 +161,19 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
-            {plans.map((plan) => {
+            {plans.map((plan, index) => {
               const Icon = plan.icon;
               return (
-                <article
+                <motion.article
                   key={plan.tier}
+                  initial={reduce ? false : { opacity: 0, y: 28 }}
+                  whileInView={reduce ? undefined : { opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.3 }}
+                  transition={{
+                    duration: 0.5,
+                    delay: reduce ? 0 : index * 0.12,
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
                   className={`relative flex flex-col rounded-3xl p-6 ring-1 transition duration-300 hover:-translate-y-1 ${
                     plan.highlighted
                       ? "bg-gradient-to-b from-studio-accent/15 to-studio-card ring-studio-accent/50 shadow-glow"
@@ -177,7 +211,7 @@ export default function LandingPage() {
                   >
                     Выбрать {plan.title}
                   </Button>
-                </article>
+                </motion.article>
               );
             })}
           </div>

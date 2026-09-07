@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { LayoutGroup } from "framer-motion";
 import { BookOpen, ClipboardList, CreditCard, Home, Sparkles } from "lucide-react";
+import SlidingTabUnderline from "@/components/ui/SlidingTabUnderline";
 
 const items = [
   { href: "/dashboard/student", label: "Кабинет", icon: Home },
@@ -32,29 +34,34 @@ export default function StudentNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="mb-4 grid shrink-0 grid-cols-5 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
-      {items.map((item) => {
-        const Icon = item.icon;
-        const active =
-          item.href === "/dashboard/student"
-            ? pathname === item.href
-            : pathname.startsWith(item.href);
+    <LayoutGroup id="student-nav">
+      <nav className="mb-4 grid shrink-0 grid-cols-5 gap-1 rounded-2xl bg-studio-surface p-1.5 ring-1 ring-studio-border">
+        {items.map((item) => {
+          const Icon = item.icon;
+          const active =
+            item.href === "/dashboard/student"
+              ? pathname === item.href
+              : pathname.startsWith(item.href);
 
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[9px] font-medium leading-tight transition sm:gap-1.5 sm:px-1 sm:text-xs ${
-              active
-                ? "bg-studio-accent/20 text-studio-accent-light"
-                : "text-studio-muted hover:text-studio-text"
-            }`}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="max-w-full break-words">{item.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`relative flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[9px] font-medium leading-tight transition sm:gap-1.5 sm:px-1 sm:text-xs ${
+                active
+                  ? "bg-studio-accent/20 text-studio-accent-light"
+                  : "text-studio-muted hover:text-studio-text"
+              }`}
+            >
+              <Icon className="relative z-[1] h-4 w-4 shrink-0" />
+              <span className="relative z-[1] max-w-full break-words">
+                {item.label}
+              </span>
+              <SlidingTabUnderline layoutId="student-nav-line" active={active} />
+            </Link>
+          );
+        })}
+      </nav>
+    </LayoutGroup>
   );
 }
