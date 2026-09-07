@@ -442,7 +442,8 @@ async function handleInit(req, res) {
     if (!(amount > 0)) {
       return json(res, 400, { error: "Стоимость абонемента не задана" });
     }
-    lessonsCount = Math.max(1, Number(body.lessonsCount) || 8);
+    // Fixed 8-lesson pack. Never trust client lessonsCount (price is profile-set).
+    lessonsCount = 8;
     purpose = "lesson_package";
     // not in subscription_products catalog — keep FK happy
     productCode = null;
