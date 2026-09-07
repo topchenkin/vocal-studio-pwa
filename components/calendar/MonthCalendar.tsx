@@ -101,9 +101,6 @@ export default function MonthCalendar({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
-      <p className="mt-1 text-center text-[11px] text-studio-muted">
-        Время студии: Екатеринбург
-      </p>
 
       <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[10px] uppercase text-studio-muted">
         {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((label) => (

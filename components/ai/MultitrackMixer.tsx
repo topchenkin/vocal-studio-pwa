@@ -1286,11 +1286,10 @@ export default function MultitrackMixer({ locked = false }: Props) {
           Сведение дорожек
         </h2>
         <p className="mt-2 text-sm text-studio-muted">
-          Сведите голос с минусовкой как в студии: несколько дорожек, запись
-          поверх трека и готовый микс в одно нажатие. Доступно с Premium.
+          Инструмент доступен по подписке.
         </p>
         <Link href="/dashboard/student/subscription" className="mt-5 inline-flex">
-          <Button>Купить премиум</Button>
+          <Button>Оформить подписку</Button>
         </Link>
       </section>
     );

@@ -114,7 +114,7 @@ function NumberStepper({
 }
 
 export default function PitchShiftStudio({ locked = false }: Props) {
-  const { isAdmin, tier } = useAuth();
+  const { isAdmin } = useAuth();
   const [file, setFile] = useState<File | null>(null);
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
   const [pitch, setPitch] = useState(0);
@@ -277,14 +277,12 @@ export default function PitchShiftStudio({ locked = false }: Props) {
             Изменение тональности
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
-            Инструмент доступен по тарифу, заданному администратором. Сейчас у
-            вас:{" "}
-            <span className="font-medium text-studio-text">{tier}</span>.
+            Инструмент доступен по подписке.
           </p>
           <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              Купить премиум
+              Оформить подписку
             </Button>
           </Link>
         </div>

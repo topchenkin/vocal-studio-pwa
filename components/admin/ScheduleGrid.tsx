@@ -797,7 +797,7 @@ export default function ScheduleGrid() {
           <div>
             <h3 className="font-display text-xl font-semibold">Расписание</h3>
             <p className="text-sm text-studio-muted">
-              Время студии — Екатеринбург. Ученик может запросить перенос или отмену.
+              Ученик может запросить перенос или отмену.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

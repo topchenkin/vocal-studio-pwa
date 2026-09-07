@@ -292,12 +292,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       void loadProfile(user, true);
     };
     window.addEventListener("uvs-profile-updated", onProfileUpdated);
+    const refreshFromServer = () => {
+      void loadProfile(user, true);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshFromServer();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refreshFromServer);
+    window.addEventListener("pageshow", refreshFromServer);
 
     return () => {
       void supabase.removeChannel(channel);
       window.removeEventListener("uvs-route-recovered", onRecovered);
       window.removeEventListener("uvs-reconnecting", onReconnecting);
       window.removeEventListener("uvs-profile-updated", onProfileUpdated);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refreshFromServer);
+      window.removeEventListener("pageshow", refreshFromServer);
     };
   }, [isMockAdmin, loadProfile, user]);
 

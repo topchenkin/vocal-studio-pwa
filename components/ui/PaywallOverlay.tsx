@@ -18,7 +18,7 @@ export default function PaywallOverlay({
   description = "Оформите Standard или выше, чтобы открыть этот раздел",
   onUpgrade,
   href = "/dashboard/student/subscription",
-  buttonLabel = "Купить премиум",
+  buttonLabel = "Оформить подписку",
 }: PaywallOverlayProps) {
   return (
     <motion.div

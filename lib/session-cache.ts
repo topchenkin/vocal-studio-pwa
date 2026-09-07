@@ -37,7 +37,13 @@ export function readCachedProfile(): StudentProfile | null {
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (!raw) return null;
-    const profile = JSON.parse(raw) as StudentProfile;
+    const parsed = JSON.parse(raw) as
+      | StudentProfile
+      | { profile?: StudentProfile; cachedAt?: number };
+    const profile =
+      parsed && typeof parsed === "object" && "id" in parsed
+        ? (parsed as StudentProfile)
+        : (parsed as { profile?: StudentProfile }).profile;
     const user = readCachedUser();
     if (!user || !profile?.id || profile.id !== user.id) return null;
     return profile;
@@ -50,7 +56,12 @@ export function writeCachedProfile(profile: StudentProfile | null) {
   if (typeof window === "undefined") return;
   try {
     if (!profile) localStorage.removeItem(PROFILE_KEY);
-    else localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    else {
+      localStorage.setItem(
+        PROFILE_KEY,
+        JSON.stringify({ profile, cachedAt: Date.now() })
+      );
+    }
   } catch {
     /* private mode */
   }

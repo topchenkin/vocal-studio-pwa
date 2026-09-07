@@ -319,7 +319,7 @@ export default function UpcomingLessons() {
             {scope === "history" ? "История занятий" : "Ближайшие занятия"}
           </h3>
           <p className="text-xs text-studio-muted">
-            Время студии — Екатеринбург. Запись делает преподаватель.
+            Запись делает преподаватель.
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">

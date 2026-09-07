@@ -68,7 +68,7 @@ function makeNoiseBuffer(ctx: AudioContext): AudioBuffer {
 }
 
 export default function ChordLoopGenerator({ locked = false }: Props) {
-  const { user, tier } = useAuth();
+  const { user } = useAuth();
   const [root, setRoot] = useState<RootKey>("A");
   const [mode, setMode] = useState<ScaleMode>("minor");
   const [vibe, setVibe] = useState<ChordVibe>("sad-pop");
@@ -479,13 +479,12 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
             Генератор аккордов
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
-            Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
-            <span className="font-medium text-studio-text">{tier}</span>.
+            Инструмент доступен по подписке.
           </p>
           <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              Купить премиум
+              Оформить подписку
             </Button>
           </Link>
         </div>

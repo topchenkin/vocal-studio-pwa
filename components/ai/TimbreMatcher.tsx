@@ -365,7 +365,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
     return (
       <LockedCard
         title="Вокальный архетип"
-        text="Спойте десять секунд — инструмент локально определит ориентировочный тип, окрас и текстуру голоса. Доступно на Premium."
+        text="Инструмент доступен по подписке."
       />
     );
   }
@@ -582,7 +582,7 @@ function LockedCard({ title, text }: { title: string; text: string }) {
       <h2 className="font-display text-2xl font-semibold">{title}</h2>
       <p className="mt-2 text-sm text-studio-muted">{text}</p>
       <Link href="/dashboard/student/subscription" className="mt-5 inline-flex">
-        <Button>Купить премиум</Button>
+        <Button>Оформить подписку</Button>
       </Link>
     </section>
   );

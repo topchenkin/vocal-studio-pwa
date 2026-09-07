@@ -21,6 +21,20 @@ function formatNotificationDate(value: string) {
   }).format(new Date(value));
 }
 
+function notificationHeadline(item: AppNotification) {
+  const title = String(item.title || "").trim();
+  if (title) return title;
+  return previewNotificationMessage(String(item.message || ""));
+}
+
+function notificationBodyPreview(item: AppNotification) {
+  const title = String(item.title || "").trim();
+  if (!title) return "";
+  const body = previewNotificationMessage(String(item.message || "")).trim();
+  if (!body || body === title) return "";
+  return body.length > 120 ? `${body.slice(0, 117)}…` : body;
+}
+
 function previewNotificationMessage(raw: string) {
   if (isExerciseResultText(raw)) {
     if (/результаты упражнения/i.test(raw) && !raw.includes("{")) {
@@ -379,9 +393,14 @@ export default function NotificationBell() {
                               <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-studio-accent" />
                             )}
                             <div className={!item.is_read ? "" : "pl-4"}>
-                              <p className="text-sm">
-                                {previewNotificationMessage(item.message)}
+                              <p className="text-sm font-medium">
+                                {notificationHeadline(item)}
                               </p>
+                              {notificationBodyPreview(item) ? (
+                                <p className="mt-0.5 text-xs text-studio-muted">
+                                  {notificationBodyPreview(item)}
+                                </p>
+                              ) : null}
                               <p className="mt-1 text-[10px] text-studio-muted/70">
                                 {formatNotificationDate(item.created_at)}
                               </p>

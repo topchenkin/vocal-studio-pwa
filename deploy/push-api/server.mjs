@@ -122,6 +122,12 @@ function previewPayload(row) {
   };
 }
 
+const BACKLOG_SKIP_MS = 30 * 60 * 1000;
+const ATTEMPT_WINDOW_MS = 30 * 60 * 1000;
+const POLL_LIMIT = 50;
+const MAX_PUSH_ATTEMPTS = 8;
+const retryState = new Map();
+
 async function markSent(ids) {
   if (ids.length === 0) return;
   const filter = ids.join(",");
@@ -132,7 +138,7 @@ async function markSent(ids) {
 }
 
 async function skipBacklog() {
-  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - BACKLOG_SKIP_MS).toISOString();
   const response = await sb(
     `/rest/v1/notifications?push_sent_at=is.null&created_at=lt.${encodeURIComponent(cutoff)}`,
     {
@@ -145,6 +151,22 @@ async function skipBacklog() {
     const text = await response.text();
     console.error("push backlog skip failed", response.status, text.slice(0, 300));
   }
+}
+
+function shouldDefer(id) {
+  const state = retryState.get(id);
+  return Boolean(state && Date.now() < state.nextAt);
+}
+
+function notePushFailure(id) {
+  const prev = retryState.get(id) || { attempts: 0, nextAt: 0 };
+  const attempts = prev.attempts + 1;
+  const delay = Math.min(
+    15 * 60 * 1000,
+    4000 * 2 ** Math.min(attempts - 1, 8)
+  );
+  retryState.set(id, { attempts, nextAt: Date.now() + delay });
+  return attempts;
 }
 
 async function loadSubscriptions(userIds) {
@@ -167,6 +189,8 @@ async function dropSubscription(endpoint) {
 
 async function deliver(row, subscriptions) {
   const payload = JSON.stringify(previewPayload(row));
+  let delivered = 0;
+  let retryable = false;
   await Promise.all(
     subscriptions.map(async (subscription) => {
       try {
@@ -180,21 +204,27 @@ async function deliver(row, subscriptions) {
           },
           payload
         );
+        delivered += 1;
       } catch (error) {
         const status = Number(error?.statusCode) || 0;
         if (status === 404 || status === 410) {
           await dropSubscription(subscription.endpoint);
           return;
         }
+        if (status === 429 || status >= 500 || status === 0) {
+          retryable = true;
+        }
         console.error("web-push failed", status, error?.message || error);
       }
     })
   );
+  return { delivered, retryable };
 }
 
 async function pollOnce() {
+  const since = new Date(Date.now() - ATTEMPT_WINDOW_MS).toISOString();
   const response = await sb(
-    `/rest/v1/notifications?push_sent_at=is.null&select=id,recipient_id,recipient_role,title,message,action_url,created_at&order=created_at.asc&limit=25`
+    `/rest/v1/notifications?push_sent_at=is.null&created_at=gte.${encodeURIComponent(since)}&select=id,recipient_id,recipient_role,title,message,action_url,created_at&order=created_at.desc&limit=${POLL_LIMIT}`
   );
   if (!response.ok) {
     const text = await response.text();
@@ -203,8 +233,11 @@ async function pollOnce() {
   const rows = await response.json();
   if (!Array.isArray(rows) || rows.length === 0) return 0;
 
+  const due = rows.filter((row) => !shouldDefer(row.id));
+  if (due.length === 0) return 0;
+
   const recipientIds = [
-    ...new Set(rows.map((row) => row.recipient_id).filter(Boolean)),
+    ...new Set(due.map((row) => row.recipient_id).filter(Boolean)),
   ];
   const subscriptions = await loadSubscriptions(recipientIds);
   const byUser = new Map();
@@ -214,14 +247,38 @@ async function pollOnce() {
     byUser.set(item.user_id, list);
   }
 
-  for (const row of rows) {
+  let handled = 0;
+  for (const row of due) {
     const targets = row.recipient_id ? byUser.get(row.recipient_id) || [] : [];
-    if (targets.length > 0) {
-      await deliver(row, targets);
+    if (targets.length === 0) {
+      const attempts = notePushFailure(row.id);
+      if (attempts >= MAX_PUSH_ATTEMPTS) {
+        await markSent([row.id]);
+        retryState.delete(row.id);
+        console.warn("push skipped, no subscriptions", row.id);
+      }
+      continue;
+    }
+    const result = await deliver(row, targets);
+    if (result.delivered > 0) {
+      await markSent([row.id]);
+      retryState.delete(row.id);
+      handled += 1;
+      continue;
+    }
+    if (result.retryable) {
+      const attempts = notePushFailure(row.id);
+      if (attempts >= MAX_PUSH_ATTEMPTS) {
+        await markSent([row.id]);
+        retryState.delete(row.id);
+        console.warn("push given up after retries", row.id);
+      }
+      continue;
     }
     await markSent([row.id]);
+    retryState.delete(row.id);
   }
-  return rows.length;
+  return handled;
 }
 
 let ticking = false;
@@ -394,6 +451,7 @@ async function tick() {
   if (ticking) return;
   ticking = true;
   try {
+    await skipBacklog();
     await pollOnce();
     if (Date.now() - lastRemindAt >= REMIND_MS) {
       lastRemindAt = Date.now();

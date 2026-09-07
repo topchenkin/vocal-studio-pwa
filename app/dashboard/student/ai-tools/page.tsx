@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AudioLines, Layers, Mic, Music2, Repeat, Stars, WandSparkles } from "lucide-react";
+import { AudioLines, Layers, Mic, Music2, Repeat, Stars } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
-import VocalRemover from "@/components/ai/VocalRemover";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
@@ -40,7 +39,6 @@ const TABS: Array<{
   icon: typeof Mic;
 }> = [
   { id: "tuner", label: "Нейроанализатор нот", icon: Mic },
-  { id: "remover", label: "Удаление вокала", icon: WandSparkles },
   { id: "timbre", label: "Вокальный архетип", icon: Stars },
   { id: "mixer", label: "Сведение дорожек", icon: Layers },
   { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
@@ -89,10 +87,9 @@ export default function AiToolsPage() {
   const locked = (tool: AiToolId) =>
     !canAccessAiTool(tool, tier, isAdmin, access);
 
-  const visibleTabs = TABS.filter((item) => {
-    if (item.id === "remover" && !isAdmin) return false;
-    return isAdmin || access[item.id]?.enabled !== false;
-  });
+  const visibleTabs = TABS.filter(
+    (item) => isAdmin || access[item.id]?.enabled !== false
+  );
 
   const activeTab = visibleTabs.some((item) => item.id === tab)
     ? tab
@@ -126,20 +123,17 @@ export default function AiToolsPage() {
               <span className="max-w-full break-words">
                 {access[item.id]?.title || item.label}
               </span>
-              {isLocked && lock && (
+              {isLocked && lock ? (
                 <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">
                   {lock}
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}
       </div>
 
       {activeTab === "tuner" && <PitchAnalyzer locked={locked("tuner")} />}
-      {activeTab === "remover" && isAdmin && (
-        <VocalRemover locked={locked("remover")} />
-      )}
       {activeTab === "timbre" && (
         <TimbreMatcher locked={locked("timbre")} />
       )}

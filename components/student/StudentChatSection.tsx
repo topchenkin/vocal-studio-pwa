@@ -171,7 +171,7 @@ export default function StudentChatSection() {
             title="Чат с преподавателем"
             description="Доступно с подпиской Standard и выше"
             onUpgrade={() => router.push("/dashboard/student/subscription")}
-            buttonLabel="Купить премиум"
+            buttonLabel="Оформить подписку"
           />
         )}
       </div>

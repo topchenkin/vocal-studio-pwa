@@ -67,7 +67,7 @@ function ensureAudioContext(): AudioContext {
 }
 
 export default function VocalFxBox({ locked = false }: Props) {
-  const { user, isAdmin, tier } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [buffer, setBuffer] = useState<AudioBuffer | null>(null);
   const [fileName, setFileName] = useState("");
   const [preset, setPreset] = useState<VocalFxPreset>("hall");
@@ -450,13 +450,12 @@ export default function VocalFxBox({ locked = false }: Props) {
             Обработка голоса
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
-            Инструмент доступен по тарифу администратора. Сейчас у вас:{" "}
-            <span className="font-medium text-studio-text">{tier}</span>.
+            Инструмент доступен по подписке.
           </p>
           <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
               <Sparkles className="h-5 w-5" />
-              Купить премиум
+              Оформить подписку
             </Button>
           </Link>
         </div>

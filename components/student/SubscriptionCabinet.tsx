@@ -51,7 +51,7 @@ function isSubscriptionActive(
 }
 
 export default function SubscriptionCabinet() {
-  const { profile, tier, refreshProfile } = useAuth();
+  const { profile, tier, refreshProfile, isAdmin } = useAuth();
   const [selectedId, setSelectedId] = useState(
     () => PLANS.find((p) => p.badge === "Популярный")?.id ?? PLANS[0]!.id
   );
@@ -308,17 +308,21 @@ export default function SubscriptionCabinet() {
             </Button>
           )}
 
-          <button
-            type="button"
-            onClick={() => setPayment({ type: "test_payment", amount: 1 })}
-            className="w-full rounded-xl px-4 py-3 text-sm text-studio-muted ring-1 ring-studio-border transition hover:bg-studio-surface hover:text-studio-text hover:ring-studio-gold/30"
-          >
-            Тестовая оплата · 1 ₽
-          </button>
-          <p className="text-center text-xs text-studio-muted">
-            Реальная оплата через ЮKassa (СБП) для проверки. Тариф и срок не
-            меняются.
-          </p>
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => setPayment({ type: "test_payment", amount: 1 })}
+                className="w-full rounded-xl px-4 py-3 text-sm text-studio-muted ring-1 ring-studio-border transition hover:bg-studio-surface hover:text-studio-text hover:ring-studio-gold/30"
+              >
+                Тестовая оплата · 1 ₽
+              </button>
+              <p className="text-center text-xs text-studio-muted">
+                Реальная оплата через ЮKassa (СБП) для проверки. Тариф и срок не
+                меняются.
+              </p>
+            </>
+          )}
         </section>
 
         <DuoSubscriptionCard profile={profile} />

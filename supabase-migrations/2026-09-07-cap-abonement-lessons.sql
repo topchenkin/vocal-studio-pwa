@@ -64,7 +64,7 @@ begin
 
   if tx.purpose = 'lesson_debt' then
     update public.profiles
-    set debt_amount = 0
+    set debt_amount = greatest(debt_amount - tx.amount_rub, 0)
     where id = tx.student_id;
   elsif tx.purpose = 'lesson_package' then
     update public.profiles

@@ -142,63 +142,29 @@ export default function NotificationForm() {
     setDeliveryNote("");
 
     if (!isMockAdmin) {
-      let {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const expiresSoon =
-        !session?.expires_at || session.expires_at * 1000 < Date.now() + 60_000;
-      if (expiresSoon) {
-        const { data, error: refreshError } =
-          await supabase.auth.refreshSession();
-        if (refreshError) {
-          setError("Сессия администратора истекла. Войдите повторно.");
-          setSending(false);
-          return;
-        }
-        session = data.session;
-      }
-      if (!session?.access_token) {
-        setError("Сессия администратора не найдена. Войдите повторно.");
+      const rows = recipientIds.map((id) => ({
+        recipient_id: id,
+        recipient_role: "student" as const,
+        title: title.trim() || "Уведомление",
+        message: message.trim().slice(0, 500),
+        kind: "general" as const,
+        action_url: "/dashboard/student",
+        email_fallback_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+      }));
+
+      const { error: insertError } = await supabase
+        .from("notifications")
+        .insert(rows);
+
+      if (insertError) {
+        setError(`Не удалось отправить уведомление: ${insertError.message}`);
         setSending(false);
         return;
       }
 
-      const response = await fetch("/api/notifications/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          recipientIds,
-          title: title.trim(),
-          message: message.trim(),
-        }),
-      });
-      const result = (await response.json()) as {
-        error?: string;
-        pushConfigured?: boolean;
-        pushDelivered?: number;
-        pushMissing?: string[];
-      };
-
-      if (!response.ok) {
-        setError(`Не удалось отправить уведомление: ${result.error ?? "ошибка сервера"}`);
-        setSending(false);
-        return;
-      }
-
-      if (!result.pushConfigured) {
-        setDeliveryNote(
-          `Сообщение сохранено, но сервер не получил: ${
-            result.pushMissing?.join(", ") || "VAPID-ключи"
-          }.`
-        );
-      } else if ((result.pushDelivered ?? 0) === 0) {
-        setDeliveryNote(
-          "Сообщение сохранено, но у получателей пока нет активной push-подписки."
-        );
-      }
+      setDeliveryNote(
+        "Сообщение сохранено. Push уйдёт автоматически, если у ученика есть подписка."
+      );
     }
 
     setSentCount(recipientIds.length);

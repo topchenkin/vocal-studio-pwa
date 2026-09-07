@@ -88,7 +88,7 @@ export default function LandingPage() {
             </p>
             <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
               <Button size="lg" onClick={() => openAuth("register")}>
-                Создать бесплатный кабинет
+                Зарегистрироваться
               </Button>
               <Button
                 size="lg"
@@ -96,7 +96,7 @@ export default function LandingPage() {
                 className="px-6 text-studio-muted ring-1 ring-studio-border/80 hover:text-studio-text"
                 onClick={() => openAuth("login")}
               >
-                У меня уже есть аккаунт
+                Войти
               </Button>
             </div>
           </div>

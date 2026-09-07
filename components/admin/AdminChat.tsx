@@ -54,7 +54,6 @@ export default function AdminChat() {
             .from("profiles")
             .select("*")
             .eq("role", "student")
-            .neq("app_sub_tier", "none")
             .order("full_name"),
           supabase
             .from("group_chats")

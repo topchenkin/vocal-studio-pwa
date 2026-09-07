@@ -150,7 +150,7 @@ export function aiToolLockLabel(
   const cfg = access[tool] ?? DEFAULT_AI_TOOL_ACCESS[tool];
   if (!cfg.enabled) return "выкл";
   if (cfg.min_tier === "none") return "";
-  return cfg.min_tier.charAt(0).toUpperCase() + cfg.min_tier.slice(1);
+  return "подписка";
 }
 
 export function aiToolDeniedMessage(
@@ -167,7 +167,5 @@ export function aiToolDeniedMessage(
   if (cfg.min_tier === "none") {
     return `${cfg.title} недоступен`;
   }
-  const label =
-    cfg.min_tier.charAt(0).toUpperCase() + cfg.min_tier.slice(1);
-  return `${cfg.title} доступен с тарифа ${label}`;
+  return "Инструмент доступен по подписке";
 }

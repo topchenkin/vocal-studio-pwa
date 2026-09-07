@@ -184,11 +184,11 @@ export default function PitchAnalyzer({
             {variant === "exam" ? "Профессиональный тест" : "Нейроанализатор нот"}
           </h2>
           <p className="mt-2 max-w-sm text-sm text-studio-muted">
-            Инструмент доступен по тарифу, заданному администратором.
+            Инструмент доступен по подписке.
           </p>
           <Link href="/dashboard/student/subscription" className="mt-6 w-full max-w-xs">
             <Button fullWidth size="lg">
-              Купить премиум
+              Оформить подписку
             </Button>
           </Link>
         </div>

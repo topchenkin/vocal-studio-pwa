@@ -19,6 +19,8 @@ SUB_SQL = ROOT / "supabase-migrations" / "2026-08-23-subscription-expiry.sql"
 TEST_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-23-test-payment.sql"
 LESSON_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-26-lesson-schedule-pay.sql"
 AUDIT_SQL = ROOT / "supabase-migrations" / "2026-09-05-audit-hardening.sql"
+CAP_ABONEMENT_SQL = ROOT / "supabase-migrations" / "2026-09-07-cap-abonement-lessons.sql"
+ROLLOUT_SQL = ROOT / "supabase-migrations" / "2026-09-07-rollout-hardening.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
 
@@ -117,6 +119,8 @@ def main() -> None:
         TEST_PAY_SQL,
         LESSON_PAY_SQL,
         AUDIT_SQL,
+        CAP_ABONEMENT_SQL,
+        ROLLOUT_SQL,
     ):
         if not path.is_file():
             raise SystemExit(f"missing {path}")
@@ -166,6 +170,10 @@ def main() -> None:
                 fh.write(LESSON_PAY_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/audit-hardening.sql", "wb") as fh:
                 fh.write(AUDIT_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/cap-abonement-lessons.sql", "wb") as fh:
+                fh.write(CAP_ABONEMENT_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/rollout-hardening.sql", "wb") as fh:
+                fh.write(ROLLOUT_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
             sftp.close()
         run(client, "chown -R www-data:www-data /opt/pay-api")
@@ -173,7 +181,12 @@ def main() -> None:
             client,
             "chown root:www-data /etc/uniquevocal/pay-api.env && chmod 640 /etc/uniquevocal/pay-api.env",
         )
-        for sql_name in ("lesson-schedule-pay.sql", "audit-hardening.sql"):
+        for sql_name in (
+            "lesson-schedule-pay.sql",
+            "audit-hardening.sql",
+            "cap-abonement-lessons.sql",
+            "rollout-hardening.sql",
+        ):
             run(
                 client,
                 f"docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < /opt/uvs-migrate/{sql_name}",
