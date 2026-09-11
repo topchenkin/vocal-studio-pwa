@@ -358,7 +358,7 @@ export default function UpcomingLessons() {
               setView("list");
               setSelectedDate(null);
             }}
-            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+            className={`flex min-h-11 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
               view === "list"
                 ? "bg-studio-accent/20 text-studio-accent-light"
                 : "text-studio-muted"
@@ -370,7 +370,7 @@ export default function UpcomingLessons() {
           <button
             type="button"
             onClick={() => setView("calendar")}
-            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+            className={`flex min-h-11 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
               view === "calendar"
                 ? "bg-studio-accent/20 text-studio-accent-light"
                 : "text-studio-muted"

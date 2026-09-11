@@ -56,7 +56,7 @@ export default function XpToastStack() {
             </div>
             <button
               type="button"
-              className="absolute right-2 top-2 rounded-md p-1 text-studio-muted/80 hover:text-studio-text"
+              className="absolute right-0.5 top-0.5 flex h-11 w-11 items-center justify-center rounded-md text-studio-muted/80 hover:text-studio-text"
               aria-label="Закрыть"
               onClick={() => setItem(null)}
             >

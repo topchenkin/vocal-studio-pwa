@@ -514,7 +514,7 @@ export default function ChatWindow({
                         !vocalReport && (
                           <button
                             type="button"
-                            className="rounded-md p-1.5 text-studio-muted hover:text-studio-text"
+                            className="flex h-11 w-11 items-center justify-center rounded-md text-studio-muted hover:text-studio-text"
                             title="Изменить"
                             onClick={() => {
                               setEditingId(msg.id);
@@ -527,7 +527,7 @@ export default function ChatWindow({
                       {onDelete && (
                         <button
                           type="button"
-                          className="rounded-md p-1.5 text-studio-muted hover:text-red-300"
+                          className="flex h-11 w-11 items-center justify-center rounded-md text-studio-muted hover:text-red-300"
                           title="Удалить"
                           onClick={() => {
                             if (window.confirm("Удалить это сообщение?")) {

@@ -427,7 +427,7 @@ export default function NotificationBell() {
           setOpen((current) => !current);
           void loadNotifications();
         }}
-        className="relative rounded-lg p-2 text-studio-muted transition-colors hover:bg-studio-card hover:text-white"
+        className="relative flex h-11 w-11 items-center justify-center rounded-lg text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text"
         aria-label="Уведомления"
       >
         <Bell className="h-5 w-5" />

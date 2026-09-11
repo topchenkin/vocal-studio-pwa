@@ -117,7 +117,7 @@ export default function ExerciseAudioPlayer({
         <button
           type="button"
           onClick={() => seek(0)}
-          className="rounded-lg p-1.5 text-studio-muted hover:bg-studio-surface hover:text-white"
+          className="flex h-11 w-11 items-center justify-center rounded-lg text-studio-muted hover:bg-studio-surface hover:text-white"
           aria-label="В начало"
         >
           <RotateCcw className="h-4 w-4" />
@@ -128,7 +128,7 @@ export default function ExerciseAudioPlayer({
               key={value}
               type="button"
               onClick={() => changeSpeed(value)}
-              className={`rounded-lg px-2 py-1 text-xs transition ${
+              className={`flex min-h-11 min-w-11 items-center justify-center rounded-lg px-2 text-xs transition ${
                 speed === value
                   ? "bg-studio-accent/20 text-studio-accent-light"
                   : "text-studio-muted hover:text-white"

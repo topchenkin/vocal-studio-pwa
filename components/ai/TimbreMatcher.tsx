@@ -397,7 +397,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
               disabled={isBusy}
               onClick={() => setGender(item)}
               aria-pressed={gender === item}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 gender === item
                   ? "bg-studio-accent/20 text-studio-accent-light ring-1 ring-studio-accent/40"
                   : "text-studio-muted hover:text-studio-text"

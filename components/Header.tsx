@@ -77,7 +77,7 @@ export default function Header({ showNav = true }: HeaderProps) {
               <button
                 type="button"
                 onClick={() => void signOut()}
-                className="hidden rounded-lg p-2 text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text sm:block"
+                className="hidden h-11 w-11 items-center justify-center rounded-lg text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text sm:flex"
                 aria-label="Выйти"
               >
                 <LogOut className="h-4 w-4" />
