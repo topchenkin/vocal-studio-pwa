@@ -7,13 +7,11 @@ import {
   FileVideo2,
   Music2,
   Plus,
-  RefreshCw,
   Trash2,
   Upload,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import PhraseEditor from "@/components/admin/PhraseEditor";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -23,14 +21,11 @@ import {
   rejectedMediaMessage,
 } from "@/lib/file-accept";
 import { supabase } from "@/lib/supabase";
-import { EXERCISE_PHRASE_LIST_LIMIT } from "@/lib/vocal-exercise";
 import { CAT_LEVEL_LABELS, CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
   AppSubscriptionTier,
   CatLevel,
   Exercise,
-  ExerciseAnalysisJob,
-  ExercisePhrase,
   StudentFolder,
   StudentProfile,
 } from "@/types";
@@ -42,15 +37,6 @@ const tierOptions: AppSubscriptionTier[] = [
   "vip",
 ];
 const catOptions = CAT_LEVEL_OPTIONS;
-
-const analysisLabels: Record<ExerciseAnalysisJob["status"], string> = {
-  queued: "В очереди",
-  separating: "Demucs отделяет вокал",
-  awaiting_phrase_review: "Нужно разметить фразы",
-  extracting: "Извлекаем признаки",
-  ready: "Интерактив готов",
-  failed: "Ошибка обработки",
-};
 
 type VisibilityPreset =
   | "everyone"
@@ -142,8 +128,6 @@ function detectPreset(item: Exercise): VisibilityPreset {
 export default function ContentManager() {
   const { user, isMockAdmin } = useAuth();
   const [items, setItems] = useState<Exercise[]>([]);
-  const [analysisJobs, setAnalysisJobs] = useState<ExerciseAnalysisJob[]>([]);
-  const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
   const [folders, setFolders] = useState<StudentFolder[]>([]);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [folderAccess, setFolderAccess] = useState<
@@ -175,8 +159,6 @@ export default function ContentManager() {
       studentsResult,
       folderAccessResult,
       studentAccessResult,
-      analysisResult,
-      phraseResult,
     ] =
       await Promise.all([
         supabase.from("exercises").select("*").order("created_at", { ascending: false }),
@@ -184,13 +166,6 @@ export default function ContentManager() {
         supabase.from("profiles").select("*").eq("role", "student").order("full_name"),
         supabase.from("exercise_folder_access").select("*"),
         supabase.from("exercise_student_access").select("*"),
-        supabase.from("exercise_analysis_jobs").select("*"),
-        supabase
-          .from("exercise_phrases")
-          .select("id,exercise_id,title,feature_status,sort_order,created_at")
-          .order("sort_order")
-          .order("created_at")
-          .limit(EXERCISE_PHRASE_LIST_LIMIT),
       ]);
 
     const queryError =
@@ -198,9 +173,7 @@ export default function ContentManager() {
       foldersResult.error ??
       studentsResult.error ??
       folderAccessResult.error ??
-      studentAccessResult.error ??
-      analysisResult.error ??
-      phraseResult.error;
+      studentAccessResult.error;
     if (queryError) {
       setError(`Не удалось загрузить библиотеку: ${queryError.message}`);
     } else {
@@ -209,8 +182,6 @@ export default function ContentManager() {
       setStudents(studentsResult.data ?? []);
       setFolderAccess(folderAccessResult.data ?? []);
       setStudentAccess(studentAccessResult.data ?? []);
-      setAnalysisJobs(analysisResult.data ?? []);
-      setPhrases((phraseResult.data ?? []) as ExercisePhrase[]);
     }
     setLoading(false);
   }, [isMockAdmin]);
@@ -218,19 +189,6 @@ export default function ContentManager() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (
-      isMockAdmin ||
-      !analysisJobs.some((job) =>
-        ["queued", "separating", "extracting"].includes(job.status)
-      )
-    ) {
-      return;
-    }
-    const timer = window.setInterval(() => void load(), 5_000);
-    return () => window.clearInterval(timer);
-  }, [analysisJobs, isMockAdmin, load]);
 
   const openCreate = () => {
     setEditing(null);
@@ -388,16 +346,6 @@ export default function ContentManager() {
     setItems((current) => current.filter((candidate) => candidate.id !== item.id));
   };
 
-  const retryAnalysis = async (exerciseId: string) => {
-    setError("");
-    const { error: retryError } = await supabase.rpc(
-      "admin_retry_exercise_analysis",
-      { p_exercise_id: exerciseId }
-    );
-    if (retryError) setError(`Не удалось повторить обработку: ${retryError.message}`);
-    else await load();
-  };
-
   if (loading) {
     return (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -428,8 +376,6 @@ export default function ContentManager() {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => {
-            const analysis = analysisJobs.find((job) => job.exercise_id === item.id);
-            const childPhrases = phrases.filter((phrase) => phrase.exercise_id === item.id);
             return (
             <article
               key={item.id}
@@ -462,44 +408,6 @@ export default function ContentManager() {
                 {straightDashNodes(CAT_LEVEL_LABELS[item.min_cat_level])}{" "}
                 · {item.audience_mode}
               </p>
-              {childPhrases.length > 0 && (
-                <p className="mt-2 text-xs text-studio-muted">
-                  {childPhrases.length}{" "}
-                  {childPhrases.length === 1
-                    ? straightDashNodes("фраза-потомок")
-                    : straightDashNodes("фраз-потомков")}{" "}
-                  этого упражнения
-                </p>
-              )}
-              {item.type === "audio" && item.storage_path && (
-                <div className="mt-3 rounded-xl bg-studio-bg/70 p-3 ring-1 ring-studio-border">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className={analysis?.status === "failed" ? "text-red-300" : "text-studio-muted"}>
-                      {analysis ? analysisLabels[analysis.status] : "Ожидает постановки в очередь"}
-                    </span>
-                    <span>{analysis?.progress ?? 0}%</span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
-                    <div
-                      className="h-full rounded-full bg-studio-accent transition-all"
-                      style={{ width: `${analysis?.progress ?? 0}%` }}
-                    />
-                  </div>
-                  {analysis?.error && (
-                    <p className="mt-2 line-clamp-3 text-[11px] text-red-300">{analysis.error}</p>
-                  )}
-                  {analysis?.status === "failed" && (
-                    <button
-                      type="button"
-                      onClick={() => void retryAnalysis(item.id)}
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-studio-accent-light"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Повторить
-                    </button>
-                  )}
-                </div>
-              )}
               <div className="mt-4 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={() => openEdit(item)}>
                   Настроить
@@ -757,17 +665,6 @@ export default function ContentManager() {
               Опубликовать сразу
             </label>
           </div>
-
-          {editing &&
-            (() => {
-              const analysis = analysisJobs.find((job) => job.exercise_id === editing.id);
-              return analysis &&
-                (analysis.status === "awaiting_phrase_review" ||
-                  analysis.status === "ready" ||
-                  analysis.status === "extracting") ? (
-                <PhraseEditor exercise={editing} job={analysis} onChanged={load} />
-              ) : null;
-            })()}
 
           <Button
             fullWidth

@@ -36,7 +36,7 @@ import {
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
 import { getSingingMicStream } from "@/lib/mic-audio";
-import { releaseIosCapture } from "@/lib/ios-audio-session";
+import { restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
 const REPRESENTATIVES_PER_GENRE = 5;
@@ -93,14 +93,11 @@ export default function TimbreMatcher({ locked = false }: Props) {
       // Capture may already be stopped.
     }
     pcmSessionRef.current = null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    releaseIosCapture(streamRef.current);
+    const stream = streamRef.current;
     streamRef.current = null;
     const context = audioContextRef.current;
     audioContextRef.current = null;
-    if (context && context.state !== "closed") {
-      await context.close().catch(() => undefined);
-    }
+    await restoreIosPlaybackAfterCapture({ stream, context });
   };
 
   useEffect(
@@ -250,8 +247,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
       if (isStale(analysisId)) return;
       const stream = await getSingingMicStream();
       if (isStale(analysisId)) {
-        stream.getTracks().forEach((track) => track.stop());
-        releaseIosCapture(stream);
+        await restoreIosPlaybackAfterCapture({ stream });
         busyRef.current = false;
         return;
       }

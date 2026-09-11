@@ -28,8 +28,8 @@ export type CatXpResult = {
 const TOAST_LINE: Partial<Record<CatXpKind, string>> = {
   checkin: "Зашли в кабинет. Серия обновлена.",
   analyzer: "Практика в анализаторе.",
-  exercise_share: "Фраза ушла преподавателю.",
-  exercise: "Фраза закрыта.",
+  exercise_share: "Практика ушла преподавателю.",
+  exercise: "Практика засчитана.",
   mixer: "Запись в студии.",
   chat: "Сообщение ушло преподавателю.",
   practice: "Практика началась.",

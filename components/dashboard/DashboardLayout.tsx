@@ -49,7 +49,7 @@ export default function DashboardLayout({
         <Header />
 
         {!compact && (
-          <div className="mt-8">
+          <div className="mt-8 min-h-[7.25rem] sm:min-h-[7.75rem]">
             <Link
               href="/"
               className="mb-4 inline-flex items-center gap-1.5 text-sm text-studio-muted transition-colors hover:text-studio-text"
@@ -58,10 +58,12 @@ export default function DashboardLayout({
               На главную
             </Link>
 
-            <h1 className="font-display text-3xl font-semibold sm:text-4xl">
+            <h1 className="truncate whitespace-nowrap font-display text-3xl font-semibold sm:text-4xl">
               {title}
             </h1>
-            {subtitle && <p className="mt-2 text-studio-muted">{subtitle}</p>}
+            <p className="mt-2 truncate text-studio-muted">
+              {subtitle || "\u00a0"}
+            </p>
           </div>
         )}
 

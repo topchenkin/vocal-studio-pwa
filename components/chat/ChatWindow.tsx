@@ -25,8 +25,7 @@ import {
   stopMediaStream,
   unlockInlineVideo,
 } from "@/lib/chat-capture";
-import { armIosCapture, cancelArmedIosCapture } from "@/lib/ios-audio-session";
-import { isAppleWebKit } from "@/lib/mic-audio";
+import { cancelArmedIosCapture, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { ChatMessage, User } from "@/lib/types";
@@ -139,6 +138,7 @@ export default function ChatWindow({
       if (timerRef.current) window.clearInterval(timerRef.current);
       stopMediaStream(streamRef.current);
       streamRef.current = null;
+      void restoreIosPlaybackAfterCapture();
     },
     []
   );
@@ -185,8 +185,15 @@ export default function ChatWindow({
     accumulatedMsRef.current = 0;
     segmentStartedRef.current = 0;
     if (previewRef.current) {
+      try {
+        previewRef.current.pause();
+      } catch {
+        /* ignore */
+      }
+      previewRef.current.removeAttribute("src");
       previewRef.current.srcObject = null;
     }
+    void restoreIosPlaybackAfterCapture();
   };
 
   const cancelRecording = () => {
@@ -268,7 +275,6 @@ export default function ChatWindow({
         setRecordError("Запись не поддерживается в этом браузере");
         return;
       }
-      armIosCapture();
       if (kind === "video") {
         // Mount a visible preview <video> during the tap. iOS will not start
         // the camera on a missing / display:none element.
@@ -276,6 +282,9 @@ export default function ChatWindow({
           setRecordKind("video");
           setPhase("recording");
           setRecordMs(0);
+        });
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         });
         if (previewRef.current) {
           unlockInlineVideo(previewRef.current);
@@ -288,7 +297,7 @@ export default function ChatWindow({
       streamRef.current = stream;
 
       if (kind === "video" && previewRef.current) {
-        void attachPreviewStream(previewRef.current, stream);
+        await attachPreviewStream(previewRef.current, stream);
       }
 
       const { recorder, mime } = createChatRecorder(stream, kind);
@@ -455,7 +464,7 @@ export default function ChatWindow({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={msg.mediaUrl}
-                        alt={isExerciseCard ? "Результаты упражнения" : "Фото в чате"}
+                        alt={isExerciseCard ? "Практика с упражнения" : "Фото в чате"}
                         className={
                           isExerciseCard
                             ? "max-h-[28rem] w-full rounded-xl object-contain"
@@ -463,7 +472,7 @@ export default function ChatWindow({
                         }
                       />
                       {isExerciseCard ? (
-                        <p className="text-xs text-studio-accent-light">Результаты упражнения</p>
+                        <p className="text-xs text-studio-accent-light">Практика с упражнения</p>
                       ) : null}
                     </div>
                   ) : msg.messageType === "video" && msg.mediaUrl ? (
@@ -472,9 +481,10 @@ export default function ChatWindow({
                         <video
                           controls
                           playsInline
+                          preload="metadata"
                           {...{ "webkit-playsinline": "true" }}
                           src={msg.mediaUrl}
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-contain bg-black"
                         />
                       </CircleVideoFrame>
                       {msg.mediaDurationSec ? (
@@ -596,7 +606,7 @@ export default function ChatWindow({
           {phase !== "idle" ? (
             <div className="space-y-2">
               {recordKind === "video" && (
-                <CircleVideoFrame className="mx-auto h-44 w-44">
+                <div className="mx-auto w-full max-w-[16rem] overflow-visible rounded-2xl bg-studio-bg ring-1 ring-studio-border">
                   <video
                     ref={previewRef}
                     muted
@@ -606,11 +616,9 @@ export default function ChatWindow({
                     height={480}
                     // iOS Safari / standalone PWA: without this the camera stays black
                     {...{ "webkit-playsinline": "true" }}
-                    className={`h-full w-full object-cover ${
-                      isAppleWebKit() ? "" : "scale-x-[-1]"
-                    }`}
+                    className="block aspect-[4/3] h-auto w-full bg-black object-contain"
                   />
-                </CircleVideoFrame>
+                </div>
               )}
               <div className="flex items-center gap-2 rounded-2xl bg-red-500/10 px-2 py-1.5 ring-1 ring-red-500/25">
                 <button

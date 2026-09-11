@@ -15,7 +15,7 @@ export default function StudentActivityStrip({
     return (
       <p className="mb-4 text-xs text-studio-muted">
         На этой неделе: {progress.exercises_week} / {progress.targets.exercises}{" "}
-        фразы · {practiceMinutes(stats.practice_sec_week)} мин пения
+        практики · {practiceMinutes(stats.practice_sec_week)} мин пения
       </p>
     );
   }

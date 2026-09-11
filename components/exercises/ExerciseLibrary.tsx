@@ -6,17 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
 import StudentActivityStrip from "@/components/student/StudentActivityStrip";
 import { useCabinetProgress } from "@/hooks/useCabinetProgress";
-import {
-  bestScoreMap,
-  countPassedPhrases,
-  phraseProgressPercent,
-  progressLabel,
-} from "@/lib/exercise-progress";
 import { supabase } from "@/lib/supabase";
-import {
-  EXERCISE_PHRASE_LIST_LIMIT,
-  phrasesForExercise,
-} from "@/lib/vocal-exercise";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
@@ -27,7 +17,7 @@ import VocalExercisePractice from "@/components/exercises/VocalExercisePractice"
 import SbpPaymentSheet, {
   type PaymentPurpose,
 } from "@/components/payment/SbpPaymentSheet";
-import type { AppSubscriptionTier, Exercise, ExercisePhrase } from "@/types";
+import type { AppSubscriptionTier, Exercise } from "@/types";
 
 const tierRank: Record<AppSubscriptionTier, number> = {
   none: 0,
@@ -110,8 +100,6 @@ export default function ExerciseLibrary() {
   const { user, tier, refreshProfile } = useAuth();
   const { progress } = useCabinetProgress();
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [phrases, setPhrases] = useState<ExercisePhrase[]>([]);
-  const [bestScores, setBestScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [lockedTier, setLockedTier] = useState<AppSubscriptionTier | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
@@ -120,38 +108,15 @@ export default function ExerciseLibrary() {
     let mounted = true;
 
     const loadExercises = async () => {
-      const [exerciseResult, progressResult] = await Promise.all([
-        supabase.from("exercises").select("*").order("title"),
-        user
-          ? supabase
-              .from("vocal_phrase_progress")
-              .select("phrase_id,best_score")
-              .eq("student_id", user.id)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      const exerciseResult = await supabase
+        .from("exercises")
+        .select("*")
+        .order("title");
 
       if (!mounted) return;
       if (exerciseResult.error) {
         console.error("Unable to load exercises:", exerciseResult.error.message);
       }
-      const visibleExercises = exerciseResult.data ?? [];
-      const visibleIds = visibleExercises.map((exercise) => exercise.id);
-      const phraseResult = visibleIds.length
-        ? await supabase
-            .from("exercise_phrases")
-            .select("*")
-            .in("exercise_id", visibleIds)
-            .order("sort_order")
-            .order("created_at")
-            .limit(EXERCISE_PHRASE_LIST_LIMIT)
-        : { data: [], error: null };
-
-      if (phraseResult.error) {
-        console.warn("Interactive phrases are unavailable:", phraseResult.error.message);
-      } else {
-        setPhrases(phraseResult.data ?? []);
-      }
-      setBestScores(bestScoreMap(progressResult.data ?? []));
       const resolvedExercises = await Promise.all(
         (exerciseResult.data ?? []).map(async (exercise) => {
           if (!exercise.storage_path) return exercise;
@@ -237,45 +202,21 @@ export default function ExerciseLibrary() {
         </div>
         <div className="grid w-full min-w-0 gap-4">
           {audioExercises.map((exercise) => {
-            const exercisePhrases = phrasesForExercise(phrases, exercise.id);
-            const passed = countPassedPhrases(
-              exercisePhrases.map((phrase) => phrase.id),
-              bestScores
-            );
-            const percent = phraseProgressPercent(exercisePhrases.length, passed);
             return (
             <div key={exercise.id} className="min-w-0 w-full">
               <div className="mb-2">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>
-                  {exercisePhrases.length > 0 && (
-                    <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
-                      {progressLabel(percent)}
-                    </span>
-                  )}
-                </div>
+                <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>
                 <p className="text-xs text-studio-muted">
                   {straightDashNodes(exercise.description)}
                 </p>
-                {exercisePhrases.length > 0 && (
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-surface">
-                    <div
-                      className="h-full rounded-full bg-emerald-400"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
-                )}
               </div>
               <ExerciseAudioPlayer
                 src={exercise.media_url}
                 title={exercise.title}
               />
-              {exercisePhrases.length > 0 && (
-                <VocalExercisePractice
-                  exercise={exercise}
-                  phrases={exercisePhrases}
-                />
-              )}
+              {exercise.media_url ? (
+                <VocalExercisePractice exercise={exercise} />
+              ) : null}
             </div>
             );
           })}

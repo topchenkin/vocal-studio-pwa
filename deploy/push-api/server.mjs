@@ -96,14 +96,14 @@ function safeActionUrl(row) {
 
 function previewPayload(row) {
   const message = String(row.message || "");
-  if (isExerciseResultText(message) || /результаты упражнения/i.test(String(row.title || ""))) {
+  if (isExerciseResultText(message) || /результаты упражнения/i.test(String(row.title || "")) || /практик/i.test(String(row.title || ""))) {
     const text =
       String(row.title || "").trim() ||
       message.replace(/\s+/g, " ").trim() ||
-      "Результаты упражнения";
+      "Практика с упражнения";
     return {
       title: text,
-      body: "Результаты упражнения",
+      body: "Практика с упражнения",
       url: safeActionUrl(row),
     };
   }
@@ -369,15 +369,15 @@ async function autoCompleteStartedLessons() {
     console.error(
       "auto-complete lessons failed",
       response.status,
-      text.slice(0, 300)
+      text.slice(0, 800)
     );
     return;
   }
   try {
     const count = await response.json();
-    if (count) console.log("auto-completed lessons", count);
+    console.log("auto-completed lessons", count ?? 0);
   } catch {
-    // RPC may return empty
+    console.log("auto-completed lessons (empty body)");
   }
 }
 
@@ -455,11 +455,13 @@ async function tick() {
     await pollOnce();
     if (Date.now() - lastRemindAt >= REMIND_MS) {
       lastRemindAt = Date.now();
+      await autoCompleteStartedLessons().catch((error) => {
+        console.error("auto-complete lessons threw", error?.message || error);
+      });
       await remindPendingReschedules();
       await remindSubscriptionExpiring();
       await grantDueLessonXp();
       await notifyUnpaidEndedLessons();
-      await autoCompleteStartedLessons();
       await sendEmailFallbacks();
     }
   } catch (error) {

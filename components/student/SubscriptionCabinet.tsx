@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Crown, FileText, WalletCards } from "lucide-react";
+import { CalendarDays, Crown, WalletCards } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import SbpPaymentSheet, {
@@ -328,20 +328,6 @@ export default function SubscriptionCabinet() {
         <DuoSubscriptionCard profile={profile} />
 
         <PaymentHistory limit={12} showEmpty />
-
-        <section className="rounded-3xl bg-studio-card/60 px-5 py-5 ring-1 ring-studio-border">
-          <div className="flex items-start gap-3">
-            <FileText className="mt-0.5 h-5 w-5 text-studio-gold" />
-            <div>
-              <p className="text-sm font-medium">Документы и поддержка</p>
-              <p className="mt-1 text-sm leading-relaxed text-studio-muted">
-                Чек приходит после оплаты через ЮKassa. Карты в кабинете не
-                сохраняем, автосписаний нет — за 3 дня до конца срока придёт
-                напоминание.
-              </p>
-            </div>
-          </div>
-        </section>
       </div>
 
       {payment && (

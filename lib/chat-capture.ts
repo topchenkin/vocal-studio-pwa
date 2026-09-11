@@ -18,6 +18,7 @@ import { pickVideoRecorderMime, pickVoiceRecorderMime } from "@/lib/media-mime";
 export function stopMediaStream(stream: MediaStream | null | undefined) {
   stream?.getTracks().forEach((track) => {
     try {
+      track.enabled = false;
       track.stop();
     } catch {
       /* already ended */
@@ -69,31 +70,56 @@ async function getVoiceStream(): Promise<MediaStream> {
   }
 }
 
+const IOS_VIDEO_CONSTRAINTS: MediaTrackConstraints[] = [
+  {
+    facingMode: { ideal: "user" },
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+  },
+  { facingMode: "user" },
+];
+
 async function getVideoStream(
   preview: HTMLVideoElement | null
 ): Promise<MediaStream> {
+  if (preview) prepareInlineVideo(preview);
+
   if (isAppleWebKit()) {
     // One combined request. Never open the camera and then ask for the mic.
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: "user" },
-      });
-    } catch {
+    let stream: MediaStream | null = null;
+    let lastError: unknown;
+    for (const video of IOS_VIDEO_CONSTRAINTS) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video,
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (!stream) {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: true,
         });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: true,
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        } catch (error) {
+          throw lastError || error;
+        }
       }
     }
-    bindPreview(preview, stream);
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = true;
+    });
+    await bindPreview(preview, stream);
     return stream;
   }
 
@@ -104,25 +130,46 @@ async function getVideoStream(
         noiseSuppression: true,
         autoGainControl: true,
       },
-      video: { facingMode: { ideal: "user" } },
+      video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } },
     });
-    bindPreview(preview, stream);
+    await bindPreview(preview, stream);
     return stream;
   } catch {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
       video: true,
     });
-    bindPreview(preview, stream);
+    await bindPreview(preview, stream);
     return stream;
   }
 }
 
-function bindPreview(preview: HTMLVideoElement | null, stream: MediaStream) {
+async function bindPreview(
+  preview: HTMLVideoElement | null,
+  stream: MediaStream
+): Promise<void> {
   if (!preview) return;
   prepareInlineVideo(preview);
-  preview.srcObject = stream;
-  void preview.play().catch(() => undefined);
+  if (preview.srcObject !== stream) {
+    preview.srcObject = stream;
+  }
+  const play = () => {
+    prepareInlineVideo(preview);
+    return preview.play().catch(() => undefined);
+  };
+  if (preview.readyState >= 1) {
+    await play();
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      preview.removeEventListener("loadedmetadata", done);
+      resolve();
+    };
+    preview.addEventListener("loadedmetadata", done, { once: true });
+    window.setTimeout(done, 800);
+  });
+  await play();
 }
 
 /** Call synchronously in the tap handler so iOS unlocks autoplay. */
@@ -132,7 +179,7 @@ export function unlockInlineVideo(video: HTMLVideoElement) {
 }
 
 function prepareInlineVideo(video: HTMLVideoElement) {
-  video.setAttribute("playsinline", "true");
+  video.setAttribute("playsinline", "");
   video.setAttribute("webkit-playsinline", "true");
   video.setAttribute("muted", "");
   video.setAttribute("autoplay", "");
@@ -141,6 +188,7 @@ function prepareInlineVideo(video: HTMLVideoElement) {
   video.playsInline = true;
   video.autoplay = true;
   video.controls = false;
+  video.setAttribute("controlslist", "nodownload nofullscreen noremoteplayback");
   try {
     video.disablePictureInPicture = true;
   } catch {
@@ -153,7 +201,7 @@ export async function attachPreviewStream(
   video: HTMLVideoElement,
   stream: MediaStream
 ): Promise<void> {
-  bindPreview(video, stream);
+  await bindPreview(video, stream);
 }
 
 export function createChatRecorder(

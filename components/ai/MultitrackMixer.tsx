@@ -39,7 +39,7 @@ import { useAuth } from "@/context/AuthContext";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
 import {
   preferIosPlayback,
-  releaseIosCapture,
+  restoreIosPlaybackAfterCapture,
   routeIosToSpeaker,
 } from "@/lib/ios-audio-session";
 import MediaAudio from "@/components/media/MediaAudio";
@@ -646,9 +646,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const stopMicTracks = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    releaseIosCapture(streamRef.current);
+    const stream = streamRef.current;
     streamRef.current = null;
+    void restoreIosPlaybackAfterCapture({ stream });
   };
 
   const releaseMicFully = () => {

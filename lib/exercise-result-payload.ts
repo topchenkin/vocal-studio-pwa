@@ -2,20 +2,21 @@ export const EXERCISE_RESULT_MARKER = "UVS_EXERCISE_RESULT";
 export const EXERCISE_VOICE_MARKER = "UVS_EXERCISE_VOICE";
 
 export type ExerciseResultPayload = {
-  v: 2;
-  kind: "exercise_result";
-  overall: number;
-  intonation: number;
-  rhythm: number;
-  completeness: number;
+  v: 2 | 3;
+  kind: "exercise_result" | "exercise_practice";
+  overall?: number;
+  intonation?: number;
+  rhythm?: number;
+  completeness?: number;
   exerciseTitle: string;
-  phraseTitle: string;
-  shift: number | null;
+  phraseTitle?: string;
+  shift?: number | null;
+  durationSec?: number;
 };
 
 export function exerciseResultNotificationText(studentName: string) {
   const name = studentName.trim() || "Ученик";
-  return `${name}, Результаты упражнения`;
+  return `${name} отправил(а) практику`;
 }
 
 export function isExerciseResultText(raw: string | null | undefined) {
@@ -23,7 +24,10 @@ export function isExerciseResultText(raw: string | null | undefined) {
   return (
     text.includes(EXERCISE_RESULT_MARKER) ||
     text.includes('"kind":"exercise_result"') ||
-    /результаты упражнения/i.test(text)
+    text.includes('"kind":"exercise_practice"') ||
+    /результаты упражнения/i.test(text) ||
+    /отправил[аи]?\s*\(?а\)?\s*практик/i.test(text) ||
+    /практика с упражнения/i.test(text)
   );
 }
 
@@ -39,6 +43,20 @@ export function exerciseResultChatText(
     0,
     2000
   );
+}
+
+export function exercisePracticeChatText(
+  studentName: string,
+  exerciseTitle: string,
+  durationSec: number
+) {
+  const payload: ExerciseResultPayload = {
+    v: 3,
+    kind: "exercise_practice",
+    exerciseTitle,
+    durationSec,
+  };
+  return exerciseResultChatText(studentName, payload);
 }
 
 export function exerciseVoiceFollowupText(exerciseTitle: string, phraseTitle: string) {
@@ -62,7 +80,16 @@ export function parseExerciseResultPayload(
       return null;
     }
   }
-  if (!parsed || parsed.v !== 2 || parsed.kind !== "exercise_result") return null;
+  if (!parsed) return null;
+  if (parsed.kind === "exercise_practice" || parsed.v === 3) {
+    return {
+      v: 3,
+      kind: "exercise_practice",
+      exerciseTitle: String(parsed.exerciseTitle || ""),
+      durationSec: Number(parsed.durationSec) || 0,
+    };
+  }
+  if (parsed.v !== 2 || parsed.kind !== "exercise_result") return null;
   return {
     v: 2,
     kind: "exercise_result",

@@ -5,7 +5,7 @@ import ExerciseLibrary from "@/components/exercises/ExerciseLibrary";
 export default function StudentExercisesPage() {
   return (
     <DashboardLayout
-      title="База упражнений"
+      title="Упражнения"
       subtitle="Распевки и видео-уроки для ежедневной практики"
       bottomInset
     >

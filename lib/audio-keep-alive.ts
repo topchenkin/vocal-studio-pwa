@@ -1,3 +1,5 @@
+import { preferIosPlayback } from "@/lib/ios-audio-session";
+
 /**
  * iOS suspends Web Audio when the screen locks. A looping silent HTML
  * media element plus Media Session is the only web-side keep-alive.
@@ -74,4 +76,5 @@ export function endAudioKeepAlive() {
   } catch {
     /* ignore */
   }
+  preferIosPlayback();
 }

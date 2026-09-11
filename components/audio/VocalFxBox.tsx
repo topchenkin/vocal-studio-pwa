@@ -20,7 +20,7 @@ import { useAuth } from "@/context/AuthContext";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
 import { getSingingMicStream } from "@/lib/mic-audio";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
-import { cancelArmedIosCapture, releaseIosCapture } from "@/lib/ios-audio-session";
+import { cancelArmedIosCapture, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 import { downloadAudioUrl, saveAudioFromUrl } from "@/lib/student-audio";
 import { decodeBlobToAudioBuffer, encodeWavBlob } from "@/lib/wav-client";
 import {
@@ -241,12 +241,12 @@ export default function VocalFxBox({ locked = false }: Props) {
       stopPlayback();
       if (recordTimerRef.current) window.clearInterval(recordTimerRef.current);
       recorderRef.current?.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      releaseIosCapture(streamRef.current);
-      if (saveUrlRef.current) URL.revokeObjectURL(saveUrlRef.current);
+      const stream = streamRef.current;
+      streamRef.current = null;
       const ctx = ctxRef.current;
       ctxRef.current = null;
-      if (ctx && ctx.state !== "closed") void ctx.close();
+      if (saveUrlRef.current) URL.revokeObjectURL(saveUrlRef.current);
+      void restoreIosPlaybackAfterCapture({ stream, context: ctx });
     };
   }, [stopPlayback]);
 
@@ -296,9 +296,9 @@ export default function VocalFxBox({ locked = false }: Props) {
         if (event.data.size) chunksRef.current.push(event.data);
       };
       recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        releaseIosCapture(stream);
+        const captured = streamRef.current;
         streamRef.current = null;
+        await restoreIosPlaybackAfterCapture({ stream: captured ?? stream });
         setRecording(false);
         if (recordTimerRef.current) {
           window.clearInterval(recordTimerRef.current);

@@ -93,7 +93,7 @@ assert.deepEqual(
   { a: 88, b: 0 }
 );
 
-assert.equal(exerciseResultNotificationText("Анна"), "Анна, Результаты упражнения");
+assert.equal(exerciseResultNotificationText("Анна"), "Анна отправил(а) практику");
 assert.ok(
   isExerciseResultText(
     exerciseResultChatText("Анна", {
@@ -114,7 +114,7 @@ assert.equal(
   resolveNotificationHref({
     actionUrl: "/dashboard/admin?tab=chat&student=11111111-1111-4111-8111-111111111111&message=22222222-2222-4222-8222-222222222222",
     kind: "chat",
-    message: "Анна, Результаты упражнения",
+    message: "Анна отправил(а) практику",
     isAdmin: true,
   }),
   "/dashboard/admin?tab=chat&student=11111111-1111-4111-8111-111111111111&message=22222222-2222-4222-8222-222222222222"
@@ -167,7 +167,6 @@ const practice = readFileSync(
 );
 assert.ok(!editor.includes("nextEnd - nextStart > 45"));
 assert.ok(editor.includes("nextPhraseSortOrder"));
-assert.ok(!practice.includes("Math.min(\n        45,"));
 assert.ok(practice.includes("EXERCISE_ATTEMPT_MAX_SEC"));
 
 const uncapSql = readFileSync(
@@ -215,7 +214,15 @@ assert.ok(guide.includes("currentTime"));
 assert.ok(guide.includes("PIXELS_PER_SEC"));
 assert.ok(!guide.includes("estimateAutoKeyCents"));
 assert.ok(!guide.includes("autoShift"));
-assert.ok(practice.includes("LiveMelodyGuide"));
+assert.ok(practice.includes("useVocalAnalyzer"));
+assert.ok(practice.includes("attachWaveformCanvas"));
+assert.ok(practice.includes("Отправить преподавателю"));
+assert.ok(practice.includes("TIER_RANK"));
+assert.ok(practice.includes("renderPracticeSharePng"));
+assert.ok(!practice.includes("LiveMelodyGuide"));
+assert.ok(!practice.includes("Фраза 1"));
+assert.ok(!practice.includes("pollAttempt"));
+assert.ok(!practice.includes("overall_score"));
 assert.ok(practice.includes("flex-wrap justify-center gap-2 px-2"));
 assert.ok(practice.includes("max-w-[100vw]"));
 assert.ok(practice.includes("overflow-hidden"));
@@ -239,12 +246,12 @@ const dashboardLayout = readFileSync(
   "utf8"
 );
 assert.ok(dashboardLayout.includes("overflow-x-clip"));
+assert.ok(dashboardLayout.includes("truncate whitespace-nowrap"));
 assert.ok(!dashboardLayout.includes("overflow-x-hidden"));
 assert.ok(practice.includes("w-full sm:w-auto") || practice.includes("sm:w-auto"));
-assert.ok(practice.includes("/ 100"));
 assert.ok(!practice.includes("onAutoKey"));
 assert.ok(!practice.includes("EXERCISE_TRANSPOSE_OPTIONS"));
-assert.ok(practice.includes("sanitizeAttemptFeedback"));
+assert.ok(!practice.includes("sanitizeAttemptFeedback"));
 const noteBlocks = readFileSync(path.join(process.cwd(), "lib", "note-blocks.ts"), "utf8");
 assert.ok(noteBlocks.includes("karaokeFrameScore"));
 assert.ok(noteBlocks.includes("HITBOX_TIMING_SLACK_SEC = 0.3"));

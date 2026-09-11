@@ -13,6 +13,7 @@ const COLORS = {
   accent: "#e9d5ff",
   goldText: "#fbbf24",
   border: "rgba(255,255,255,0.12)",
+  green: "#34d399",
 };
 
 function loadImage(src: string) {
@@ -66,19 +67,7 @@ function fillMetric(
   ctx.fillText(String(value), x + width / 2, y + 118);
 }
 
-export async function renderExerciseResultPng(input: {
-  studentName: string;
-  payload: ExerciseResultPayload;
-  weakest: ScoreDimension;
-}): Promise<Blob> {
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas unavailable");
-
-  const reaction = teacherReaction(input.payload.overall, input.weakest);
-
+function paintBackdrop(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -93,7 +82,9 @@ export async function renderExerciseResultPng(input: {
   glow2.addColorStop(1, "transparent");
   ctx.fillStyle = glow2;
   ctx.fillRect(0, 0, W, H);
+}
 
+async function paintLogo(ctx: CanvasRenderingContext2D) {
   try {
     const logo = await loadImage("/icons/logo.png");
     const logoSize = 96;
@@ -105,6 +96,31 @@ export async function renderExerciseResultPng(input: {
   } catch {
     /* logo optional */
   }
+}
+
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (value) => (value ? resolve(value) : reject(new Error("PNG export failed"))),
+      "image/png",
+      1
+    );
+  });
+}
+
+export async function renderPracticeSharePng(input: {
+  studentName: string;
+  exerciseTitle: string;
+  durationSec: number;
+}): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+
+  paintBackdrop(ctx);
+  await paintLogo(ctx);
 
   ctx.textAlign = "center";
   ctx.fillStyle = COLORS.goldText;
@@ -113,7 +129,96 @@ export async function renderExerciseResultPng(input: {
 
   ctx.fillStyle = COLORS.muted;
   ctx.font = "500 22px system-ui, sans-serif";
-  ctx.fillText("Результаты упражнения", W / 2, 228);
+  ctx.fillText("Практика с упражнения", W / 2, 228);
+
+  ctx.fillStyle = COLORS.text;
+  ctx.font = "700 48px Georgia, serif";
+  ctx.fillText(input.studentName.trim() || "Ученик", W / 2, 292);
+
+  ctx.fillStyle = COLORS.accent;
+  ctx.font = "600 28px system-ui, sans-serif";
+  ctx.fillText(input.exerciseTitle || "Упражнение", W / 2, 348);
+
+  try {
+    const cat = await loadImage("/stickers/sticker-cat-sing.png");
+    ctx.drawImage(cat, W / 2 - 180, 400, 360, 360);
+  } catch {
+    /* sticker optional */
+  }
+
+  ctx.fillStyle = COLORS.green;
+  ctx.font = "700 42px Georgia, serif";
+  ctx.fillText("Запись для преподавателя", W / 2, 820);
+
+  const minutes = Math.floor(Math.max(1, input.durationSec) / 60);
+  const seconds = Math.max(1, input.durationSec) % 60;
+  const durationLabel =
+    minutes > 0
+      ? `${minutes} мин ${seconds.toString().padStart(2, "0")} сек`
+      : `${Math.max(1, input.durationSec)} сек`;
+
+  roundRect(ctx, 80, 880, W - 160, 200, 28);
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
+  ctx.fill();
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = "600 22px system-ui, sans-serif";
+  ctx.fillText("Длительность", W / 2, 950);
+  ctx.fillStyle = COLORS.text;
+  ctx.font = "700 48px Georgia, serif";
+  ctx.fillText(durationLabel, W / 2, 1020);
+
+  roundRect(ctx, 80, 1120, W - 160, 220, 28);
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.fill();
+  ctx.strokeStyle = COLORS.border;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = COLORS.accent;
+  ctx.font = "600 24px system-ui, sans-serif";
+  ctx.fillText("Без автооценки", W / 2, 1190);
+  ctx.fillStyle = COLORS.text;
+  ctx.font = "400 24px system-ui, sans-serif";
+  ctx.fillText("Ученик отправил, как спел. Слушайте запись в чате.", W / 2, 1244);
+
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = "500 20px system-ui, sans-serif";
+  ctx.fillText("uniquevocal.ru", W / 2, H - 56);
+
+  return canvasToPng(canvas);
+}
+
+export async function renderExerciseResultPng(input: {
+  studentName: string;
+  payload: ExerciseResultPayload;
+  weakest: ScoreDimension;
+}): Promise<Blob> {
+  if (input.payload.kind === "exercise_practice") {
+    return renderPracticeSharePng({
+      studentName: input.studentName,
+      exerciseTitle: input.payload.exerciseTitle,
+      durationSec: input.payload.durationSec ?? 0,
+    });
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+
+  const reaction = teacherReaction(input.payload.overall ?? 0, input.weakest);
+
+  paintBackdrop(ctx);
+  await paintLogo(ctx);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = COLORS.goldText;
+  ctx.font = "600 20px Georgia, serif";
+  ctx.fillText("UNIQUE VOCAL STUDIO", W / 2, 186);
+
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = "500 22px system-ui, sans-serif";
+  ctx.fillText("Практика с упражнения", W / 2, 228);
 
   ctx.fillStyle = COLORS.text;
   ctx.font = "700 48px Georgia, serif";
@@ -136,7 +241,7 @@ export async function renderExerciseResultPng(input: {
 
   ctx.fillStyle = COLORS.text;
   ctx.font = "700 120px Georgia, serif";
-  ctx.fillText(String(input.payload.overall), W / 2, 740);
+  ctx.fillText(String(input.payload.overall ?? 0), W / 2, 740);
   ctx.fillStyle = COLORS.muted;
   ctx.font = "600 28px system-ui, sans-serif";
   ctx.fillText("из 100", W / 2, 786);
@@ -147,9 +252,9 @@ export async function renderExerciseResultPng(input: {
 
   const gap = 24;
   const cardW = (W - 160 - gap * 2) / 3;
-  fillMetric(ctx, "Мелодия", input.payload.intonation, 80, 890, cardW);
-  fillMetric(ctx, "Ритм", input.payload.rhythm, 80 + cardW + gap, 890, cardW);
-  fillMetric(ctx, "Полнота", input.payload.completeness, 80 + (cardW + gap) * 2, 890, cardW);
+  fillMetric(ctx, "Мелодия", input.payload.intonation ?? 0, 80, 890, cardW);
+  fillMetric(ctx, "Ритм", input.payload.rhythm ?? 0, 80 + cardW + gap, 890, cardW);
+  fillMetric(ctx, "Полнота", input.payload.completeness ?? 0, 80 + (cardW + gap) * 2, 890, cardW);
 
   if (input.payload.shift) {
     ctx.fillStyle = COLORS.muted;
@@ -192,12 +297,5 @@ export async function renderExerciseResultPng(input: {
   ctx.font = "500 20px system-ui, sans-serif";
   ctx.fillText("uniquevocal.ru", W / 2, H - 56);
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (value) => (value ? resolve(value) : reject(new Error("PNG export failed"))),
-      "image/png",
-      1
-    );
-  });
-  return blob;
+  return canvasToPng(canvas);
 }

@@ -43,9 +43,9 @@ function previewNotificationMessage(raw: string) {
     const sender = raw.split(":")[0]?.trim();
     if (sender && sender.includes(", Результаты")) return sender;
     if (sender && !sender.includes("{") && sender.length < 80) {
-      return `${sender}, Результаты упражнения`;
+      return `${sender} отправил(а) практику`;
     }
-    return "Результаты упражнения";
+    return "Практика с упражнения";
   }
   if (isVocalReportText(raw)) {
     const sender = raw.split(":")[0]?.trim();

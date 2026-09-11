@@ -57,7 +57,7 @@ export default function ProTestPage() {
 
   return (
     <DashboardLayout
-      title="Профессиональный тест"
+      title="Проф. тест"
       subtitle="Оценка уходит преподавателю. Баллы на уровень котика — после его отметки"
       bottomInset
     >

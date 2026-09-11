@@ -35,7 +35,7 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
-import { releaseIosCapture } from "@/lib/ios-audio-session";
+import { restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 
 export type { PitchFrame } from "@/lib/pitch";
 
@@ -102,6 +102,7 @@ export type UseVocalAnalyzerApi = {
   startTest: (durationMs: number) => Promise<VocalTestResult>;
   /** Callback ref — attach to the `<canvas>` used for the oscilloscope. */
   attachWaveformCanvas: (canvas: HTMLCanvasElement | null) => void;
+  getAudioGraph: () => { stream: MediaStream; context: AudioContext } | null;
 };
 
 function drawWaveform(canvas: HTMLCanvasElement | null, timeData: Float32Array) {
@@ -171,15 +172,9 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    streamRef.current?.getTracks().forEach((track) => {
-      track.enabled = false;
-      track.stop();
-    });
-    releaseIosCapture(streamRef.current);
+    const stream = streamRef.current;
+    const context = audioContextRef.current;
     streamRef.current = null;
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      void audioContextRef.current.close();
-    }
     audioContextRef.current = null;
     analyserRef.current = null;
     inputGainRef.current = null;
@@ -198,6 +193,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     testRejectRef.current = null;
 
     endAudioKeepAlive();
+    void restoreIosPlaybackAfterCapture({ stream, context });
     setListening(false);
     setTesting(false);
     setTestProgress(0);
@@ -396,5 +392,11 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     stopListening,
     startTest,
     attachWaveformCanvas,
+    getAudioGraph: () => {
+      const stream = streamRef.current;
+      const context = audioContextRef.current;
+      if (!stream || !context || context.state === "closed") return null;
+      return { stream, context };
+    },
   };
 }

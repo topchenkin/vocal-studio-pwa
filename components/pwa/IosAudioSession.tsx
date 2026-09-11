@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { preferIosPlayback } from "@/lib/ios-audio-session";
+import {
+  forceIosSpeakerRoute,
+  preferIosPlayback,
+} from "@/lib/ios-audio-session";
 
 /**
  * Keep iPhone in media-playback mode unless a tool has the mic open.
@@ -11,17 +14,22 @@ import { preferIosPlayback } from "@/lib/ios-audio-session";
 export default function IosAudioSession() {
   useEffect(() => {
     preferIosPlayback();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") preferIosPlayback();
+    const retakeSpeaker = () => {
+      preferIosPlayback();
+      if (document.visibilityState === "visible") {
+        void forceIosSpeakerRoute();
+      }
     };
-    const onPageShow = () => preferIosPlayback();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") retakeSpeaker();
+    };
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("pageshow", onPageShow);
-    window.addEventListener("focus", preferIosPlayback);
+    window.addEventListener("pageshow", retakeSpeaker);
+    window.addEventListener("focus", retakeSpeaker);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("pageshow", onPageShow);
-      window.removeEventListener("focus", preferIosPlayback);
+      window.removeEventListener("pageshow", retakeSpeaker);
+      window.removeEventListener("focus", retakeSpeaker);
     };
   }, []);
   return null;

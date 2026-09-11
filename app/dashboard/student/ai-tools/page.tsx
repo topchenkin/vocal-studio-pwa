@@ -102,7 +102,7 @@ export default function AiToolsPage() {
 
   return (
     <DashboardLayout
-      title="Нейросети и лаборатория"
+      title="Нейросети"
       subtitle="Анализ нот, архетип, сведение, обработка голоса и генератор аккордов"
       bottomInset
     >
