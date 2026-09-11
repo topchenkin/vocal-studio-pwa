@@ -61,7 +61,7 @@ assert.ok(
   readFileSync(
     path.join(root, "components", "student", "SubscriptionStatus.tsx"),
     "utf8"
-  ).includes("Готов перейти на следующий уровень")
+  ).includes("Подписка на приложение")
 );
 
 const toast = readFileSync(
@@ -70,6 +70,40 @@ const toast = readFileSync(
 );
 assert.ok(toast.includes("text-studio-gold"));
 assert.ok(toast.includes("+{item.amount} XP"));
+assert.ok(toast.includes("/stickers/sticker-cat-star.png"));
+assert.ok(toast.includes("bg-transparent"));
+
+const hub = readFileSync(
+  path.join(root, "components", "student", "StudentHomeHub.tsx"),
+  "utf8"
+);
+assert.ok(hub.includes("TILE_CAT"));
+assert.ok(hub.includes("bg-transparent object-contain"));
+
+const chatWindow = readFileSync(
+  path.join(root, "components", "chat", "ChatWindow.tsx"),
+  "utf8"
+);
+assert.ok(chatWindow.includes("clipPath: \"circle(50%)\""));
+assert.ok(chatWindow.includes("rounded-full bg-black object-cover"));
+assert.ok(chatWindow.includes("aspect-square"));
+assert.ok(chatWindow.includes("ChatCircleVideo"));
+assert.ok(!chatWindow.includes("aspect-[4/3]"));
+assert.ok(!chatWindow.includes("CircleVideoFrame"));
+
+for (const name of [
+  "sticker-cat-sing.png",
+  "sticker-cat-headphones.png",
+  "sticker-cat-heart.png",
+  "sticker-cat-fire.png",
+  "sticker-cat-star.png",
+  "sticker-cat-ok.png",
+  "sticker-cat-think.png",
+  "sticker-cat-wave.png",
+]) {
+  const png = readFileSync(path.join(root, "public", "stickers", name));
+  assert.equal(png[25], 6, `${name} must be RGBA`);
+}
 
 const analyzer = readFileSync(
   path.join(root, "components", "ai", "PitchAnalyzer.tsx"),

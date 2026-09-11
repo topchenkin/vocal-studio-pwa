@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Cat, X } from "lucide-react";
+import { X } from "lucide-react";
 import { subscribeXpToasts } from "@/lib/xp-toast";
 
 const LIFE_MS = 4200;
@@ -43,8 +43,13 @@ export default function XpToastStack() {
             }
             className="pointer-events-auto relative flex items-start gap-3 rounded-2xl bg-studio-card/95 px-3.5 py-3 shadow-glow ring-1 ring-studio-accent/40 backdrop-blur-md"
           >
-            <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-studio-accent/15 ring-1 ring-studio-accent/35">
-              <Cat className="h-6 w-6 text-studio-accent-light" />
+            <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center bg-transparent">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/stickers/sticker-cat-star.png"
+                alt=""
+                className="h-11 w-11 bg-transparent object-contain"
+              />
             </span>
             <div className="min-w-0 flex-1 pr-5">
               <p className="font-display text-2xl font-semibold leading-none text-studio-gold">

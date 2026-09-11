@@ -4,11 +4,7 @@ import { useState } from "react";
 import {
   Calendar,
   Flame,
-  MessageCircle,
-  Mic,
-  Target,
   WalletCards,
-  Waves,
 } from "lucide-react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
@@ -111,7 +107,6 @@ export default function StudentHomeHub({
 
   const tiles: Array<{
     id: TileId;
-    icon: typeof Mic;
     title: string;
     value: string;
     percent: number;
@@ -119,7 +114,6 @@ export default function StudentHomeHub({
   }> = [
     {
       id: "lessons",
-      icon: Mic,
       title: "Занятия",
       value: `${Math.min(lessonCurrent, lessonTarget)} / ${lessonTarget}`,
       percent: clampPercent(lessonCurrent, lessonTarget),
@@ -127,7 +121,6 @@ export default function StudentHomeHub({
     },
     {
       id: "practice",
-      icon: Waves,
       title: "Практика",
       value: `${Math.min(practiceMin, practiceTarget)} / ${practiceTarget} мин`,
       percent: clampPercent(practiceMin, practiceTarget),
@@ -135,7 +128,6 @@ export default function StudentHomeHub({
     },
     {
       id: "cabinet",
-      icon: Target,
       title: "Кабинет",
       value: `${Math.min(daysCurrent, daysTarget)} / ${daysTarget} дн.`,
       percent: clampPercent(daysCurrent, daysTarget),
@@ -143,7 +135,6 @@ export default function StudentHomeHub({
     },
     {
       id: "exercises",
-      icon: Calendar,
       title: "Упражнения",
       value: `${Math.min(exerciseCurrent, exerciseTarget)} / ${exerciseTarget}`,
       percent: clampPercent(exerciseCurrent, exerciseTarget),
@@ -151,7 +142,6 @@ export default function StudentHomeHub({
     },
     {
       id: "connect",
-      icon: MessageCircle,
       title: "Связь",
       value: connectCurrent >= 1 ? "есть" : "ещё нет",
       percent: connectCurrent >= 1 ? 100 : 0,
@@ -165,20 +155,28 @@ export default function StudentHomeHub({
     <div className="space-y-5">
       <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-studio-card via-studio-surface to-emerald-500/10 p-5 ring-1 ring-studio-border">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-studio-muted">
-              Уровень котика
-            </p>
-            <CatLevelText
-              as="h2"
-              label={title}
-              className="mt-1 font-display text-2xl font-semibold"
+          <div className="flex min-w-0 items-start gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/stickers/sticker-cat-star.png"
+              alt=""
+              className="h-16 w-16 shrink-0 bg-transparent object-contain"
             />
-            {level !== "star" && (
-              <p className="mt-1 text-xs text-studio-muted">
-                Дальше: <CatLevelText label={nextLabel} />
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-studio-muted">
+                Уровень котика
               </p>
-            )}
+              <CatLevelText
+                as="h2"
+                label={title}
+                className="mt-1 font-display text-2xl font-semibold"
+              />
+              {level !== "star" && (
+                <p className="mt-1 text-xs text-studio-muted">
+                  Дальше: <CatLevelText label={nextLabel} />
+                </p>
+              )}
+            </div>
           </div>
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-studio-accent/15 px-3 py-1.5 text-sm text-studio-accent-light ring-1 ring-studio-accent/30">
             <Flame className="h-3.5 w-3.5" />
@@ -241,7 +239,6 @@ export default function StudentHomeHub({
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {tiles.map((tile) => {
-            const Icon = tile.icon;
             return (
               <button
                 key={tile.id}
@@ -249,9 +246,12 @@ export default function StudentHomeHub({
                 onClick={() => setOpenTile(tile.id)}
                 className="rounded-3xl bg-studio-card p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent/40"
               >
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-studio-accent/15 ring-1 ring-studio-accent/30">
-                  <Icon className="h-4 w-4 text-studio-accent-light" />
-                </span>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={TILE_CAT[tile.id]}
+                  alt=""
+                  className="h-14 w-14 bg-transparent object-contain"
+                />
                 <p className="mt-3 text-[11px] text-studio-muted">{tile.title}</p>
                 <p className="font-display text-lg font-semibold">{tile.value}</p>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-studio-bg">
@@ -350,7 +350,7 @@ export default function StudentHomeHub({
                   rotate: { duration: 2.2, repeat: Infinity, ease: "easeInOut" },
                   opacity: { duration: 0.25 },
                 }}
-                className="mx-auto h-36 w-36 object-contain sm:h-44 sm:w-44"
+                className="mx-auto h-36 w-36 bg-transparent object-contain sm:h-44 sm:w-44"
               />
             </AnimatePresence>
             <h3 className="mt-2 font-display text-2xl font-semibold">

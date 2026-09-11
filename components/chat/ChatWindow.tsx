@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import {
   Camera,
@@ -41,6 +41,15 @@ import VocalTestReviewActions from "@/components/chat/VocalTestReviewActions";
 
 const MAX_VOICE_MS = 5 * 60 * 1000;
 const MAX_VIDEO_MS = 60 * 1000;
+
+/** Clip the <video> itself — parent overflow/radius paints live camera black on iPhone. */
+const CIRCLE_VIDEO_MASK: CSSProperties = {
+  clipPath: "circle(50%)",
+  WebkitClipPath: "circle(50%)",
+  WebkitMaskImage:
+    "-webkit-radial-gradient(circle closest-side, #000 99.6%, transparent 100%)",
+  maskImage: "radial-gradient(circle closest-side, #000 99.6%, transparent 100%)",
+};
 
 type RecordKind = "voice" | "video";
 type RecordPhase = "idle" | "recording" | "paused" | "sending";
@@ -407,6 +416,8 @@ export default function ChatWindow({
               msg.messageType === "vocal_report" ||
               isVocalReportText(msg.text || "");
             const isExerciseCard = isExerciseResultText(msg.text || "");
+            const isVideoNote =
+              !isDeleted && msg.messageType === "video" && Boolean(msg.mediaUrl);
             const canManage =
               !disabled &&
               !isAnnouncement &&
@@ -425,18 +436,26 @@ export default function ChatWindow({
                 }`}
               >
                 <div
-                  className={`relative min-w-0 rounded-2xl px-4 py-2.5 ${
-                    isVocalBubble || isExerciseCard || focusedId === msg.id
-                      ? "w-full max-w-sm"
-                      : "max-w-[80%]"
+                  className={`relative min-w-0 ${
+                    isVideoNote
+                      ? "max-w-[80%] bg-transparent px-0 py-0"
+                      : `rounded-2xl px-4 py-2.5 ${
+                          isVocalBubble || isExerciseCard || focusedId === msg.id
+                            ? "w-full max-w-sm"
+                            : "max-w-[80%]"
+                        }`
                   } ${
-                    focusedId === msg.id ? "ring-2 ring-studio-accent/80" : ""
+                    focusedId === msg.id && !isVideoNote
+                      ? "ring-2 ring-studio-accent/80"
+                      : ""
                   } ${
-                    isAnnouncement
-                      ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
-                      : isOwn
-                        ? "bg-studio-accent/20 text-studio-text"
-                        : "bg-studio-card text-studio-muted"
+                    isVideoNote
+                      ? ""
+                      : isAnnouncement
+                        ? "w-full max-w-md border border-amber-400/40 bg-gradient-to-br from-amber-500/15 via-studio-card to-studio-gold/10 text-studio-text shadow-[inset_0_1px_0_rgba(251,191,36,0.2)]"
+                        : isOwn
+                          ? "bg-studio-accent/20 text-studio-text"
+                          : "bg-studio-card text-studio-muted"
                   }`}
                 >
                   {isAnnouncement ? (
@@ -457,7 +476,7 @@ export default function ChatWindow({
                     <img
                       src={sticker.src}
                       alt={sticker.label}
-                      className="h-28 w-28 object-contain"
+                      className="h-28 w-28 bg-transparent object-contain"
                     />
                   ) : msg.messageType === "image" && msg.mediaUrl ? (
                     <div className="space-y-1">
@@ -475,24 +494,11 @@ export default function ChatWindow({
                         <p className="text-xs text-studio-accent-light">Практика с упражнения</p>
                       ) : null}
                     </div>
-                  ) : msg.messageType === "video" && msg.mediaUrl ? (
-                    <div className="space-y-1">
-                      <CircleVideoFrame className="h-48 w-48">
-                        <video
-                          controls
-                          playsInline
-                          preload="metadata"
-                          {...{ "webkit-playsinline": "true" }}
-                          src={msg.mediaUrl}
-                          className="h-full w-full object-contain bg-black"
-                        />
-                      </CircleVideoFrame>
-                      {msg.mediaDurationSec ? (
-                        <p className="text-center text-[10px] opacity-60">
-                          {msg.mediaDurationSec} сек
-                        </p>
-                      ) : null}
-                    </div>
+                  ) : isVideoNote && msg.mediaUrl ? (
+                    <ChatCircleVideo
+                      src={msg.mediaUrl}
+                      durationSec={msg.mediaDurationSec}
+                    />
                   ) : vocalReport ? (
                     <div className="space-y-3">
                       <VocalReportCard payload={vocalReport} compact />
@@ -593,7 +599,7 @@ export default function ChatWindow({
                   <img
                     src={sticker.src}
                     alt={sticker.label}
-                    className="mx-auto h-14 w-14 object-contain"
+                    className="mx-auto h-14 w-14 bg-transparent object-contain"
                   />
                   <span className="mt-1 block text-[10px] text-studio-muted">
                     {sticker.label}
@@ -606,17 +612,18 @@ export default function ChatWindow({
           {phase !== "idle" ? (
             <div className="space-y-2">
               {recordKind === "video" && (
-                <div className="mx-auto w-full max-w-[16rem] overflow-visible rounded-2xl bg-studio-bg ring-1 ring-studio-border">
+                <div className="mx-auto h-52 w-52 shrink-0">
                   <video
                     ref={previewRef}
                     muted
                     playsInline
                     autoPlay
-                    width={640}
+                    width={480}
                     height={480}
                     // iOS Safari / standalone PWA: without this the camera stays black
                     {...{ "webkit-playsinline": "true" }}
-                    className="block aspect-[4/3] h-auto w-full bg-black object-contain"
+                    className="block aspect-square h-full w-full rounded-full bg-black object-cover"
+                    style={CIRCLE_VIDEO_MASK}
                   />
                 </div>
               )}
@@ -835,13 +842,60 @@ function ComposerIcon({
   );
 }
 
-/** Live camera must not be clipped — overflow/radius/mask paint black on iPhone. */
-function CircleVideoFrame({
-  children,
-  className,
+function ChatCircleVideo({
+  src,
+  durationSec,
 }: {
-  children: React.ReactNode;
-  className?: string;
+  src: string;
+  durationSec?: number | null;
 }) {
-  return <div className={`bg-black ${className ?? ""}`}>{children}</div>;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const toggle = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      void el.play();
+      return;
+    }
+    el.pause();
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="relative mx-auto h-48 w-48">
+        <video
+          ref={videoRef}
+          playsInline
+          preload="metadata"
+          {...{ "webkit-playsinline": "true" }}
+          src={src}
+          onClick={toggle}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false);
+            const el = videoRef.current;
+            if (el) el.currentTime = 0;
+          }}
+          className="block aspect-square h-full w-full rounded-full bg-black object-cover"
+          style={CIRCLE_VIDEO_MASK}
+        />
+        {playing ? null : (
+          <button
+            type="button"
+            className="absolute inset-0 flex items-center justify-center rounded-full bg-black/25"
+            aria-label="Смотреть кружок"
+            onClick={toggle}
+          >
+            <Play className="h-10 w-10 fill-white text-white" />
+          </button>
+        )}
+      </div>
+      {durationSec ? (
+        <p className="text-center text-[10px] opacity-60">{durationSec} сек</p>
+      ) : null}
+    </div>
+  );
 }
