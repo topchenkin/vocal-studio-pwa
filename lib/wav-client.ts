@@ -48,18 +48,72 @@ export function encodeWavBlob(
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-export async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+function liveAudioContext(): AudioContext {
   const AudioCtx =
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext })
       .webkitAudioContext;
-  const ctx = new AudioCtx();
+  return new AudioCtx();
+}
+
+/** Prefer a real recorder mime so Safari does not see a typeless blob. */
+export function typedAudioBlob(blob: Blob, fallbackMime = "audio/mp4"): Blob {
+  const type = blob.type && blob.type !== "application/octet-stream"
+    ? blob.type
+    : fallbackMime;
+  if (blob.type === type) return blob;
+  return new Blob([blob], { type });
+}
+
+export async function decodeAudioDataWithRetry(
+  ctx: AudioContext,
+  blob: Blob
+): Promise<AudioBuffer> {
+  const source = typedAudioBlob(blob);
+  const tryOnce = async () => {
+    const bytes = await source.arrayBuffer();
+    return ctx.decodeAudioData(bytes.slice(0));
+  };
   try {
-    const arrayBuf = await blob.arrayBuffer();
-    return await ctx.decodeAudioData(arrayBuf.slice(0));
-  } finally {
-    await ctx.close();
+    return await tryOnce();
+  } catch (first) {
+    await sleep(40);
+    try {
+      return await tryOnce();
+    } catch {
+      throw first;
+    }
   }
+}
+
+export async function decodeBlobToAudioBuffer(blob: Blob): Promise<AudioBuffer> {
+  if (blob.size < 256) {
+    throw new Error("Пустая запись — нет аудиоданных");
+  }
+  const ctx = liveAudioContext();
+  try {
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => undefined);
+    }
+    return await decodeAudioDataWithRetry(ctx, blob);
+  } finally {
+    await ctx.close().catch(() => undefined);
+  }
+}
+
+export function decodeErrorMessage(err: unknown): string {
+  const detail = err instanceof Error ? err.message : "";
+  if (/empty|нет аудиоданных|size/i.test(detail)) {
+    return "Пустая запись — микрофон не отдал данные. Попробуйте снова.";
+  }
+  if (/decode|encoding|not supported|unable|не удалось прочитать/i.test(detail)) {
+    return "Не удалось прочитать запись. Попробуйте ещё раз.";
+  }
+  return detail || "Не удалось обработать запись";
 }
 
 export async function mixAudioBuffers(

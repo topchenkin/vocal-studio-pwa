@@ -58,6 +58,9 @@ const NOISE_FLOOR_DB_IOS = -58;
 /** A take needs at least this fraction of voiced frames to be scoreable. */
 const MIN_VOICED_RATIO = 0.15;
 
+/** Skip leading analyser silence (mic / graph spin-up) when scoring tooQuiet. */
+const TEST_WARMUP_MS = 400;
+
 /** Consecutive unvoiced frames before the live tuner resets to "silence" —
  * pure UI debounce so a single dropped frame doesn't flicker the display. */
 const SILENT_HOLD_FRAMES = 4;
@@ -89,6 +92,8 @@ export type VocalTestResult = {
   avgDb: number;
   voicedRatio: number;
   tooQuiet: boolean;
+  /** Analyser never received a usable signal (empty first buffers / no mic). */
+  noSignal: boolean;
 };
 
 export type UseVocalAnalyzerApi = {
@@ -277,19 +282,32 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
         setTestProgress(100);
 
         const frames = testFramesRef.current;
-        const voicedCount = frames.filter((f) => f.voiced).length;
+        const usable = frames.filter((frame) => frame.tMs >= TEST_WARMUP_MS);
+        const stats = usable.length >= 8 ? usable : frames;
+        const voicedCount = stats.filter((frame) => frame.voiced).length;
         const avgDb =
-          frames.length > 0
-            ? frames.reduce((sum, f) => sum + f.db, 0) / frames.length
+          stats.length > 0
+            ? stats.reduce((sum, frame) => sum + frame.db, 0) / stats.length
             : -100;
-        const voicedRatio = frames.length > 0 ? voicedCount / frames.length : 0;
-        const resultTooQuiet = avgDb < floorDb || voicedRatio < MIN_VOICED_RATIO;
+        const voicedRatio = stats.length > 0 ? voicedCount / stats.length : 0;
+        const noSignal =
+          stats.length === 0 ||
+          stats.every((frame) => !frame.voiced && frame.db < -80);
+        const resultTooQuiet =
+          noSignal || voicedRatio < MIN_VOICED_RATIO;
 
         testFramesRef.current = [];
         const resolve = testResolveRef.current;
         testResolveRef.current = null;
         testRejectRef.current = null;
-        resolve?.({ frames, durationMs: duration, avgDb, voicedRatio, tooQuiet: resultTooQuiet });
+        resolve?.({
+          frames,
+          durationMs: duration,
+          avgDb,
+          voicedRatio,
+          tooQuiet: resultTooQuiet,
+          noSignal,
+        });
       } else {
         setTestProgress(Math.min(100, (tMs / duration) * 100));
       }

@@ -29,8 +29,11 @@ import { StraightHyphen, straightDashNodes } from "@/components/ui/StraightDashT
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import SaveToLibraryButton from "@/components/student/SaveToLibraryButton";
 import {
+  decodeAudioDataWithRetry,
   decodeBlobToAudioBuffer,
+  decodeErrorMessage,
   mixAudioBuffersWithOffsets,
+  typedAudioBlob,
 } from "@/lib/wav-client";
 import { AUDIO_FILE_ACCEPT } from "@/lib/file-accept";
 import { getStudioMicStream, isAppleWebKit } from "@/lib/mic-audio";
@@ -38,6 +41,7 @@ import { awardCatXp } from "@/lib/cat-xp";
 import { useAuth } from "@/context/AuthContext";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
 import {
+  forceIosSpeakerRoute,
   preferIosPlayback,
   restoreIosPlaybackAfterCapture,
   routeIosToSpeaker,
@@ -50,6 +54,10 @@ const MIN_TIMELINE_SEC = 6;
 const MIN_CLIP_SEC = 0.05;
 const PITCH_MIN = -12;
 const PITCH_MAX = 12;
+/** Default overdub stacks in parallel from the timeline origin. */
+const OVERDUB_FROM_SEC = 0;
+const MONITOR_SCHEDULE_SLOP = 0.02;
+const IOS_KEEP_DECODED = 3;
 
 type Track = {
   id: string;
@@ -59,7 +67,8 @@ type Track = {
   /** Full source duration */
   sourceDurationSec: number;
   peaks: number[];
-  buffer: AudioBuffer;
+  /** Decoded PCM for Web Audio / mixdown. Dropped for idle lanes on iOS. */
+  buffer: AudioBuffer | null;
   /** Clip start on the shared timeline */
   offsetSec: number;
   /** Inclusive trim window inside the source buffer */
@@ -103,27 +112,44 @@ function buildPeaks(buffer: AudioBuffer, buckets = PEAK_BUCKETS): number[] {
   return peaks.map((p) => p / max);
 }
 
-/** Peaks for the visible (trimmed) region only */
-function buildTrimmedPeaks(track: Track, buckets = PEAK_BUCKETS): number[] {
-  const { buffer, trimStartSec, trimEndSec } = track;
-  const sr = buffer.sampleRate;
-  const start = Math.max(0, Math.floor(trimStartSec * sr));
-  const end = Math.min(buffer.length, Math.ceil(trimEndSec * sr));
-  const channel = buffer.getChannelData(0);
-  const len = Math.max(1, end - start);
-  const block = Math.max(1, Math.floor(len / buckets));
-  const peaks: number[] = [];
-  for (let i = 0; i < buckets; i += 1) {
-    let peak = 0;
-    const a = start + i * block;
-    const b = Math.min(end, a + block);
-    for (let j = a; j < b; j += 1) {
-      peak = Math.max(peak, Math.abs(channel[j] ?? 0));
-    }
-    peaks.push(peak);
+/** Visible-clip peaks from the cached overview — no PCM walk on every render. */
+function peaksForVisibleClip(track: Track): number[] {
+  const peaks = track.peaks;
+  if (peaks.length === 0) return peaks;
+  const dur = Math.max(track.sourceDurationSec, 0.001);
+  const start = Math.max(0, Math.min(1, track.trimStartSec / dur));
+  const end = Math.max(start, Math.min(1, track.trimEndSec / dur));
+  const a = Math.max(0, Math.floor(start * peaks.length));
+  const b = Math.min(
+    peaks.length,
+    Math.max(a + 1, Math.ceil(end * peaks.length))
+  );
+  return peaks.slice(a, b);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForRecorderBytes(chunks: Blob[], attempts = 5) {
+  for (let i = 0; i < attempts; i += 1) {
+    if (chunks.some((chunk) => chunk.size > 0)) return;
+    await sleep(50 + i * 50);
   }
-  const max = Math.max(...peaks, 0.001);
-  return peaks.map((p) => p / max);
+}
+
+function blobFromRecorderChunks(
+  chunks: Blob[],
+  recorder: MediaRecorder,
+  fallbackMime: string
+) {
+  const usable = chunks.filter((chunk) => chunk.size > 0);
+  const type =
+    recorder.mimeType ||
+    usable.find((chunk) => chunk.type)?.type ||
+    fallbackMime ||
+    (isAppleWebKit() ? "audio/mp4" : "audio/webm");
+  return typedAudioBlob(new Blob(usable, { type }), type);
 }
 
 function formatTime(sec: number) {
@@ -150,10 +176,6 @@ function htmlMonitorPlayable(track: Track) {
   return Boolean(track.url);
 }
 
-function htmlElAudible(el: HTMLAudioElement) {
-  return !el.paused && !el.muted && el.volume > 0 && el.readyState >= 2;
-}
-
 function pickRecorderMime(): string {
   if (isAppleWebKit()) {
     if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
@@ -171,8 +193,11 @@ async function decodeWithCtx(
   ctx: AudioContext,
   blob: Blob
 ): Promise<AudioBuffer> {
-  const bytes = await blob.arrayBuffer();
-  return ctx.decodeAudioData(bytes.slice(0));
+  try {
+    return await decodeAudioDataWithRetry(ctx, blob);
+  } catch {
+    return decodeBlobToAudioBuffer(blob);
+  }
 }
 
 type DragMode = "move" | "trim-start" | "trim-end";
@@ -206,7 +231,10 @@ function ClipLane({
   const leftPct = (Math.max(0, track.offsetSec) / span) * 100;
   const widthPct = Math.min(100 - leftPct, (Math.max(dur, 0.08) / span) * 100);
   const playheadPct = Math.min(100, (playheadSec / span) * 100);
-  const peaks = useMemo(() => buildTrimmedPeaks(track), [track]);
+  const peaks = useMemo(
+    () => peaksForVisibleClip(track),
+    [track.peaks, track.sourceDurationSec, track.trimStartSec, track.trimEndSec]
+  );
 
   const onPointerDown = (
     event: ReactPointerEvent<Element>,
@@ -606,13 +634,28 @@ export default function MultitrackMixer({ locked = false }: Props) {
     );
   };
 
-  const htmlOwnedTrackIds = async () => {
-    const owned = new Set<string>();
+  const resyncHtmlMonitor = (fromSec: number) => {
+    const cue = Math.max(0, fromSec);
+    const list = tracksRef.current;
     for (const item of htmlMonitorRef.current) {
-      const ok = await item.playOk;
-      if (ok && htmlElAudible(item.el)) owned.add(item.id);
+      const track = list.find((entry) => entry.id === item.id);
+      if (!track) continue;
+      const clipStart = Math.max(0, track.offsetSec);
+      const playDur = clipDuration(track);
+      if (cue >= clipStart + playDur - 0.0005) continue;
+      const startAt = track.trimStartSec + Math.max(0, cue - clipStart);
+      try {
+        const dur = Number.isFinite(item.el.duration)
+          ? item.el.duration
+          : startAt + playDur;
+        item.el.currentTime = Math.max(
+          0,
+          Math.min(startAt, Math.max(0, dur - 0.02))
+        );
+      } catch {
+        /* ignore */
+      }
     }
-    return owned;
   };
 
   const monitoredTracks = () =>
@@ -686,48 +729,64 @@ export default function MultitrackMixer({ locked = false }: Props) {
     return audioCtxRef.current;
   };
 
-  const redecodeTracks = async (ctx: AudioContext) => {
-    const rebuilt: Track[] = [];
-    for (const track of tracksRef.current) {
+  const hydrateTracks = async (ctx: AudioContext, list: Track[]) => {
+    const ready: Track[] = [];
+    for (const track of list) {
+      if (track.buffer) {
+        try {
+          if (track.buffer.length > 0) {
+            ready.push(track);
+            continue;
+          }
+        } catch {
+          /* detached after a closed context */
+        }
+      }
       try {
         const buffer = await decodeWithCtx(ctx, track.blob);
-        const duration = buffer.duration;
-        const trimStart = Math.min(
-          track.trimStartSec,
-          Math.max(0, duration - MIN_CLIP_SEC)
-        );
-        const trimEnd = Math.min(
-          Math.max(track.trimEndSec, trimStart + MIN_CLIP_SEC),
-          duration
-        );
-        rebuilt.push({
-          ...track,
-          buffer,
-          sourceDurationSec: duration,
-          trimStartSec: trimStart,
-          trimEndSec: trimEnd,
-          peaks: buildPeaks(buffer),
-        });
+        ready.push({ ...track, buffer });
       } catch {
-        rebuilt.push(track);
+        /* skip undecodeable lane */
       }
     }
-    tracksRef.current = rebuilt;
-    setTracks(rebuilt);
+    if (ready.length === 0) return ready;
+    const byId = new Map(ready.map((track) => [track.id, track]));
+    const merged = tracksRef.current.map((track) => byId.get(track.id) ?? track);
+    tracksRef.current = merged;
+    setTracks(merged);
+    return ready;
+  };
+
+  const pruneIdleBuffers = (keepIds: Iterable<string>) => {
+    const keep = new Set(keepIds);
+    const limit = isAppleWebKit() ? IOS_KEEP_DECODED : MAX_TRACKS;
+    setTracks((current) => {
+      let idleBudget = Math.max(0, limit - keep.size);
+      const next = current.map((track) => {
+        if (!track.buffer || keep.has(track.id)) return track;
+        if (idleBudget > 0) {
+          idleBudget -= 1;
+          return track;
+        }
+        return { ...track, buffer: null };
+      });
+      tracksRef.current = next;
+      return next;
+    });
   };
 
   /**
    * An AudioContext created or used while Safari is in play-and-record stays
    * glued to the earpiece. Setting audioSession to "playback" does not move
-   * it. Close + new context + re-decode blobs after playback is armed.
-   * If the new context cannot resume (gesture gone after getUserMedia), keep
-   * the old one so monitor is never absolute silence.
+   * it. Close + new context after playback is armed.
+   * Do not re-decode every blob here — that delayed recording and OOMed iOS
+   * when 5+ long mp3s were decoded at once.
    */
-  const unlockSpeakerContext = async () => {
+  const unlockSpeakerContext = async (opts?: { forceFresh?: boolean }) => {
     preferIosPlayback();
     routeIosToSpeaker();
     const prev = audioCtxRef.current;
-    const tainted = ctxTaintedRef.current;
+    const tainted = ctxTaintedRef.current || Boolean(opts?.forceFresh);
     if (prev && prev.state !== "closed" && !tainted) {
       if (prev.state === "suspended") await prev.resume();
       return prev;
@@ -761,7 +820,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
     }
     audioCtxRef.current = next;
     ctxTaintedRef.current = false;
-    await redecodeTracks(next);
     if (next.state === "suspended") {
       await next.resume().catch(() => undefined);
     }
@@ -825,6 +883,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     const dest = output ?? ctx.destination;
     const sources: AudioBufferSourceNode[] = [];
     for (const track of list) {
+      if (!track.buffer) continue;
       const clipStart = Math.max(0, track.offsetSec);
       const playDur = clipDuration(track);
       const clipEnd = clipStart + playDur;
@@ -906,11 +965,11 @@ export default function MultitrackMixer({ locked = false }: Props) {
     preferIosPlayback();
     setError("");
     try {
-      // Fresh context in this click — no getUserMedia, so resume() binds to speaker.
-      const ctx = await unlockSpeakerContext();
+      const manyLanes = tracksRef.current.length >= 8;
+      const ctx = await unlockSpeakerContext({ forceFresh: manyLanes });
+      const monitors = await hydrateTracks(ctx, monitoredTracks());
       beginAudioKeepAlive();
-      const monitors = monitoredTracks();
-      const t0 = ctx.currentTime + 0.02;
+      const t0 = ctx.currentTime + MONITOR_SCHEDULE_SLOP;
       const duration = playLanes(ctx, monitors, t0, fromSec);
       startPlayhead(ctx, duration, t0, fromSec);
     } catch (err) {
@@ -944,20 +1003,22 @@ export default function MultitrackMixer({ locked = false }: Props) {
       return;
     }
     setError("");
-    const cueSec = playheadSecRef.current;
+    const fromSec = OVERDUB_FROM_SEC;
     stopPlayback({ keepPlayhead: true });
     preferIosPlayback();
+    playheadSecRef.current = 0;
+    setPlayheadSec(0);
 
     const take = ++takeIdRef.current;
     const monitorsAtStart = monitoredTracks();
-    // Warm a live context in this gesture so unlock() can fall back to it
-    // if the post-mic context cannot resume.
+    const htmlList = monitorsAtStart.filter(htmlMonitorPlayable);
+    const webOnly = monitorsAtStart.filter((track) => !htmlMonitorPlayable(track));
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       audioCtxRef.current = createLiveAudioContext();
     }
     void audioCtxRef.current.resume();
-    // Gesture is still hot — start in-DOM HTML now, before any await.
-    startHtmlMonitor(monitorsAtStart, cueSec);
+    // Gesture is still hot — arm in-DOM HTML now, before any await.
+    startHtmlMonitor(htmlList, fromSec);
 
     try {
       const stream = await ensureMic();
@@ -972,7 +1033,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
             .catch(() => undefined);
         });
       }
-      // Per-take chunk list (closure) — never share with the next recording
       const chunks: Blob[] = [];
       chunksRef.current = chunks;
       const id = crypto.randomUUID();
@@ -983,7 +1043,6 @@ export default function MultitrackMixer({ locked = false }: Props) {
       recorderRef.current = recorder;
 
       recorder.ondataavailable = (event) => {
-        // Ignore late events from an older take
         if (take !== takeIdRef.current) return;
         if (event.data.size > 0) chunks.push(event.data);
       };
@@ -1005,25 +1064,25 @@ export default function MultitrackMixer({ locked = false }: Props) {
           releaseMicFully();
           preferIosPlayback();
 
-          if (chunks.length === 0) {
-            setError("Пустая запись — микрофон не отдал данные. Попробуйте снова.");
+          await waitForRecorderBytes(chunks);
+          if (!chunks.some((chunk) => chunk.size > 0)) {
+            setError(
+              "Пустая запись — микрофон не отдал данные. Попробуйте снова."
+            );
             return;
           }
 
-          const blob = new Blob(chunks, {
-            type: recorder.mimeType || mime || "audio/webm",
-          });
+          const blob = blobFromRecorderChunks(chunks, recorder, mime);
           if (blob.size < 256) {
             setError("Запись слишком короткая или повреждена.");
             return;
           }
 
-          const liveCtx =
-            audioCtxRef.current && audioCtxRef.current.state !== "closed"
-              ? audioCtxRef.current
-              : await ensureAudioCtx();
-
           try {
+            const liveCtx =
+              audioCtxRef.current && audioCtxRef.current.state !== "closed"
+                ? audioCtxRef.current
+                : await ensureAudioCtx();
             const buffer = await decodeWithCtx(liveCtx, blob);
             const url = URL.createObjectURL(blob);
             const peaks = buildPeaks(buffer);
@@ -1038,48 +1097,24 @@ export default function MultitrackMixer({ locked = false }: Props) {
                   sourceDurationSec: buffer.duration,
                   peaks,
                   buffer,
-                  // Align punch-in take to the cue where recording began
-                  offsetSec: cueSec,
+                  offsetSec: OVERDUB_FROM_SEC,
                   trimStartSec: 0,
                   trimEndSec: buffer.duration,
                   pitchSemitones: 0,
                 },
               ];
+              tracksRef.current = next;
               setMonitorIds((ids) => [...ids, id]);
               setSelectedId(id);
               return next;
             });
+            pruneIdleBuffers([id, ...monitorIdsRef.current]);
           } catch (err) {
-            try {
-              const buffer = await decodeBlobToAudioBuffer(blob);
-              const url = URL.createObjectURL(blob);
-              setTracks((current) => [
-                ...current,
-                {
-                  id,
-                  name: `Дорожка ${current.length + 1}`,
-                  blob,
-                  url,
-                  sourceDurationSec: buffer.duration,
-                  peaks: buildPeaks(buffer),
-                  buffer,
-                  offsetSec: cueSec,
-                  trimStartSec: 0,
-                  trimEndSec: buffer.duration,
-                  pitchSemitones: 0,
-                },
-              ]);
-              setMonitorIds((ids) => [...ids, id]);
-              setSelectedId(id);
-            } catch {
-              setError(
-                err instanceof Error
-                  ? err.message
-                  : "Не удалось обработать запись"
-              );
-            }
+            setError(decodeErrorMessage(err));
           }
-          setPlayheadSec(cueSec);
+          setPlayheadSec(0);
+          playheadSecRef.current = 0;
+          void forceIosSpeakerRoute();
         })();
       };
 
@@ -1093,51 +1128,36 @@ export default function MultitrackMixer({ locked = false }: Props) {
       }
       routeIosToSpeaker();
       beginAudioKeepAlive();
-      try {
-        await reviveHtmlMonitor();
-        const graphCtx = await unlockSpeakerContext();
-        if (graphCtx.state === "suspended") {
-          await graphCtx.resume().catch(() => undefined);
-        }
 
-        const monitors = monitoredTracks();
-        const speakerFresh =
-          !ctxTaintedRef.current && graphCtx.state === "running";
-        let webList = monitors;
-        if (speakerFresh) {
-          stopHtmlMonitor();
-        } else {
-          const owned = await htmlOwnedTrackIds();
-          webList =
-            owned.size > 0
-              ? monitors.filter((track) => !owned.has(track.id))
-              : monitors;
-          if (owned.size === 0) stopHtmlMonitor();
-        }
-
-        const t0 = graphCtx.currentTime + 0.08;
-        const monitorDuration = playLanes(graphCtx, webList, t0, cueSec);
-        const htmlEnd = Math.max(
-          0,
-          ...monitors.map((track) => track.offsetSec + clipDuration(track))
-        );
-        startPlayhead(
-          graphCtx,
-          Math.max(monitorDuration, htmlEnd, cueSec + 3600),
-          t0,
-          cueSec
-        );
-      } catch {
-        const fallback = audioCtxRef.current;
-        if (fallback && fallback.state !== "closed") {
-          startPlayhead(
-            fallback,
-            cueSec + 3600,
-            fallback.currentTime,
-            cueSec
-          );
-        }
+      const clockCtx =
+        audioCtxRef.current && audioCtxRef.current.state !== "closed"
+          ? audioCtxRef.current
+          : createLiveAudioContext();
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        audioCtxRef.current = clockCtx;
       }
+      startPlayhead(clockCtx, fromSec + 3600, clockCtx.currentTime, fromSec);
+
+      void (async () => {
+        try {
+          await reviveHtmlMonitor();
+          resyncHtmlMonitor(fromSec);
+          if (webOnly.length === 0) return;
+          const graphCtx = await unlockSpeakerContext();
+          if (graphCtx.state === "suspended") {
+            await graphCtx.resume().catch(() => undefined);
+          }
+          const hydrated = await hydrateTracks(graphCtx, webOnly);
+          playLanes(
+            graphCtx,
+            hydrated,
+            graphCtx.currentTime + MONITOR_SCHEDULE_SLOP,
+            fromSec
+          );
+        } catch {
+          /* HTML monitor already running */
+        }
+      })();
     } catch {
       setError("Не удалось получить доступ к микрофону");
       releaseMicFully();
@@ -1154,7 +1174,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       // flushes is what stuck a looping quantum on iPhone.
       stopPlayback({ keepPlayhead: true });
       try {
-        if (typeof recorder.requestData === "function") {
+        if (!isAppleWebKit() && typeof recorder.requestData === "function") {
           recorder.requestData();
         }
       } catch {
@@ -1262,12 +1282,32 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const mixAll = async () => {
-    if (tracks.length === 0 || mixing || recordingId) return;
+    const lanes = monitoredTracks();
+    if (lanes.length === 0 || mixing || recordingId) {
+      if (lanes.length === 0 && tracks.length > 0) {
+        setError("Отметьте галочкой дорожки, которые нужны в сведении.");
+      }
+      return;
+    }
     setMixing(true);
     setError("");
+    stopPlayback({ keepPlayhead: true });
+    stopMicTracks();
+    preferIosPlayback();
     try {
+      await forceIosSpeakerRoute();
+      const ctx = await unlockSpeakerContext({
+        forceFresh: tracksRef.current.length >= 8,
+      });
+      const hydrated = await hydrateTracks(ctx, lanes);
+      const ready = hydrated.filter((track): track is Track & { buffer: AudioBuffer } =>
+        Boolean(track.buffer)
+      );
+      if (ready.length === 0) {
+        throw new Error("Не удалось прочитать отмеченные дорожки");
+      }
       const mixed = await mixAudioBuffersWithOffsets(
-        tracks.map((track) => ({
+        ready.map((track) => ({
           buffer: track.buffer,
           offsetSec: track.offsetSec,
           trimStartSec: track.trimStartSec,
@@ -1275,11 +1315,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
           pitchSemitones: track.pitchSemitones,
         }))
       );
-      const ctx = await ensureAudioCtx();
-      const mixBuffer = await decodeWithCtx(ctx, mixed);
+      preferIosPlayback();
+      const previewCtx = await unlockSpeakerContext({ forceFresh: true });
+      const mixBuffer = await decodeWithCtx(previewCtx, mixed);
       if (mixUrl) URL.revokeObjectURL(mixUrl);
       setMixUrl(URL.createObjectURL(mixed));
       setMixPeaks(buildPeaks(mixBuffer, 140));
+      pruneIdleBuffers(monitorIdsRef.current);
+      await forceIosSpeakerRoute();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Не удалось свести дорожки"
@@ -1338,12 +1381,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
             с телефона или компьютера.
           </li>
           <li>
-            Линейка сверху — таймлайн. Поставьте курсор туда, откуда хотите
-            слушать или писать (punch-in).
+            Линейка сверху — таймлайн для прослушивания и обрезки. Новая
+            запись всегда стартует с 0:00 параллельно остальным дорожкам.
           </li>
           <li>
-            «Слушать» воспроизводит с курсора через динамик. «Запись с
-            прослушкой» пишет новый слой, пока играют остальные дорожки.
+            «Слушать» играет отмеченные дорожки с курсора. «Запись с
+            прослушкой» пишет новый слой с начала, пока играют галочки.
+            Галочка = в прослушке и в «Свести всё».
           </li>
           <li>
             Клип на дорожке: потяните середину — сдвиг по времени, края —
@@ -1437,11 +1481,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
           fullWidth
           size="lg"
           variant="secondary"
-          disabled={tracks.length === 0 || busy || mixing}
+          disabled={monitorTracks.length === 0 || busy || mixing}
           onClick={() => void mixAll()}
         >
           <Layers className="h-5 w-5" />
-          {mixing ? "Сводим…" : "Свести всё"}
+          {mixing
+            ? "Сводим…"
+            : `Свести отмеченные (${monitorTracks.length})`}
         </Button>
 
         <Button
@@ -1594,7 +1640,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
                           : [...current, track.id]
                       )
                     }
-                    title="В прослушке"
+                    title="В прослушке и сведении"
                   />
                   <button
                     type="button"

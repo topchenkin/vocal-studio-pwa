@@ -27,6 +27,10 @@ function statusVariant(status: GiftCertificate["status"]) {
   return "default" as const;
 }
 
+function canDeleteGift(item: GiftCertificate) {
+  return item.status !== "redeemed" && !item.redeemed_by;
+}
+
 export default function GiftCertificatesPanel() {
   const { isMockAdmin } = useAuth();
   const [items, setItems] = useState<GiftCertificate[]>([]);
@@ -160,10 +164,12 @@ export default function GiftCertificatesPanel() {
     setBusy(false);
   };
 
-  const remove = async (id: string) => {
+  const remove = async (item: GiftCertificate) => {
+    if (!canDeleteGift(item)) return;
+    const code = formatGiftCode(item.code);
     if (
       !window.confirm(
-        "Удалить сертификат безвозвратно? Код перестанет работать."
+        `Удалить сертификат для «${item.recipient_name}» (${code})?\n\nКод перестанет работать. Это необратимо.`
       )
     ) {
       return;
@@ -172,12 +178,12 @@ export default function GiftCertificatesPanel() {
     setBusy(true);
     const { error: rpcError } = await supabase.rpc(
       "admin_delete_gift_certificate",
-      { p_id: id }
+      { p_id: item.id }
     );
     if (rpcError) {
-      setError(rpcError.message || "Не удалось удалить");
+      setError(rpcError.message || "Не удалось удалить сертификат");
     } else {
-      if (selectedId === id) setSelectedId(null);
+      if (selectedId === item.id) setSelectedId(null);
       setPayUrl("");
       await load();
     }
@@ -321,35 +327,51 @@ export default function GiftCertificatesPanel() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <div className="space-y-2">
             {items.map((item) => (
-              <button
+              <div
                 key={item.id}
-                type="button"
-                onClick={() => {
-                  setSelectedId(item.id);
-                  setPayUrl("");
-                }}
-                className={`w-full rounded-2xl px-4 py-3 text-left ring-1 transition ${
+                className={`flex w-full items-stretch gap-1 rounded-2xl ring-1 transition ${
                   selected?.id === item.id
                     ? "bg-studio-accent/10 ring-studio-accent/50"
                     : "bg-studio-surface ring-studio-border"
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium">{item.recipient_name}</p>
-                    <p className="text-xs text-studio-muted">
-                      {GIFT_KIND_LABELS[item.kind]} ·{" "}
-                      {Number(item.amount_rub).toLocaleString("ru-RU")} ₽
-                    </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    setPayUrl("");
+                  }}
+                  className="min-w-0 flex-1 rounded-2xl px-4 py-3 text-left"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{item.recipient_name}</p>
+                      <p className="text-xs text-studio-muted">
+                        {GIFT_KIND_LABELS[item.kind]} ·{" "}
+                        {Number(item.amount_rub).toLocaleString("ru-RU")} ₽
+                      </p>
+                    </div>
+                    <Badge variant={statusVariant(item.status)}>
+                      {GIFT_STATUS_LABELS[item.status]}
+                    </Badge>
                   </div>
-                  <Badge variant={statusVariant(item.status)}>
-                    {GIFT_STATUS_LABELS[item.status]}
-                  </Badge>
-                </div>
-                <p className="mt-2 font-mono text-xs tracking-wider text-studio-gold">
-                  {formatGiftCode(item.code)}
-                </p>
-              </button>
+                  <p className="mt-2 font-mono text-xs tracking-wider text-studio-gold">
+                    {formatGiftCode(item.code)}
+                  </p>
+                </button>
+                {canDeleteGift(item) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Удалить сертификат ${formatGiftCode(item.code)}`}
+                    title="Удалить сертификат"
+                    onClick={() => void remove(item)}
+                    className="m-1 flex w-11 shrink-0 items-center justify-center rounded-xl text-red-400 ring-1 ring-red-500/25 transition hover:bg-red-500/15 disabled:opacity-40"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
 
@@ -403,14 +425,14 @@ export default function GiftCertificatesPanel() {
                     {copied === "url" ? "Ссылка скопирована" : "Копировать оплату"}
                   </Button>
                 )}
-                {selected.status !== "redeemed" && !selected.redeemed_by && (
+                {canDeleteGift(selected) && (
                   <Button
                     variant="danger"
                     disabled={busy}
-                    onClick={() => void remove(selected.id)}
+                    onClick={() => void remove(selected)}
                   >
                     <Trash2 className="h-4 w-4" />
-                    Удалить
+                    Удалить сертификат
                   </Button>
                 )}
               </div>

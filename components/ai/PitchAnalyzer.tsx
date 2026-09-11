@@ -67,6 +67,7 @@ export default function PitchAnalyzer({
   const [sentOk, setSentOk] = useState(false);
   const [sendNote, setSendNote] = useState("");
   const [savedResultId, setSavedResultId] = useState<string | null>(null);
+  const [micSilent, setMicSilent] = useState(false);
 
   const { listening, testing, testProgress, error, live } = analyzer;
 
@@ -94,10 +95,12 @@ export default function PitchAnalyzer({
     setSentOk(false);
     setSavedResultId(null);
     setReport(null);
+    setMicSilent(false);
     const modeAtStart = testMode;
     const targetAtStart = targetNote;
     try {
       const result = await analyzer.startTest(TEST_MS);
+      setMicSilent(Boolean(result.noSignal));
       const built = buildVocalReport(
         result.frames,
         result.tooQuiet,
@@ -524,11 +527,12 @@ export default function PitchAnalyzer({
           <div className="space-y-4 text-center">
             <div className="rounded-2xl bg-amber-500/10 p-6 ring-1 ring-amber-400/30">
               <p className="font-display text-xl font-semibold text-amber-100">
-                Звук не распознан
+                {micSilent ? "Микрофон не отдал звук" : "Звук не распознан"}
               </p>
               <p className="mt-2 text-sm text-studio-muted">
-                Пойте громче и увереннее, поднесите микрофон ближе — сигнал
-                оказался слишком тихим для честной оценки.
+                {micSilent
+                  ? "Сигнал не дошёл до анализатора. Нажмите ещё раз и подождите долю секунды, прежде чем петь."
+                  : "Пойте громче и увереннее, поднесите микрофон ближе — сигнал оказался слишком тихим для честной оценки."}
               </p>
             </div>
             <Button fullWidth size="lg" onClick={() => setReportOpen(false)}>
