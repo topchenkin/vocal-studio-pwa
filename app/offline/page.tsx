@@ -21,6 +21,12 @@ export default function OfflinePage() {
         Проверьте интернет и попробуйте снова. Приложение будет доступно офлайн
         после первой загрузки.
       </p>
+      <a
+        href="/"
+        className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl bg-studio-accent px-5 text-sm font-medium text-white"
+      >
+        На главную
+      </a>
     </main>
   );
 }

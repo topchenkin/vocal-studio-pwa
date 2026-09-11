@@ -73,7 +73,7 @@ export default function LandingPage() {
       <div className="pointer-events-none fixed -left-40 bottom-20 h-96 w-96 rounded-full bg-blue-500/5 blur-3xl" />
 
       <div
-        className="relative isolate min-h-[100svh]"
+        className="relative isolate min-h-[100svh] text-studio-text"
         style={{
           ["--studio-text" as string]: "255 255 255",
           ["--studio-muted" as string]: "186 186 210",

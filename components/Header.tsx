@@ -16,6 +16,7 @@ import Logo from "@/components/Logo";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { useAuth } from "@/context/AuthContext";
 import { APP_NAME } from "@/lib/constants";
+import { LEGAL } from "@/lib/legal";
 import { useTheme } from "@/context/ThemeContext";
 
 interface HeaderProps {
@@ -36,7 +37,7 @@ export default function Header({ showNav = true }: HeaderProps) {
 
   return (
     <header className="relative z-30 flex w-full min-w-0 items-center justify-between overflow-visible pt-[env(safe-area-inset-top)] animate-fade-in opacity-0 [animation-fill-mode:forwards]">
-      <Link href="/" className="flex min-w-0 items-center gap-3">
+      <Link href="/" className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden pr-2 sm:gap-3 sm:flex-none">
         <Logo size={48} />
         <BrandWordmark className="min-w-0" subtitle="Студия вокала" />
       </Link>
@@ -46,7 +47,7 @@ export default function Header({ showNav = true }: HeaderProps) {
         <button
           type="button"
           onClick={toggleTheme}
-          className="rounded-lg bg-studio-surface p-2 text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text"
+          className="flex h-11 w-11 items-center justify-center rounded-lg bg-studio-surface text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text"
           aria-label={
             theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему"
           }
@@ -86,7 +87,7 @@ export default function Header({ showNav = true }: HeaderProps) {
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
-              className="rounded-lg p-2 text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text sm:hidden"
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text sm:hidden"
               aria-label="Меню"
             >
               {menuOpen ? (
@@ -112,9 +113,26 @@ export default function Header({ showNav = true }: HeaderProps) {
             </Link>
           )}
           {!isAuthenticated && (
-            <p className="px-3 py-2 text-xs text-studio-muted">
-              {APP_NAME} — запишитесь на урок
-            </p>
+            <nav className="flex flex-col">
+              <p className="px-3 py-2 text-xs text-studio-muted">
+                {APP_NAME} — запишитесь на урок
+              </p>
+              {[
+                { href: LEGAL.uslugiPath, label: "Услуги и цены" },
+                { href: LEGAL.offerPath, label: "Оферта и возврат" },
+                { href: LEGAL.privacyPath, label: "Конфиденциальность" },
+                { href: LEGAL.contactsPath, label: "Контакты" },
+              ].map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMenuOpen(false)}
+                  className="flex min-h-11 items-center rounded-lg px-3 py-2.5 text-sm text-studio-muted hover:bg-studio-surface hover:text-studio-text"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
           )}
           {isStudent && (
             <Link

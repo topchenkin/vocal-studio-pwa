@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 function H({ children }: { children: string }) {
   return (
     <h2 className="mt-8 font-display text-xl font-semibold text-studio-text">
-      {children}
+      {straightDashNodes(children)}
     </h2>
   );
 }

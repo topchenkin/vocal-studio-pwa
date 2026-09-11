@@ -48,6 +48,9 @@ export default function Modal({
             onClick={onClose}
           />
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
             initial={{ opacity: 0, y: 40, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.97 }}
@@ -60,7 +63,7 @@ export default function Modal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-lg p-1.5 text-studio-muted transition-colors hover:bg-studio-surface hover:text-white"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-studio-muted transition-colors hover:bg-studio-surface hover:text-white"
                   aria-label="Закрыть"
                 >
                   <X className="h-5 w-5" />

@@ -27,7 +27,7 @@ const DUO = [
 ];
 
 function rub(value: number) {
-  return `${value.toLocaleString("ru-RU")} ₽`;
+  return `${value.toLocaleString("ru-RU")}\u00a0₽`;
 }
 
 export default function UslugiPage() {
@@ -62,11 +62,11 @@ export default function UslugiPage() {
                 key={plan.title}
                 className="flex items-baseline justify-between gap-3 rounded-xl bg-studio-surface px-4 py-3 ring-1 ring-studio-border"
               >
-                <span>
+                <span className="min-w-0">
                   {plan.title}
                   <span className="text-studio-muted"> · {straightDashNodes(plan.note)}</span>
                 </span>
-                <b>{rub(plan.price)}</b>
+                <b className="shrink-0 whitespace-nowrap">{rub(plan.price)}</b>
               </li>
             ))}
           </ul>
@@ -81,11 +81,11 @@ export default function UslugiPage() {
                 key={plan.title}
                 className="flex items-baseline justify-between gap-3 rounded-xl bg-studio-surface px-4 py-3 ring-1 ring-studio-border"
               >
-                <span>
+                <span className="min-w-0">
                   {plan.title}
                   <span className="text-studio-muted"> · {straightDashNodes(plan.note)}</span>
                 </span>
-                <b>{rub(plan.price)}</b>
+                <b className="shrink-0 whitespace-nowrap">{rub(plan.price)}</b>
               </li>
             ))}
           </ul>

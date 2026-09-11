@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "framer-motion";
 
 const LEAD = ["Голос", "раскрывается,", "когда", "рядом"] as const;
 const ACCENT = ["наставник", "и", "умная", "практика"] as const;
+const LABEL = "Голос раскрывается, когда рядом наставник и умная практика";
 
 export default function HeadlineStagger() {
   const reduce = useReducedMotion();
@@ -20,7 +21,8 @@ export default function HeadlineStagger() {
 
   return (
     <motion.h1
-      className="font-display text-4xl font-semibold leading-[1.08] sm:text-6xl lg:text-7xl"
+      aria-label={LABEL}
+      className="font-display text-4xl font-semibold leading-[1.08] text-studio-text sm:text-6xl lg:text-7xl"
       variants={{
         hidden: {},
         show: { transition: { staggerChildren: 0.05 } },
