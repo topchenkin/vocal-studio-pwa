@@ -36,7 +36,7 @@ import {
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
 import { getSingingMicStream } from "@/lib/mic-audio";
-import { restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
+import { preferIosPlayback, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
 const REPRESENTATIVES_PER_GENRE = 5;
@@ -252,6 +252,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         return;
       }
       streamRef.current = stream;
+      preferIosPlayback();
 
       const AudioCtx =
         window.AudioContext ||

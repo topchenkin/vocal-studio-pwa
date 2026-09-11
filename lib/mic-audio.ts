@@ -104,7 +104,8 @@ export async function getSingingMicStream(): Promise<MediaStream> {
  * Mixer / overdub mic. One getUserMedia — the singing path's unlock-then-
  * re-open cycle flips Safari between play-and-record and playback and kills
  * monitor audio. Echo cancellation is applied by the caller when speakers
- * are playing previous takes.
+ * are playing previous takes. holdIosCapture immediately returns the session
+ * to playback so minusovka never stays on the earpiece.
  */
 export async function getStudioMicStream(): Promise<MediaStream> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {

@@ -42,6 +42,7 @@ async function requestWakeLock() {
 
 export function beginAudioKeepAlive() {
   holdCount += 1;
+  preferIosPlayback();
   const audio = mediaEl();
   if (!audio) return;
   void audio.play().catch(() => undefined);

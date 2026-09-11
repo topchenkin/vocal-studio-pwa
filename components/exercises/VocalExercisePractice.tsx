@@ -23,6 +23,7 @@ import {
 import { EXERCISE_ATTEMPT_MAX_SEC } from "@/lib/vocal-exercise";
 import type { Exercise } from "@/types";
 import Link from "next/link";
+import { preferIosPlayback } from "@/lib/ios-audio-session";
 
 type PracticeStage = "idle" | "live" | "recording" | "ready" | "sending";
 
@@ -81,6 +82,7 @@ export default function VocalExercisePractice({
   const playBacking = async () => {
     const audio = audioRef.current;
     if (!audio) return;
+    preferIosPlayback();
     audio.currentTime = 0;
     try {
       await audio.play();
@@ -94,6 +96,7 @@ export default function VocalExercisePractice({
     setTake(null);
     try {
       await analyzer.startListening();
+      preferIosPlayback();
       setPracticeStage("live");
       void awardCatXp("exercise").then((result) => {
         if (result?.awarded) void refreshProfile();
@@ -259,6 +262,8 @@ export default function VocalExercisePractice({
           src={exercise.media_url}
           preload="metadata"
           playsInline
+          {...{ "webkit-playsinline": "true" }}
+          onPlay={() => preferIosPlayback()}
         />
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-studio-accent/15">

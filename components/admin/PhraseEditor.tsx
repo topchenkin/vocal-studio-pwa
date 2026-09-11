@@ -6,6 +6,7 @@ import PhraseAnchors from "@/components/admin/PhraseAnchors";
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
+import { preferIosPlayback } from "@/lib/ios-audio-session";
 import {
   EXERCISE_PHRASE_LIST_LIMIT,
   EXERCISE_PHRASE_MAX_SEC,
@@ -268,6 +269,7 @@ export default function PhraseEditor({
       return;
     }
     audio.currentTime = start;
+    preferIosPlayback();
     setPlayingId(id);
     await audio.play();
   };
@@ -284,6 +286,7 @@ export default function PhraseEditor({
         return;
       }
       clip.src = clipUrl;
+      preferIosPlayback();
       setPlayingId(phrase.id);
       await clip.play();
       return;
@@ -302,6 +305,7 @@ export default function PhraseEditor({
       return;
     }
     setPlayingId("minus");
+    preferIosPlayback();
     await audio.play();
   };
 
@@ -338,6 +342,9 @@ export default function PhraseEditor({
         ref={audioRef}
         src={audioUrl}
         preload="metadata"
+        playsInline
+        {...{ "webkit-playsinline": "true" }}
+        onPlay={() => preferIosPlayback()}
         onTimeUpdate={(event) => {
           if (activeEnd != null && event.currentTarget.currentTime >= Number(activeEnd)) {
             event.currentTarget.pause();
@@ -346,8 +353,23 @@ export default function PhraseEditor({
         }}
         onEnded={() => setPlayingId(null)}
       />
-      <audio ref={clipAudioRef} onEnded={() => setPlayingId(null)} />
-      {minusUrl && <audio ref={minusAudioRef} src={minusUrl} onEnded={() => setPlayingId(null)} />}
+      <audio
+        ref={clipAudioRef}
+        playsInline
+        {...{ "webkit-playsinline": "true" }}
+        onPlay={() => preferIosPlayback()}
+        onEnded={() => setPlayingId(null)}
+      />
+      {minusUrl && (
+        <audio
+          ref={minusAudioRef}
+          src={minusUrl}
+          playsInline
+          {...{ "webkit-playsinline": "true" }}
+          onPlay={() => preferIosPlayback()}
+          onEnded={() => setPlayingId(null)}
+        />
+      )}
       <div
         ref={waveRef}
         className="relative mt-4 touch-none overflow-hidden rounded-xl"
@@ -445,8 +467,10 @@ export default function PhraseEditor({
             onClick={() => {
               const audio = audioRef.current;
               if (!audio) return;
-              if (audio.paused) void audio.play();
-              else audio.pause();
+              if (audio.paused) {
+                preferIosPlayback();
+                void audio.play();
+              } else audio.pause();
             }}
           >
             <Play className="h-4 w-4" />

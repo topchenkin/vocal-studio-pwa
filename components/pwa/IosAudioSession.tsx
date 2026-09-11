@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import {
   forceIosSpeakerRoute,
+  iosCaptureActive,
   preferIosPlayback,
 } from "@/lib/ios-audio-session";
 
@@ -10,15 +11,19 @@ import {
  * Keep iPhone in media-playback mode unless a tool has the mic open.
  * Without this, a previous getUserMedia leaves the PWA ducking into the
  * earpiece for every later <audio> / Web Audio play.
+ *
+ * A live mic hold still prefers playback (holdIosCapture already flipped
+ * the session). Never re-arm play-and-record on focus. The silent speaker
+ * ping waits until capture ends so it cannot steal the overdub graph.
  */
 export default function IosAudioSession() {
   useEffect(() => {
     preferIosPlayback();
     const retakeSpeaker = () => {
       preferIosPlayback();
-      if (document.visibilityState === "visible") {
-        void forceIosSpeakerRoute();
-      }
+      if (document.visibilityState !== "visible") return;
+      if (iosCaptureActive()) return;
+      void forceIosSpeakerRoute();
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") retakeSpeaker();

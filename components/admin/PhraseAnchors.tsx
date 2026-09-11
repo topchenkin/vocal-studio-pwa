@@ -5,6 +5,10 @@ import { Mic, Pause, Play, Square, Upload } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { getSingingMicStream } from "@/lib/mic-audio";
+import {
+  preferIosPlayback,
+  restoreIosPlaybackAfterCapture,
+} from "@/lib/ios-audio-session";
 import { audioBufferToWavBlob, startPcmCapture, type PcmCaptureSession } from "@/lib/pcm-capture";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
@@ -112,8 +116,10 @@ export default function PhraseAnchors({
   const record = async (band: PhraseAnchorBand) => {
     if (recording) return;
     setError("");
+    let stream: MediaStream | null = null;
     try {
-      const stream = await getSingingMicStream();
+      stream = await getSingingMicStream();
+      preferIosPlayback();
       setRecording(band);
       const capture = await startPcmCapture(stream);
       captureRef.current = capture;
@@ -132,8 +138,9 @@ export default function PhraseAnchors({
       stopRef.current = null;
       const buffer = await capture.stop();
       captureRef.current = null;
-      stream.getTracks().forEach((track) => track.stop());
       setRecording(null);
+      await restoreIosPlaybackAfterCapture({ stream });
+      stream = null;
       if (buffer.duration < 1) {
         setError("Запись слишком короткая.");
         return;
@@ -144,6 +151,7 @@ export default function PhraseAnchors({
       captureRef.current = null;
       stopRef.current = null;
       setRecording(null);
+      await restoreIosPlaybackAfterCapture({ stream });
       setError(caught instanceof Error ? caught.message : "Не удалось записать пример");
     }
   };
@@ -167,13 +175,20 @@ export default function PhraseAnchors({
       return;
     }
     audio.src = url;
+    preferIosPlayback();
     setPlaying(band);
     await audio.play();
   };
 
   return (
     <div className="mt-2 rounded-xl bg-studio-bg/60 p-3 ring-1 ring-studio-border">
-      <audio ref={audioRef} onEnded={() => setPlaying(null)} />
+      <audio
+        ref={audioRef}
+        playsInline
+        {...{ "webkit-playsinline": "true" }}
+        onPlay={() => preferIosPlayback()}
+        onEnded={() => setPlaying(null)}
+      />
       <p className="text-[11px] text-studio-muted">
         Три калибровочных примера с того же микрофона: алгоритм подтягивает оценку к 90 / 65 / 28,
         если ученик похож на сильный, средний или слабый образец.

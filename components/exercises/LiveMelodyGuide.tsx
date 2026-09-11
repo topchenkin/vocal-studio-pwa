@@ -12,6 +12,7 @@ import {
   readAnalyserTimeDomain,
   singingInputGainValue,
 } from "@/lib/mic-audio";
+import { preferIosPlayback } from "@/lib/ios-audio-session";
 import {
   HITBOX_TIMING_SLACK_SEC,
   blockAtTime,
@@ -341,6 +342,7 @@ export default function LiveMelodyGuide({
 
     const start = async () => {
       if (stream) {
+        preferIosPlayback();
         const AudioCtx =
           window.AudioContext ||
           (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;

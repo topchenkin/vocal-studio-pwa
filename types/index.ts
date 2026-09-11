@@ -40,6 +40,7 @@ export interface GiftCertificateRow {
   redeemed_at: string | null;
   expires_at: string | null;
   paid_at: string | null;
+  archived_at: string | null;
   created_at: string;
 }
 
@@ -1039,6 +1040,10 @@ export interface Database {
       admin_delete_gift_certificate: {
         Args: { p_id: string };
         Returns: undefined;
+      };
+      admin_set_gift_certificate_archived: {
+        Args: { p_id: string; p_archived: boolean };
+        Returns: GiftCertificateRow;
       };
       complete_sandbox_payment: {
         Args: {

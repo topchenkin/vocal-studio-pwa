@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
-import { preferIosPlayback } from "@/lib/ios-audio-session";
+import { preferIosPlayback, routeHtmlMediaToSpeaker } from "@/lib/ios-audio-session";
 
 export default function ExerciseAudioPlayer({
   src,
@@ -38,6 +38,7 @@ export default function ExerciseAudioPlayer({
     if (!audio) return;
     if (audio.paused) {
       preferIosPlayback();
+      void routeHtmlMediaToSpeaker(audio);
       await audio.play();
       setPlaying(true);
     } else {

@@ -35,7 +35,7 @@ import {
   singingInputGainValue,
 } from "@/lib/mic-audio";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
-import { restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
+import { restoreIosPlaybackAfterCapture, preferIosPlayback } from "@/lib/ios-audio-session";
 
 export type { PitchFrame } from "@/lib/pitch";
 
@@ -326,6 +326,7 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     }
 
     const stream = await getSingingMicStream();
+    preferIosPlayback();
     streamRef.current = stream;
     const AudioCtx =
       window.AudioContext ||

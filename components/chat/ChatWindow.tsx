@@ -25,7 +25,7 @@ import {
   stopMediaStream,
   unlockInlineVideo,
 } from "@/lib/chat-capture";
-import { cancelArmedIosCapture, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
+import { cancelArmedIosCapture, preferIosPlayback, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 import { mediaFileFromChunks } from "@/lib/media-mime";
 import { CHAT_EMOJIS, getSticker, VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { ChatMessage, User } from "@/lib/types";
@@ -304,6 +304,7 @@ export default function ChatWindow({
 
       const stream = await getChatMediaStream(kind, previewRef.current);
       streamRef.current = stream;
+      preferIosPlayback();
 
       if (kind === "video" && previewRef.current) {
         await attachPreviewStream(previewRef.current, stream);

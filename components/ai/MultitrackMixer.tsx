@@ -44,6 +44,8 @@ import {
   forceIosSpeakerRoute,
   preferIosPlayback,
   restoreIosPlaybackAfterCapture,
+  reviveHtmlMediaOnSpeaker,
+  routeHtmlMediaToSpeaker,
   routeIosToSpeaker,
 } from "@/lib/ios-audio-session";
 import MediaAudio from "@/components/media/MediaAudio";
@@ -607,6 +609,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
       el.addEventListener("loadedmetadata", seek, { once: true });
       seek();
       host.appendChild(el);
+      void routeHtmlMediaToSpeaker(el);
       const playOk = el
         .play()
         .then(() => true)
@@ -620,12 +623,9 @@ export default function MultitrackMixer({ locked = false }: Props) {
     await Promise.all(
       htmlMonitorRef.current.map(async (item) => {
         try {
-          if (item.el.paused) {
-            item.playOk = item.el
-              .play()
-              .then(() => true)
-              .catch(() => false);
-          }
+          item.playOk = reviveHtmlMediaOnSpeaker(item.el)
+            .then(() => !item.el.paused)
+            .catch(() => false);
           await item.playOk;
         } catch {
           /* ignore */
@@ -720,6 +720,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   );
 
   const ensureAudioCtx = async () => {
+    preferIosPlayback();
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       audioCtxRef.current = createLiveAudioContext();
     }
@@ -839,7 +840,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
   };
 
   const startPlayhead = (
-    ctx: AudioContext,
+    clock: { currentTime: number },
     endSec: number,
     t0: number,
     fromSec: number
@@ -850,7 +851,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setPlayheadSec(playFromSecRef.current);
     setPlaying(true);
     const tick = () => {
-      const elapsed = ctx.currentTime - playStartedAtRef.current;
+      const elapsed = clock.currentTime - playStartedAtRef.current;
       const pos = playFromSecRef.current + elapsed;
       setPlayheadSec(Math.max(0, pos));
       if (!recordingIdRef.current && pos >= playDurationRef.current) {
@@ -966,6 +967,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
     setError("");
     try {
       const manyLanes = tracksRef.current.length >= 8;
+      await forceIosSpeakerRoute();
       const ctx = await unlockSpeakerContext({ forceFresh: manyLanes });
       const monitors = await hydrateTracks(ctx, monitoredTracks());
       beginAudioKeepAlive();
@@ -1013,15 +1015,14 @@ export default function MultitrackMixer({ locked = false }: Props) {
     const monitorsAtStart = monitoredTracks();
     const htmlList = monitorsAtStart.filter(htmlMonitorPlayable);
     const webOnly = monitorsAtStart.filter((track) => !htmlMonitorPlayable(track));
-    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-      audioCtxRef.current = createLiveAudioContext();
-    }
-    void audioCtxRef.current.resume();
-    // Gesture is still hot — arm in-DOM HTML now, before any await.
+    // Do not create Web Audio before getUserMedia — that context binds to the
+    // earpiece for the rest of the take. HTML monitor is armed in this tap.
     startHtmlMonitor(htmlList, fromSec);
 
     try {
       const stream = await ensureMic();
+      preferIosPlayback();
+      routeIosToSpeaker();
       if (monitorsAtStart.length > 0) {
         stream.getAudioTracks().forEach((track) => {
           void track
@@ -1063,6 +1064,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           recorderRef.current = null;
           releaseMicFully();
           preferIosPlayback();
+          void forceIosSpeakerRoute();
 
           await waitForRecorderBytes(chunks);
           if (!chunks.some((chunk) => chunk.size > 0)) {
@@ -1079,10 +1081,7 @@ export default function MultitrackMixer({ locked = false }: Props) {
           }
 
           try {
-            const liveCtx =
-              audioCtxRef.current && audioCtxRef.current.state !== "closed"
-                ? audioCtxRef.current
-                : await ensureAudioCtx();
+            const liveCtx = await unlockSpeakerContext({ forceFresh: true });
             const buffer = await decodeWithCtx(liveCtx, blob);
             const url = URL.createObjectURL(blob);
             const peaks = buildPeaks(buffer);
@@ -1118,6 +1117,16 @@ export default function MultitrackMixer({ locked = false }: Props) {
         })();
       };
 
+      preferIosPlayback();
+      await forceIosSpeakerRoute();
+      await reviveHtmlMonitor();
+      resyncHtmlMonitor(fromSec);
+      if (take !== takeIdRef.current) {
+        releaseMicFully();
+        stopPlayback();
+        return;
+      }
+
       // No timeslice: one continuous stream — timeslices caused dropouts / gaps
       recorder.start();
       setRecordingId(id);
@@ -1128,36 +1137,33 @@ export default function MultitrackMixer({ locked = false }: Props) {
       }
       routeIosToSpeaker();
       beginAudioKeepAlive();
+      const wall = {
+        get currentTime() {
+          return performance.now() / 1000;
+        },
+      };
+      startPlayhead(wall, fromSec + 3600, wall.currentTime, fromSec);
 
-      const clockCtx =
-        audioCtxRef.current && audioCtxRef.current.state !== "closed"
-          ? audioCtxRef.current
-          : createLiveAudioContext();
-      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
-        audioCtxRef.current = clockCtx;
-      }
-      startPlayhead(clockCtx, fromSec + 3600, clockCtx.currentTime, fromSec);
-
-      void (async () => {
-        try {
-          await reviveHtmlMonitor();
-          resyncHtmlMonitor(fromSec);
-          if (webOnly.length === 0) return;
-          const graphCtx = await unlockSpeakerContext();
-          if (graphCtx.state === "suspended") {
-            await graphCtx.resume().catch(() => undefined);
+      if (webOnly.length > 0) {
+        void (async () => {
+          try {
+            preferIosPlayback();
+            const graphCtx = await unlockSpeakerContext({ forceFresh: true });
+            if (graphCtx.state === "suspended") {
+              await graphCtx.resume().catch(() => undefined);
+            }
+            const hydrated = await hydrateTracks(graphCtx, webOnly);
+            playLanes(
+              graphCtx,
+              hydrated,
+              graphCtx.currentTime + MONITOR_SCHEDULE_SLOP,
+              fromSec
+            );
+          } catch {
+            /* HTML monitor already running */
           }
-          const hydrated = await hydrateTracks(graphCtx, webOnly);
-          playLanes(
-            graphCtx,
-            hydrated,
-            graphCtx.currentTime + MONITOR_SCHEDULE_SLOP,
-            fromSec
-          );
-        } catch {
-          /* HTML monitor already running */
-        }
-      })();
+        })();
+      }
     } catch {
       setError("Не удалось получить доступ к микрофону");
       releaseMicFully();
@@ -1187,11 +1193,13 @@ export default function MultitrackMixer({ locked = false }: Props) {
         setRecordingId(null);
         releaseMicFully();
         preferIosPlayback();
+        void forceIosSpeakerRoute();
       }
       return;
     }
     stopPlayback();
     preferIosPlayback();
+    void forceIosSpeakerRoute();
   };
 
   const removeTrack = (id: string) => {

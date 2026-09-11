@@ -28,6 +28,7 @@ import {
   playInstrumentNote,
 } from "@/lib/chord-synth";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
+import { preferIosPlayback } from "@/lib/ios-audio-session";
 import { ensureChordSamples } from "@/lib/chord-sampler";
 import {
   deleteChordLoopPreset,
@@ -305,6 +306,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
   }, [stopVoices, tick]);
 
   const play = useCallback(async () => {
+    preferIosPlayback();
     if (!ctxRef.current || ctxRef.current.state === "closed") {
       const ctx = ensureAudioContext();
       const master = ctx.createGain();

@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Gift, Link2, Plus, Trash2, CheckCircle2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Copy,
+  Gift,
+  Link2,
+  Plus,
+  Trash2,
+  CheckCircle2,
+} from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import NumberInput from "@/components/ui/NumberInput";
@@ -31,6 +40,17 @@ function canDeleteGift(item: GiftCertificate) {
   return item.status !== "redeemed" && !item.redeemed_by;
 }
 
+function isGiftArchived(item: GiftCertificate) {
+  return Boolean(item.archived_at);
+}
+
+function canArchiveGift(item: GiftCertificate) {
+  return (
+    !isGiftArchived(item) &&
+    (item.status === "redeemed" || Boolean(item.redeemed_by))
+  );
+}
+
 export default function GiftCertificatesPanel() {
   const { isMockAdmin } = useAuth();
   const [items, setItems] = useState<GiftCertificate[]>([]);
@@ -49,8 +69,26 @@ export default function GiftCertificatesPanel() {
   const [tier, setTier] = useState<"standard" | "premium" | "vip">("premium");
   const [amount, setAmount] = useState(20000);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [listTab, setListTab] = useState<"active" | "archive">("active");
 
-  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
+  const activeItems = useMemo(
+    () =>
+      items.filter(
+        (item) => !isGiftArchived(item) && item.status !== "redeemed" && !item.redeemed_by
+      ),
+    [items]
+  );
+  const archiveItems = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          isGiftArchived(item) || item.status === "redeemed" || Boolean(item.redeemed_by)
+      ),
+    [items]
+  );
+  const visibleItems = listTab === "archive" ? archiveItems : activeItems;
+  const selected =
+    visibleItems.find((item) => item.id === selectedId) ?? visibleItems[0] ?? null;
 
   const suggestedAmount = useMemo(() => {
     if (kind === "subscription") return APP_TIER_PRICES[tier];
@@ -120,6 +158,7 @@ export default function GiftCertificatesPanel() {
       setPayUrl(url);
       setSelectedId(created.id);
       setCreating(false);
+      setListTab("active");
       setRecipientName("");
       setBuyerName("");
       setNote("");
@@ -190,6 +229,29 @@ export default function GiftCertificatesPanel() {
     setBusy(false);
   };
 
+  const setArchived = async (item: GiftCertificate, archived: boolean) => {
+    if (archived && !canArchiveGift(item)) return;
+    if (!archived && !isGiftArchived(item)) return;
+    setError("");
+    setBusy(true);
+    const { error: rpcError } = await supabase.rpc(
+      "admin_set_gift_certificate_archived",
+      { p_id: item.id, p_archived: archived }
+    );
+    if (rpcError) {
+      setError(
+        rpcError.message ||
+          (archived
+            ? "Не удалось убрать сертификат в архив"
+            : "Не удалось вернуть сертификат из архива")
+      );
+    } else {
+      if (archived) setListTab("archive");
+      await load();
+    }
+    setBusy(false);
+  };
+
   if (isMockAdmin) {
     return (
       <p className="rounded-2xl bg-studio-card p-5 text-sm text-studio-muted ring-1 ring-studio-border">
@@ -206,6 +268,8 @@ export default function GiftCertificatesPanel() {
           <p className="mt-1 text-xs text-studio-muted">
             Звонок → создаёте сертификат → кидаете ссылку оплаты ЮKassa.
             Код дарите после оплаты. Активация по имени получателя.
+            Активированные не удаляются — их можно убрать в архив, оплата
+            сохранится.
           </p>
         </div>
         <Button onClick={() => setCreating((value) => !value)}>
@@ -314,19 +378,54 @@ export default function GiftCertificatesPanel() {
 
       {error && !creating && <p className="text-sm text-red-400">{error}</p>}
 
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setListTab("active");
+            setPayUrl("");
+          }}
+          className={`rounded-xl px-3 py-2 text-xs font-medium ring-1 transition ${
+            listTab === "active"
+              ? "bg-studio-accent/15 text-studio-accent-light ring-studio-accent"
+              : "bg-studio-surface text-studio-muted ring-studio-border"
+          }`}
+        >
+          Сертификаты
+          {activeItems.length > 0 ? ` · ${activeItems.length}` : ""}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setListTab("archive");
+            setPayUrl("");
+          }}
+          className={`rounded-xl px-3 py-2 text-xs font-medium ring-1 transition ${
+            listTab === "archive"
+              ? "bg-studio-accent/15 text-studio-accent-light ring-studio-accent"
+              : "bg-studio-surface text-studio-muted ring-studio-border"
+          }`}
+        >
+          Архив
+          {archiveItems.length > 0 ? ` · ${archiveItems.length}` : ""}
+        </button>
+      </div>
+
       {loading ? (
         <p className="text-sm text-studio-muted">Загружаем…</p>
-      ) : items.length === 0 && !creating ? (
+      ) : visibleItems.length === 0 && !creating ? (
         <div className="rounded-3xl bg-studio-card p-8 text-center ring-1 ring-studio-border">
           <Gift className="mx-auto h-8 w-8 text-studio-gold" />
           <p className="mt-3 text-sm text-studio-muted">
-            Пока нет сертификатов. Создайте первый по звонку.
+            {listTab === "archive"
+              ? "Архив пуст. Активированные сертификаты можно убрать сюда — история оплаты останется."
+              : "Пока нет сертификатов. Создайте первый по звонку."}
           </p>
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <div className="space-y-2">
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <div
                 key={item.id}
                 className={`flex w-full items-stretch gap-1 rounded-2xl ring-1 transition ${
@@ -359,6 +458,30 @@ export default function GiftCertificatesPanel() {
                     {formatGiftCode(item.code)}
                   </p>
                 </button>
+                {canArchiveGift(item) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`В архив ${formatGiftCode(item.code)}`}
+                    title="Убрать в архив"
+                    onClick={() => void setArchived(item, true)}
+                    className="m-1 flex w-11 shrink-0 items-center justify-center rounded-xl text-studio-muted ring-1 ring-studio-border transition hover:bg-studio-card hover:text-studio-text disabled:opacity-40"
+                  >
+                    <Archive className="h-4 w-4" />
+                  </button>
+                )}
+                {isGiftArchived(item) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Вернуть из архива ${formatGiftCode(item.code)}`}
+                    title="Вернуть из архива"
+                    onClick={() => void setArchived(item, false)}
+                    className="m-1 flex w-11 shrink-0 items-center justify-center rounded-xl text-studio-muted ring-1 ring-studio-border transition hover:bg-studio-card hover:text-studio-text disabled:opacity-40"
+                  >
+                    <ArchiveRestore className="h-4 w-4" />
+                  </button>
+                )}
                 {canDeleteGift(item) && (
                   <button
                     type="button"
@@ -433,6 +556,26 @@ export default function GiftCertificatesPanel() {
                   >
                     <Trash2 className="h-4 w-4" />
                     Удалить сертификат
+                  </Button>
+                )}
+                {canArchiveGift(selected) && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void setArchived(selected, true)}
+                  >
+                    <Archive className="h-4 w-4" />
+                    В архив
+                  </Button>
+                )}
+                {isGiftArchived(selected) && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void setArchived(selected, false)}
+                  >
+                    <ArchiveRestore className="h-4 w-4" />
+                    Вернуть из архива
                   </Button>
                 )}
               </div>

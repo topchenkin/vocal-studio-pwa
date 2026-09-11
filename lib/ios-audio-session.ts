@@ -6,6 +6,14 @@
  *
  * A Web Audio graph created during play-and-record stays on the receiver
  * until that context is closed and a fresh playback context is opened.
+ *
+ * Native AVAudioSession has `.defaultToSpeaker` / `overrideOutputAudioPort`.
+ * Safari still does not expose a reliable equivalent. If a future WebKit
+ * build adds `overrideOutputAudioPort`, we call it. Until then: arm
+ * play-and-record only for the getUserMedia call, immediately return to
+ * playback, keep re-asserting playback while a mic track is held, recreate
+ * AudioContext after capture, and prefer in-DOM HTML <audio> for unpitched
+ * monitors (they follow the playback session).
  */
 
 type SessionType =
@@ -16,7 +24,10 @@ type SessionType =
   | "ambient"
   | "play-and-record";
 
-type SafariAudioSession = { type: SessionType };
+type SafariAudioSession = {
+  type: SessionType;
+  overrideOutputAudioPort?: (port: string) => unknown;
+};
 
 function safariSession(): SafariAudioSession | null {
   if (typeof navigator === "undefined") return null;
@@ -33,6 +44,22 @@ function isIPhone(): boolean {
 
 let captureCount = 0;
 let pendingArm = false;
+let speakerLockTimer: number | null = null;
+const speakerPulseTimers: number[] = [];
+
+function applySpeakerOverride() {
+  const session = safariSession();
+  const override = session?.overrideOutputAudioPort;
+  if (!session || typeof override !== "function") return;
+  try {
+    const result = override.call(session, "speaker");
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      void (result as Promise<unknown>).catch(() => undefined);
+    }
+  } catch {
+    /* WebKit has no overrideOutputAudioPort on current iOS */
+  }
+}
 
 function apply(type: SessionType) {
   const session = safariSession();
@@ -42,6 +69,32 @@ function apply(type: SessionType) {
   } catch {
     /* older WebKit */
   }
+  if (type !== "play-and-record") {
+    applySpeakerOverride();
+  }
+}
+
+function clearSpeakerPulses() {
+  if (typeof window === "undefined") return;
+  speakerPulseTimers.splice(0).forEach((id) => window.clearTimeout(id));
+}
+
+function startSpeakerLock() {
+  apply("playback");
+  if (typeof window === "undefined") return;
+  if (speakerLockTimer != null) return;
+  speakerLockTimer = window.setInterval(() => {
+    apply("playback");
+  }, 450);
+}
+
+function stopSpeakerLock() {
+  if (typeof window === "undefined") return;
+  if (speakerLockTimer != null) {
+    window.clearInterval(speakerLockTimer);
+    speakerLockTimer = null;
+  }
+  clearSpeakerPulses();
 }
 
 /** Call before getUserMedia / while a live audio track is needed. */
@@ -54,6 +107,7 @@ export function beginIosCapture() {
  * Switch Safari to play-and-record *before* getUserMedia.
  * Without this, iOS throws NotAllowedError even when the site already
  * has microphone permission (and does not show another prompt).
+ * Leave this mode immediately after the stream arrives — see holdIosCapture.
  */
 export function armIosCapture() {
   apply("play-and-record");
@@ -74,6 +128,7 @@ export function endIosCapture() {
   captureCount = Math.max(0, captureCount - 1);
   if (captureCount === 0) {
     pendingArm = false;
+    stopSpeakerLock();
     apply("playback");
   }
 }
@@ -94,6 +149,23 @@ export function routeIosToSpeaker() {
   apply("playback");
 }
 
+/**
+ * Re-assert playback for a few hundred ms after getUserMedia. Safari often
+ * flips back to play-and-record (and the earpiece) right after the mic opens.
+ */
+export function pulseIosPlayback(times = 8, gapMs = 70) {
+  preferIosPlayback();
+  if (typeof window === "undefined") return;
+  clearSpeakerPulses();
+  for (let i = 1; i <= times; i += 1) {
+    speakerPulseTimers.push(
+      window.setTimeout(() => {
+        apply("playback");
+      }, i * gapMs)
+    );
+  }
+}
+
 export function iosCaptureActive() {
   return captureCount > 0;
 }
@@ -102,15 +174,21 @@ const heldStreams = new WeakSet<MediaStream>();
 
 /** Pair with releaseIosCapture(stream) after the tracks are stopped. */
 export function holdIosCapture(stream: MediaStream) {
-  if (heldStreams.has(stream)) return;
+  if (heldStreams.has(stream)) {
+    apply("playback");
+    startSpeakerLock();
+    return;
+  }
   heldStreams.add(stream);
   if (pendingArm) {
     pendingArm = false;
   } else {
-    beginIosCapture();
+    captureCount += 1;
   }
   // Mic is open. Leave play-and-record and use the loudspeaker.
   apply("playback");
+  startSpeakerLock();
+  pulseIosPlayback();
 }
 
 export function releaseIosCapture(stream: MediaStream | null | undefined) {
@@ -136,6 +214,53 @@ function stopStreamTracks(stream: MediaStream | null | undefined) {
       /* already ended */
     }
   });
+}
+
+/**
+ * Best-effort HTML media route. iOS below ~26 has no setSinkId; empty sink
+ * id is the system default (speaker / headphones), never the receiver.
+ */
+export async function routeHtmlMediaToSpeaker(el: HTMLMediaElement) {
+  preferIosPlayback();
+  const media = el as HTMLMediaElement & {
+    setSinkId?: (id: string) => Promise<void>;
+  };
+  if (typeof media.setSinkId !== "function") return;
+  try {
+    await media.setSinkId("");
+  } catch {
+    /* ignored or unsupported */
+  }
+}
+
+/**
+ * Kick an already-playing element off the earpiece after the session
+ * returns to playback. Do not mute — Safari can leave the element silent.
+ */
+export async function reviveHtmlMediaOnSpeaker(el: HTMLMediaElement) {
+  preferIosPlayback();
+  el.muted = false;
+  if (el.volume < 0.05) el.volume = 1;
+  await routeHtmlMediaToSpeaker(el);
+  if (el.paused) {
+    try {
+      await el.play();
+    } catch {
+      /* gesture may be gone */
+    }
+    return;
+  }
+  if (!isIPhone()) return;
+  try {
+    el.pause();
+    await el.play();
+  } catch {
+    try {
+      await el.play();
+    } catch {
+      /* keep the pre-gUM play() if this retry fails */
+    }
+  }
 }
 
 /**
@@ -200,6 +325,7 @@ export async function restoreIosPlaybackAfterCapture(input?: {
   }
   pendingArm = false;
   captureCount = 0;
+  stopSpeakerLock();
   apply("playback");
   await forceIosSpeakerRoute();
 }
