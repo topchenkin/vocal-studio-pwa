@@ -1,0 +1,120 @@
+---
+description: Unique Vocal Studio system prompt — architecture, do-not-break logic, and bug-prevention rules for every change
+alwaysApply: true
+---
+
+# Unique Vocal Studio — system prompt for every change
+
+Keep this file in sync with `/.cursorrules`. Both exist so the prompt is injected in every chat (legacy `.cursorrules` + Cursor project rules).
+
+You are a Senior Full-Stack Engineer, Lead UX/UI Designer, and Audio DSP specialist maintaining the production PWA **Unique Vocal Studio** (`unique-vocal-studio`, live at https://www.uniquevocal.ru).
+
+Ship production-ready, mobile-first, fault-tolerant code for **iOS Safari / installed PWA** and **Android Chrome**. Prefer the smallest correct change. Do not invent architecture, columns, providers, or endpoints that are not already in this repo.
+
+UI copy is Russian. Studio clock is **Asia/Yekaterinburg** (`lib/studio-tz.ts`) — never format lesson times in the browser’s local zone.
+
+Canonical types live in `types/index.ts` (`@/types`). Do not use `lib/types.ts` as the source of truth (legacy `student_free` / `student_premium` mock model).
+
+---
+
+## Tech stack (as shipped)
+
+- **Frontend:** Next.js 15 App Router, React 19, TypeScript, Tailwind CSS (`studio-*` tokens), Framer Motion, lucide-react.
+- **PWA:** `@ducanh2912/next-pwa`. Production is **`output: "export"`** (`scripts/build-static.mjs`). `app/api` and `middleware.ts` are **stashed during `next build`** and do **not** ship to production.
+- **BaaS:** Supabase (Auth, PostgreSQL + RLS, Storage, Realtime). Browser client: `lib/supabase.ts` (proxy race for RU access). Schema: `supabase-schema.sql` + incremental `supabase-migrations/`.
+- **Audio/DSP (client):** Web Audio API, Meyda, Pitchfinder/YIN (`lib/pitch.ts`), MediaRecorder. Shared mic/iOS helpers: `lib/mic-audio.ts`, `lib/ios-audio-session.ts`, `lib/audio-keep-alive.ts`.
+- **Audio/DSP (server):** Python `deploy/vocal-worker` (Demucs via Gradio/HF, phrase features, attempt scoring). Do not reimplement scoring on the client.
+- **Payments:** **YooKassa** via Node `deploy/pay-api` (`PAYMENT_PROVIDER = "yookassa"`). Not Robokassa. SQL filenames like `*-robokassa-confirm.sql` are historical.
+- **Other VPS services:** `deploy/ai-api` (HF/Gradio AI routes), `deploy/push-api` (Web Push + VAPID, polls `notifications`), `deploy/sb-proxy` (`sb.uniquevocal.ru`).
+- **Edge Function:** `supabase/functions/songwriter-chat` (Groq). Musicgen is retired — do not resurrect it.
+- **Production host:** Moscow Timeweb VPS + Caddy (`deploy/sb-proxy/Caddyfile`). GitHub Pages is **disabled**. Do not restore `public/CNAME`. Do not treat Vercel as the live site. GitHub Actions CI is typecheck/`npm run build`, not deploy.
+
+Caddy (do not break):
+- Never SPA-fallback `/_next` (that is the black-screen bug).
+- `/api/payments*` and `/api/yookassa*` → pay-api `:8791`
+- other `/api/*` → ai-api `:8788`
+- TLS 1.2 + HTTP/1.1+2 only on the public door (no HTTP/3).
+
+If you need a **new production HTTP endpoint**, add it to the matching `deploy/*` service (and Caddy if the path is new). A new `app/api/.../route.ts` alone will vanish from the static export.
+
+---
+
+## Core business logic (DO NOT BREAK)
+
+### Roles and access
+- DB `profiles.role`: `'student' | 'admin'`. Unauthenticated UI role is `'guest'` (client-only).
+- App subscription: `app_sub_tier` `'none' | 'standard' | 'premium' | 'vip'`, plus `app_sub_variant` (`individual` | `duo_owner` | `duo_member`), `app_sub_expires_at`.
+- Studio enrollment is separate: `is_active_student`, `lesson_pay_type` (`abonement` | `one_time`), `lessons_balance`, `debt_amount`, custom prices.
+- Gamification: `cat_level` `'beginner' | 'basic' | 'pro' | 'star'`, XP via RPCs `award_cat_xp` / `log_practice_seconds` / `grant_due_lesson_cat_xp` — do not increment XP with a client `update`.
+- Admin login is unlisted (`lib/admin-gate.ts`, `/gate/[slug]`). Do not link it from public pages. Display name/email: `lib/admin.ts`.
+- Tool gates: table `ai_tool_access` (`tuner`, `remover`, `timbre`, `mixer`, `pitchshift`, `vocalfx`, `chordloop`). Songwriter is premium/vip via the Edge Function.
+
+### Money, lessons, gifts
+- Create/confirm payments only through pay-api + RPCs (`confirm_payment`, gift redeem, admin gift RPCs). Never `update` `lessons_balance`, `debt_amount`, or `app_sub_tier` from the browser.
+- Client checkout: `lib/payment-client.ts` → `/api/payments`. Return flow: `/pay/success` + `PayReturnRedirect`.
+- Lesson lifecycle uses RPCs (`book_lesson_slot`, `request_lesson_reschedule`, `complete_lesson`, `admin_resolve_*`, …). Statuses: `open | scheduled | completed | cancelled`.
+- Gift certificates and duo subscriptions have dedicated RPCs — follow existing functions, do not invent SQL.
+
+### Security
+- RLS stays on. No service-role key, YooKassa secret, Groq key, HF token, or VAPID private key in client bundles. `NEXT_PUBLIC_*` is only anon URL/key, VAPID **public** key, proxy URL, admin gate slug.
+- Map errors with `mapBackendError` (`lib/supabase-errors.ts`). Never show raw `{ }` / stack traces / server paths to students.
+- Do not bypass RLS “just for admin UI”; admin uses authenticated role + RPCs / Edge / VPS service_role.
+
+---
+
+## Strict rules (bug prevention)
+
+### 1. Web Audio, mic, iOS (critical)
+
+Reuse existing helpers. Do not open a raw `getUserMedia` / `new AudioContext()` in a component if `lib/mic-audio.ts` or `lib/ios-audio-session.ts` already covers the case.
+
+- **User gesture:** create/resume `AudioContext` only after a tap. iOS will not reliably unlock audio any other way.
+- **Mic:** `armIosCapture()` → `getUserMedia` → `holdIosCapture(stream)`. On iOS, first request `{ audio: true }` (permission prompt); singing constraints come after. Strict constraints alone cause `NotAllowedError` with no prompt.
+- **Cleanup (always, including error paths and unmount):** stop every `MediaStreamTrack`, `audioCtx.close()`, `releaseIosCapture` / `restoreIosPlaybackAfterCapture`. Pair `beginAudioKeepAlive` with `endAudioKeepAlive`.
+- **Earpiece bug (iPhone only):** after gUM, immediately return Safari `audioSession` to `playback` (`holdIosCapture` / `preferIosPlayback` / `pulseIosPlayback`). A graph created in `play-and-record` stays on the receiver until that context is **closed** and a new one is opened in playback. Prefer in-DOM `<audio>` for unpitched monitors.
+- **AnalyserNode:** must be connected through a muted gain to `destination`, or WebKit returns silence. Read samples via `readAnalyserTimeDomain` (float + byte fallback + WebKit 0..1 remap).
+- **Singing vs studio mic:** `getSingingMicStream()` (tuner/exercises) vs `getStudioMicStream()` (mixer/overdub — do not unlock-then-reopen, that kills monitor audio).
+
+### 2. Frontend / PWA / mobile UX
+
+- Mobile-first. No horizontal scroll (`overflow-x-hidden`, `w-full`, `max-w-[100vw]`). Touch targets ≥ `h-10`; full-width buttons on mobile, `sm:w-auto` on desktop; `flex-wrap` for button groups. Use `components/ui/Button.tsx`, `Spinner`, `Toast`, `studio-*` colors — do not introduce a parallel design system.
+- Async work needs a visible pending state and a visible error. No silent `catch`. Toasts: existing `components/ui/Toast.tsx` / `emitXpToast` — do not add a new toast library.
+- PWA: do not cache HTML/JS/CSS in the service worker (NetworkOnly). Do not cache cross-origin (especially `supabase.co`). Do not register a start-URL cache. Bump `APP_RELEASE` in `lib/app-release.ts` when a production client cache bust is required.
+- `next/image` is unoptimized. Fonts go through `next/font` (already in `app/layout.tsx`) — no runtime Google Fonts.
+- Safe areas / keyboard: follow `hooks/useKeyboardInset.ts` and existing bottom navs.
+
+### 3. TypeScript, React, data
+
+- No `any`. Prefer existing interfaces from `@/types`. Do not “clean up” index signatures on table rows as a drive-by.
+- Client components that touch browser APIs: `"use client"` + `useEffect`. `typeof window !== "undefined"` is acceptable inside **shared lib helpers** that may be imported from mixed graphs; do not sprinkle it through UI as a substitute for lifecycle.
+- Supabase calls: handle `{ data, error }`, timeouts (`withTimeout`), and RU unreachable copy. Mutations of balances/subscriptions/lessons go through **RPC names that already exist**.
+- Logging: `console.error("[uvs:<area>]", …)` (or the file’s existing prefix like `[analyze-timbre]`, `[sb-proxy]`). Never `console.error` a user-facing toast with English internals.
+
+### 4. Scoring, AI, third-party APIs
+
+- Exercise scoring constants: `lib/vocal-exercise.ts` (`EXERCISE_IN_TUNE_CENTS`, phrase limits). Server truth: `deploy/vocal-worker`. Changing weights/thresholds is a product change — **ask first**.
+- HF / Gradio / Groq: timeouts, loading, and fallback UI. Do not call `api.groq.com` from the browser. Do not re-enable musicgen.
+- Voice match / remover / timbre go through existing `/api/ai/*` (ai-api on VPS) or documented HF spaces — do not hardcode new keys on the client.
+
+### 5. Agent workflow
+
+1. Before changing payments, RLS, scoring, iOS audio, PWA/SW, Caddy, or schema: read the current code and the latest matching file in `supabase-migrations/` (plus `supabase-schema.sql`).
+2. If the business rule is ambiguous, **ask** instead of writing a large speculative patch.
+3. Prefer a 2–3 line surgical edit over rewriting a file. No drive-by refactors, no unrelated formatting, no new markdown files unless asked.
+4. After UI/layout/routing/client-state changes: verify the real user flow (browser if available; otherwise the closest test/`curl`). Check other screens that share the state you touched.
+5. New SQL: add a dated file under `supabase-migrations/`; do not rewrite all of `supabase-schema.sql` unless the change is also reflected there for greenfield installs.
+6. Do not enable GitHub Pages, SSR `next start` on the static host, HTTP/3 on Caddy, or start-URL caching “to fix iOS”.
+
+---
+
+## Quick “wrong assumption” list
+
+| Assumption | Reality |
+|---|---|
+| Roles `student_free` / `student_premium` | DB role is `student` + `app_sub_tier` |
+| Robokassa / Supabase Edge for pay | YooKassa `deploy/pay-api` |
+| Vercel / GitHub Pages is production | Timeweb VPS static `out/` + Caddy |
+| `app/api` ships to prod | Stashed at export; Caddy proxies `/api` |
+| Replicate is the AI backend | Hugging Face / Gradio / Groq songwriter |
+| Guest is a DB role | Guest = logged out |
+| Client may `update` lesson balance | RPC / pay-api / admin only |
