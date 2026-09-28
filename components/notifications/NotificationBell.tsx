@@ -73,7 +73,11 @@ function keysMatch(current: ArrayBuffer | null, expected: Uint8Array) {
   );
 }
 
-export default function NotificationBell() {
+export default function NotificationBell({
+  compact = false,
+}: {
+  compact?: boolean;
+}) {
   const { user, isAdmin, isMockAdmin } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
@@ -427,7 +431,9 @@ export default function NotificationBell() {
           setOpen((current) => !current);
           void loadNotifications();
         }}
-        className="relative flex h-11 w-11 items-center justify-center rounded-lg text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text"
+        className={`relative flex items-center justify-center rounded-full text-studio-muted transition-colors hover:bg-studio-card hover:text-studio-text ${
+          compact ? "h-10 w-10" : "h-11 w-11 rounded-lg"
+        }`}
         aria-label="Уведомления"
       >
         <Bell className="h-5 w-5" />

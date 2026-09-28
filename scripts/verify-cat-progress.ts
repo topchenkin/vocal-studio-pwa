@@ -44,12 +44,12 @@ assert.ok(progressSql.includes("'chat'"));
 assert.ok(progressSql.includes("12 - public.cat_today_activity_xp"));
 assert.ok(progressSql.includes("streak3-"));
 
-const nav = readFileSync(
-  path.join(root, "components", "student", "StudentNav.tsx"),
+const lab = readFileSync(
+  path.join(root, "app", "dashboard", "student", "ai-tools", "page.tsx"),
   "utf8"
 );
-assert.ok(nav.includes("/dashboard/student/pro-test"));
-assert.ok(nav.includes("Проф. тест"));
+assert.ok(lab.includes("/dashboard/student/pro-test"));
+assert.ok(lab.includes("Проф. тест"));
 
 const home = readFileSync(
   path.join(root, "app", "dashboard", "student", "StudentDashboardClient.tsx"),

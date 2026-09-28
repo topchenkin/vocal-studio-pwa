@@ -1,5 +1,4 @@
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import StudentNav from "@/components/student/StudentNav";
 import SubscriptionCabinet from "@/components/student/SubscriptionCabinet";
 
 export default function StudentSubscriptionPage() {
@@ -8,9 +7,11 @@ export default function StudentSubscriptionPage() {
       title="Подписка"
       subtitle="Тариф, оплата и способ списания"
       bottomInset
+      student
     >
-      <StudentNav />
-      <SubscriptionCabinet />
+      <div className="mt-5">
+        <SubscriptionCabinet />
+      </div>
     </DashboardLayout>
   );
 }

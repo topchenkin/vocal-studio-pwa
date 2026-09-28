@@ -231,7 +231,8 @@ const exercisesPage = readFileSync(
   path.join(process.cwd(), "app", "dashboard", "student", "exercises", "page.tsx"),
   "utf8"
 );
-assert.ok(exercisesPage.includes("<StudentNav />"));
+assert.ok(exercisesPage.includes("Распевки"));
+assert.ok(exercisesPage.includes("Домашка"));
 assert.ok(exercisesPage.includes("<ExerciseLibrary />"));
 assert.ok(!exercisesPage.includes("overflow-x-hidden"));
 assert.ok(!exercisesPage.includes("max-w-[100vw]"));

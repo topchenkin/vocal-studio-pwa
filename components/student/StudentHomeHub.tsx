@@ -100,6 +100,9 @@ export default function StudentHomeHub({
   const connectCurrent = Math.min(progress?.connect_week ?? 0, 1);
   const next = progress?.next_lesson ?? null;
   const stats = progress?.stats;
+  const payType = profile?.lesson_pay_type === "abonement" ? "Абонемент" : "Разовая";
+  const debt = Number(profile?.debt_amount) || 0;
+  const balance = Number(profile?.lessons_balance) || 0;
 
   const tiles: Array<{
     id: TileId;
@@ -198,6 +201,39 @@ export default function StudentHomeHub({
         </div>
       </section>
 
+      <section className="grid grid-cols-2 gap-2">
+        <Link
+          href="/dashboard/student/subscription"
+          className="rounded-2xl bg-studio-card px-4 py-3 ring-1 ring-studio-border"
+        >
+          <p className="text-[11px] uppercase tracking-[0.14em] text-studio-muted">
+            Уроки
+          </p>
+          <p className="mt-1 font-display text-2xl font-semibold">{balance}</p>
+          <p className="text-xs text-studio-muted">
+            {payType === "Абонемент" ? "по абонементу" : "разовые"}
+          </p>
+        </Link>
+        <Link
+          href="/dashboard/student/subscription"
+          className={`rounded-2xl px-4 py-3 ring-1 ${
+            debt > 0
+              ? "bg-red-500/10 ring-red-500/30"
+              : "bg-studio-card ring-studio-border"
+          }`}
+        >
+          <p className="text-[11px] uppercase tracking-[0.14em] text-studio-muted">
+            Оплата
+          </p>
+          <p className="mt-1 font-display text-lg font-semibold">
+            {debt > 0 ? `${debt.toLocaleString("ru-RU")} ₽` : payType}
+          </p>
+          <p className="text-xs text-studio-muted">
+            {debt > 0 ? "есть долг" : "задолженности нет"}
+          </p>
+        </Link>
+      </section>
+
       {board && (
         <p className="text-xs text-studio-muted">
           {board.freezeLeft
@@ -250,7 +286,7 @@ export default function StudentHomeHub({
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-lg font-semibold">Дальше</h3>
           <Link
-            href="/dashboard/student?tab=lessons"
+            href="/dashboard/student/schedule"
             className="text-xs text-studio-accent-light underline-offset-2 hover:underline"
           >
             Все занятия
@@ -258,7 +294,7 @@ export default function StudentHomeHub({
         </div>
         {next ? (
           <Link
-            href="/dashboard/student?tab=lessons"
+            href="/dashboard/student/schedule"
             className="flex items-center gap-3 rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border transition hover:ring-studio-accent/40"
           >
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-studio-accent/15">

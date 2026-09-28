@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import Header from "@/components/Header";
+import StudentStatusBar from "@/components/student/StudentStatusBar";
 import { cn } from "@/lib/utils";
 
 export default function DashboardLayout({
@@ -11,26 +12,30 @@ export default function DashboardLayout({
   subtitle,
   compact,
   bottomInset,
+  student = false,
 }: {
   children: React.ReactNode;
   title: string;
   subtitle?: string;
   compact?: boolean;
   bottomInset?: boolean;
+  student?: boolean;
 }) {
+  const bar = student ? "5.25rem" : "4.5rem";
   return (
     <div
       data-dashboard-shell={compact ? "compact" : "page"}
       data-dashboard-inset={bottomInset ? "1" : undefined}
+      style={{ ["--uvs-bottom-bar" as string]: bar }}
       className={cn(
         "relative max-w-[100vw] overflow-x-clip",
         compact ? "flex min-h-0 flex-col" : "min-h-screen",
         compact && bottomInset
-          ? "h-[calc(var(--uvs-vv-height,100dvh)-4.5rem-env(safe-area-inset-bottom))]"
+          ? "h-[calc(var(--uvs-vv-height,100dvh)-var(--uvs-bottom-bar)-env(safe-area-inset-bottom))]"
           : compact
             ? "h-[var(--uvs-vv-height,100dvh)]"
             : bottomInset
-              ? "pb-[calc(4.5rem+env(safe-area-inset-bottom))]"
+              ? "pb-[calc(var(--uvs-bottom-bar)+env(safe-area-inset-bottom))]"
               : ""
       )}
     >
@@ -46,9 +51,9 @@ export default function DashboardLayout({
           compact ? "min-h-0 flex-1 pb-3 pt-3" : "pb-10 pt-6"
         )}
       >
-        <Header />
+        {student ? <StudentStatusBar /> : <Header />}
 
-        {!compact && (
+        {!compact && !student && (
           <div className="mt-8 min-h-[7.25rem] sm:min-h-[7.75rem]">
             <Link
               href="/"

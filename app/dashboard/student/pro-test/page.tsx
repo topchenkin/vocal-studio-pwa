@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardList } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import StudentNav from "@/components/student/StudentNav";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import VocalProgressSection from "@/components/student/VocalProgressSection";
 import { useAuth } from "@/context/AuthContext";
@@ -60,8 +59,8 @@ export default function ProTestPage() {
       title="Проф. тест"
       subtitle="Оценка уходит преподавателю. Баллы на уровень котика — после его отметки"
       bottomInset
+      student
     >
-      <StudentNav />
       <div className="mb-4 flex items-start gap-3 rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
         <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
         <p className="text-sm text-studio-muted">
