@@ -105,6 +105,38 @@ www.uniquevocal.ru, uniquevocal.ru {
 sb.uniquevocal.ru {
 	import tls12
 	header Alt-Svc "clear"
+	# Sibling project Family shares this host. These paths must stay ahead of
+	# the vocal catch-all, or a site deploy sends Family at the vocal gateway.
+	handle /family/__health {
+		respond "family-ok" 200
+	}
+	handle_path /family/* {
+		reverse_proxy 127.0.0.1:8100 {
+			flush_interval -1
+			header_up Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+			transport http {
+				versions 1.1
+				read_timeout 0
+				write_timeout 0
+				dial_timeout 5s
+			}
+		}
+	}
+	handle_path /ot/* {
+		reverse_proxy 127.0.0.1:8792 {
+			flush_interval -1
+			header_up Host {host}
+			header_up X-Forwarded-Proto https
+			transport http {
+				versions 1.1
+				read_timeout 30s
+				write_timeout 30s
+				dial_timeout 5s
+			}
+		}
+	}
 	handle /__health {
 		respond "ok" 200
 	}
@@ -121,5 +153,25 @@ sb.uniquevocal.ru {
 				dial_timeout 5s
 			}
 		}
+	}
+}
+
+# Family static app. Do not drop this block: vocal and family share one Caddy.
+family.uniquevocal.ru {
+	import tls12
+	header Alt-Svc "clear"
+	root * /var/www/familyapp
+	encode gzip
+	handle /_next/* {
+		file_server
+	}
+	handle /sw.js {
+		header Cache-Control "no-store"
+		file_server
+	}
+	handle {
+		header Cache-Control "no-store, no-cache, must-revalidate"
+		try_files {path} {path}.html {path}/index.html /index.html
+		file_server
 	}
 }

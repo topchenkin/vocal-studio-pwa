@@ -54,6 +54,18 @@ def main() -> None:
         raise SystemExit(f"missing static export at {OUT}")
     if not CADDYFILE.is_file():
         raise SystemExit(f"missing {CADDYFILE}")
+    caddy_text = CADDYFILE.read_text(encoding="utf-8")
+    # One Caddy serves both projects. Shipping a vocal-only file takes Family offline.
+    for marker in (
+        "family.uniquevocal.ru",
+        "handle_path /family/*",
+        "handle_path /ot/*",
+        "127.0.0.1:8100",
+    ):
+        if marker not in caddy_text:
+            raise SystemExit(
+                f"refusing to deploy Caddyfile without sibling Family route: {marker}"
+            )
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
