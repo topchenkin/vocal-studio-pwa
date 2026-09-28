@@ -14,6 +14,9 @@ import StudentNav from "@/components/student/StudentNav";
 import StudentHomeHub from "@/components/student/StudentHomeHub";
 import StudentActivityStrip from "@/components/student/StudentActivityStrip";
 import { useCabinetProgress } from "@/hooks/useCabinetProgress";
+import { useStudentRetention } from "@/hooks/useStudentRetention";
+import SingTodayCard from "@/components/student/SingTodayCard";
+import VoicePathStrip from "@/components/student/VoicePathStrip";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -44,6 +47,7 @@ export default function StudentDashboardClient() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const [retrying, setRetrying] = useState(false);
   const { progress } = useCabinetProgress();
+  const { board, reload: reloadRetention } = useStudentRetention();
 
   useEffect(() => {
     if (loading) return;
@@ -173,9 +177,9 @@ export default function StudentDashboardClient() {
           >
             {activeTab === "home" && (
               <div className="space-y-8">
-                <StudentHomeHub progress={progress} />
-                <SubscriptionStatus />
-                <GiftRedeemCard />
+                <SingTodayCard board={board} onClosed={reloadRetention} />
+                <VoicePathStrip board={board} />
+                <StudentHomeHub progress={progress} board={board} />
                 <section>
                   <h3 className="font-display text-lg font-semibold">
                     Домашние задания
@@ -191,6 +195,10 @@ export default function StudentDashboardClient() {
               <>
                 <StudentActivityStrip progress={progress} variant="lessons" />
                 <UpcomingLessons />
+                <div className="mt-8 space-y-8">
+                  <SubscriptionStatus />
+                  <GiftRedeemCard />
+                </div>
               </>
             )}
             {activeTab === "audio" && <MyAudioLibrary />}

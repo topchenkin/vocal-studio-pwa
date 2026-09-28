@@ -5,7 +5,9 @@ import { Lock, Play, Video } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
 import StudentActivityStrip from "@/components/student/StudentActivityStrip";
+import VoicePathStrip from "@/components/student/VoicePathStrip";
 import { useCabinetProgress } from "@/hooks/useCabinetProgress";
+import { useStudentRetention } from "@/hooks/useStudentRetention";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
 import Modal from "@/components/ui/Modal";
@@ -99,6 +101,7 @@ const demoExercises: Exercise[] = [
 export default function ExerciseLibrary() {
   const { user, tier, refreshProfile } = useAuth();
   const { progress } = useCabinetProgress();
+  const { board } = useStudentRetention();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [lockedTier, setLockedTier] = useState<AppSubscriptionTier | null>(null);
@@ -191,6 +194,9 @@ export default function ExerciseLibrary() {
   return (
     <>
       <StudentActivityStrip progress={progress} variant="exercises" />
+      <div className="mb-8">
+        <VoicePathStrip board={board} />
+      </div>
       <section>
         <div className="mb-4">
           <h2 className="font-display text-2xl font-semibold">
@@ -203,7 +209,7 @@ export default function ExerciseLibrary() {
         <div className="grid w-full min-w-0 gap-4">
           {audioExercises.map((exercise) => {
             return (
-            <div key={exercise.id} className="min-w-0 w-full">
+            <div id={`exercise-${exercise.id}`} key={exercise.id} className="min-w-0 w-full">
               <div className="mb-2">
                 <h3 className="font-medium">{straightDashNodes(exercise.title)}</h3>
                 <p className="text-xs text-studio-muted">

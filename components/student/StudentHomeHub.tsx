@@ -1,11 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Calendar,
-  Flame,
-  WalletCards,
-} from "lucide-react";
+import { Calendar, Flame } from "lucide-react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
@@ -23,6 +19,7 @@ import CatLevelText from "@/components/ui/CatLevelText";
 import BottomSheet from "@/components/ui/BottomSheet";
 import { VOCAL_CAT_STICKERS } from "@/lib/chat-stickers";
 import type { CatLevel } from "@/types";
+import type { RetentionBoard } from "@/lib/student-retention";
 
 function clampPercent(current: number, target: number) {
   if (target <= 0) return 100;
@@ -78,8 +75,10 @@ const TILE_CAT: Record<TileId, (typeof VOCAL_CAT_STICKERS)[number]["src"]> = {
 
 export default function StudentHomeHub({
   progress,
+  board,
 }: {
   progress: CabinetProgress | null;
+  board?: RetentionBoard | null;
 }) {
   const { profile } = useAuth();
   const [openTile, setOpenTile] = useState<TileId | null>(null);
@@ -101,9 +100,6 @@ export default function StudentHomeHub({
   const connectCurrent = Math.min(progress?.connect_week ?? 0, 1);
   const next = progress?.next_lesson ?? null;
   const stats = progress?.stats;
-  const payType = profile?.lesson_pay_type === "abonement" ? "Абонемент" : "Разовая";
-  const debt = Number(profile?.debt_amount) || 0;
-  const balance = Number(profile?.lessons_balance) || 0;
 
   const tiles: Array<{
     id: TileId;
@@ -180,7 +176,11 @@ export default function StudentHomeHub({
           </div>
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-studio-accent/15 px-3 py-1.5 text-sm text-studio-accent-light ring-1 ring-studio-accent/30">
             <Flame className="h-3.5 w-3.5" />
-            {streak > 0 ? `Серия ${streak} дн.` : "Серия с сегодня"}
+            {board?.comeback
+              ? "Мягкий возврат"
+              : streak > 0
+                ? `Серия ${streak} дн.`
+                : "Серия с сегодня"}
           </span>
         </div>
         <div className="mt-5">
@@ -198,37 +198,13 @@ export default function StudentHomeHub({
         </div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3">
-        <div className="rounded-3xl bg-studio-card p-4 ring-1 ring-studio-border">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-studio-muted">
-            Остаток уроков
-          </p>
-          <p className="mt-2 font-display text-3xl font-semibold">{balance}</p>
-          <p className="mt-1 text-xs text-studio-muted">
-            {payType === "Абонемент" ? "по абонементу" : "разовые занятия"}
-          </p>
-        </div>
-        <div
-          className={`rounded-3xl p-4 ring-1 ${
-            debt > 0
-              ? "bg-red-500/10 ring-red-500/30"
-              : "bg-studio-card ring-studio-border"
-          }`}
-        >
-          <p className="text-[11px] uppercase tracking-[0.16em] text-studio-muted">
-            Оплата
-          </p>
-          <p className="mt-2 font-display text-lg font-semibold">{payType}</p>
-          {debt > 0 ? (
-            <p className="mt-1 flex items-center gap-1 text-xs text-red-300">
-              <WalletCards className="h-3.5 w-3.5" />
-              Долг {debt.toLocaleString("ru-RU")} ₽
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-emerald-300/80">Задолженности нет</p>
-          )}
-        </div>
-      </section>
+      {board && (
+        <p className="text-xs text-studio-muted">
+          {board.freezeLeft
+            ? "Один пропуск на этой неделе серию не оборвёт."
+            : "Заморозка на этой неделе уже использована."}
+        </p>
+      )}
 
       <section>
         <div className="mb-3">
@@ -310,6 +286,27 @@ export default function StudentHomeHub({
           </div>
         )}
       </section>
+
+      {board && (
+        <section>
+          <h3 className="font-display text-lg font-semibold">Ваши рекорды</h3>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <StatChip label="Серия" value={`${board.records.bestStreak} дн.`} />
+            <StatChip
+              label="Минуты за неделю"
+              value={`${board.records.weekMin} / ${board.records.bestWeekMin}`}
+            />
+            <StatChip
+              label="Дольше фраза"
+              value={
+                board.records.bestPhraseSec > 0
+                  ? `${board.records.bestPhraseSec} сек`
+                  : "ещё нет"
+              }
+            />
+          </div>
+        </section>
+      )}
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatChip

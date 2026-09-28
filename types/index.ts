@@ -910,6 +910,20 @@ export interface Database {
         Args: Record<string, never>;
         Returns: Record<string, unknown>;
       };
+      student_retention_board: {
+        Args: Record<string, never>;
+        Returns: Record<string, unknown>;
+      };
+      close_vocal_step: {
+        Args: {
+          p_kind: string;
+          p_ref: string;
+          p_title: string;
+          p_mark: string;
+          p_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
       submit_vocal_test_for_review: {
         Args: { p_result_id: string };
         Returns: undefined;

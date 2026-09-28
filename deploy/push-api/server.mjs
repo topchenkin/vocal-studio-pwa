@@ -425,6 +425,28 @@ async function sendEmailFallbacks() {
   }
 }
 
+async function enqueueStreakFading() {
+  const response = await sb("/rest/v1/rpc/enqueue_streak_fading_pushes", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(
+      "streak fading push failed",
+      response.status,
+      text.slice(0, 300)
+    );
+    return;
+  }
+  try {
+    const count = await response.json();
+    if (count) console.log("streak fading pushes", count);
+  } catch {
+    // RPC may return empty
+  }
+}
+
 async function notifyUnpaidEndedLessons() {
   const response = await sb("/rest/v1/rpc/notify_unpaid_ended_lessons", {
     method: "POST",
@@ -462,6 +484,7 @@ async function tick() {
       await remindSubscriptionExpiring();
       await grantDueLessonXp();
       await notifyUnpaidEndedLessons();
+      await enqueueStreakFading();
       await sendEmailFallbacks();
     }
   } catch (error) {

@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
 import { logPracticeSeconds } from "@/lib/practice-log";
+import { closeVocalStep } from "@/lib/student-retention";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
 import { renderPracticeSharePng } from "@/lib/exercise-result-card";
 import {
@@ -47,6 +48,8 @@ export default function VocalExercisePractice({
     null
   );
   const [sharing, setSharing] = useState(false);
+  const [stepNote, setStepNote] = useState("");
+  const [marking, setMarking] = useState<"ok" | "again" | null>(null);
 
   stageRef.current = stage;
   usePracticeHeartbeat(
@@ -361,9 +364,59 @@ export default function VocalExercisePractice({
         {stage === "ready" && take && (
           <div className="mt-4 space-y-3 rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
             <p className="text-sm text-studio-muted">
-              Запись {take.durationSec} сек готова. Оценки нет — преподаватель
-              услышит вас как есть.
+              Запись {take.durationSec} сек готова. Оценки нет — отметьте, как
+              прошла фраза.
             </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="w-full sm:w-auto"
+                disabled={Boolean(marking)}
+                onClick={() => {
+                  setMarking("ok");
+                  void closeVocalStep({
+                    kind: "exercise",
+                    ref: exercise.id,
+                    title: exercise.title,
+                    mark: "ok",
+                    seconds: take.durationSec,
+                  }).then((ok) => {
+                    setMarking(null);
+                    setStepNote(
+                      ok
+                        ? "Шаг тропы закрыт."
+                        : "Не удалось сохранить шаг. Нажмите ещё раз."
+                    );
+                  });
+                }}
+              >
+                {marking === "ok" ? "Сохраняем…" : "Получилось"}
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto"
+                disabled={Boolean(marking)}
+                onClick={() => {
+                  setMarking("again");
+                  void closeVocalStep({
+                    kind: "exercise",
+                    ref: exercise.id,
+                    title: exercise.title,
+                    mark: "again",
+                    seconds: take.durationSec,
+                  }).then((ok) => {
+                    setMarking(null);
+                    setStepNote(
+                      ok
+                        ? "Вернём это упражнение позже."
+                        : "Не удалось сохранить шаг. Нажмите ещё раз."
+                    );
+                  });
+                }}
+              >
+                {marking === "again" ? "Сохраняем…" : "Ещё раз"}
+              </Button>
+            </div>
+            {stepNote && <p className="text-sm text-studio-text">{stepNote}</p>}
             {canSend ? (
               <Button
                 className="w-full"
