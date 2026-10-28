@@ -72,7 +72,7 @@ export async function getChatSessionToken() {
 const CHAT_MEDIA_MAX_BYTES = 40 * 1024 * 1024;
 const IMAGE_MAX_EDGE = 1600;
 
-async function prepareChatImageFile(file: File): Promise<File> {
+export async function prepareChatImageFile(file: File): Promise<File> {
   const mime = normalizeMimeType(file.type);
   const needsConvert =
     !mime ||

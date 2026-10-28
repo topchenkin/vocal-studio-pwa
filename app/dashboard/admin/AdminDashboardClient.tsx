@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Sparkles,
   LibraryBig,
+  UserRound,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
@@ -27,6 +28,7 @@ import AdminAiToolBody, {
 import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import DebtorsPanel from "@/components/admin/DebtorsPanel";
 import GiftCertificatesPanel from "@/components/admin/GiftCertificatesPanel";
+import TeacherCardEditor from "@/components/admin/TeacherCardEditor";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -53,6 +55,11 @@ const TABS = [
     id: "ai-tools",
     label: "ИИ-инструменты",
     icon: <Sparkles className="h-4 w-4" />,
+  },
+  {
+    id: "teacher-card",
+    label: "Визитка",
+    icon: <UserRound className="h-4 w-4" />,
   },
 ];
 
@@ -188,6 +195,7 @@ export default function AdminDashboardClient() {
             {activeTab === "debtors" && <DebtorsPanel />}
             {activeTab === "gifts" && <GiftCertificatesPanel />}
             {activeTab === "ai-tools" && <AdminAiToolBody active={aiSubTab} />}
+            {activeTab === "teacher-card" && <TeacherCardEditor />}
           </motion.div>
         </AnimatePresence>
       )}

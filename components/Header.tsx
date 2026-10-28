@@ -18,12 +18,14 @@ import { useAuth } from "@/context/AuthContext";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 import { PUBLIC_PATHS } from "@/lib/public-site";
+import { TEACHER_CARD_PATH } from "@/lib/teacher-card";
 import { useOptionalPublicAuth } from "@/components/landing/PublicAuth";
 import { useTheme } from "@/context/ThemeContext";
 
 const PUBLIC_NAV = [
   { href: PUBLIC_PATHS.ekaterinburg, label: "Очно в Екатеринбурге" },
   { href: PUBLIC_PATHS.online, label: "Онлайн" },
+  { href: TEACHER_CARD_PATH, label: "Преподаватель" },
 ] as const;
 
 interface HeaderProps {

@@ -428,6 +428,18 @@ export interface StudentAudioTrack {
   created_at: string;
 }
 
+/** `public.teacher_card` — single row (id = 1) behind /prepodavatel. */
+export type TeacherCardRow = {
+  id: number;
+  full_name: string;
+  headline: string;
+  bio: string;
+  achievements: string[];
+  music_links: string[];
+  media: Array<{ id: string; kind: "photo" | "video"; path: string; caption: string }>;
+  updated_at: string;
+};
+
 export interface VocalTestResult {
   [key: string]: unknown;
   id: string;
@@ -889,6 +901,12 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Pick<VocalTestResult, "payload">>;
+        Relationships: [];
+      };
+      teacher_card: {
+        Row: TeacherCardRow;
+        Insert: Omit<TeacherCardRow, "updated_at"> & { updated_at?: string };
+        Update: Partial<Omit<TeacherCardRow, "id">>;
         Relationships: [];
       };
     };

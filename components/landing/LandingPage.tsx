@@ -11,7 +11,9 @@ import HeadlineStagger from "@/components/landing/HeadlineStagger";
 import AuthRedirect from "@/components/landing/AuthRedirect";
 import Faq from "@/components/landing/Faq";
 import { AuthCta, PublicAuthProvider } from "@/components/landing/PublicAuth";
+import TeacherPreview from "@/components/landing/TeacherPreview";
 import TrialCard from "@/components/landing/TrialCard";
+import type { TeacherCard } from "@/lib/teacher-card";
 import { APP_TIER_PRICES } from "@/lib/constants";
 import {
   FAQ_HOME,
@@ -78,7 +80,7 @@ const paths = [
   },
 ] as const;
 
-export default function LandingPage() {
+export default function LandingPage({ teacher }: { teacher: TeacherCard | null }) {
   const reduce = useReducedMotion();
 
   return (
@@ -158,6 +160,10 @@ export default function LandingPage() {
               </Link>
             ))}
           </section>
+
+          <div className="mt-10">
+            <TeacherPreview snapshot={teacher} />
+          </div>
 
           <div className="mt-10">
             <TrialCard id="trial" />

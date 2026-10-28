@@ -7,6 +7,7 @@ import {
   faqJsonLd,
   organizationJsonLd,
 } from "@/lib/public-seo";
+import { fetchTeacherCardSnapshot } from "@/lib/teacher-card";
 
 export const metadata: Metadata = buildPublicMetadata({
   title: "Уроки вокала в Екатеринбурге и онлайн | Unique Vocal Studio",
@@ -15,12 +16,13 @@ export const metadata: Metadata = buildPublicMetadata({
 });
 
 /** Landing is rendered into the static HTML for search bots; logged-in users are redirected client-side. */
-export default function Home() {
+export default async function Home() {
+  const teacher = await fetchTeacherCardSnapshot();
   return (
     <>
       <JsonLd data={organizationJsonLd()} />
       <JsonLd data={faqJsonLd(FAQ_HOME)} />
-      <LandingPage />
+      <LandingPage teacher={teacher} />
     </>
   );
 }
