@@ -17,7 +17,14 @@ import NotificationBell from "@/components/notifications/NotificationBell";
 import { useAuth } from "@/context/AuthContext";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
+import { PUBLIC_PATHS } from "@/lib/public-site";
+import { useOptionalPublicAuth } from "@/components/landing/PublicAuth";
 import { useTheme } from "@/context/ThemeContext";
+
+const PUBLIC_NAV = [
+  { href: PUBLIC_PATHS.ekaterinburg, label: "Очно в Екатеринбурге" },
+  { href: PUBLIC_PATHS.online, label: "Онлайн" },
+] as const;
 
 interface HeaderProps {
   showNav?: boolean;
@@ -28,6 +35,7 @@ export default function Header({ showNav = true }: HeaderProps) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
+  const publicAuth = useOptionalPublicAuth();
 
   const dashboardHref = isAdmin
     ? "/dashboard/admin"
@@ -43,6 +51,23 @@ export default function Header({ showNav = true }: HeaderProps) {
       </Link>
 
       <div className="flex items-center gap-1 sm:gap-2">
+        {!isAuthenticated && showNav && (
+          <nav className="mr-1 hidden items-center gap-1 md:flex">
+            {PUBLIC_NAV.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex min-h-10 items-center rounded-lg px-3 text-sm transition-colors hover:text-studio-text ${
+                  pathname === item.href
+                    ? "text-studio-text"
+                    : "text-studio-muted"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        )}
         {isAuthenticated && <NotificationBell />}
         <button
           type="button"
@@ -64,6 +89,23 @@ export default function Header({ showNav = true }: HeaderProps) {
 
         {showNav && (
           <>
+            {!isAuthenticated &&
+              (publicAuth ? (
+                <button
+                  type="button"
+                  onClick={() => publicAuth.openAuth("login")}
+                  className="hidden h-11 items-center rounded-lg bg-studio-surface px-4 text-sm font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/40 sm:flex"
+                >
+                  Войти в кабинет
+                </button>
+              ) : (
+                <Link
+                  href="/"
+                  className="hidden h-11 items-center rounded-lg bg-studio-surface px-4 text-sm font-medium text-studio-text ring-1 ring-studio-border transition hover:ring-studio-accent/40 sm:flex"
+                >
+                  Войти в кабинет
+                </Link>
+              ))}
             {isAuthenticated && pathname === "/" && (
               <Link
                 href={dashboardHref}
@@ -118,6 +160,7 @@ export default function Header({ showNav = true }: HeaderProps) {
                 {APP_NAME} — запишитесь на урок
               </p>
               {[
+                ...PUBLIC_NAV,
                 { href: LEGAL.uslugiPath, label: "Услуги и цены" },
                 { href: LEGAL.offerPath, label: "Оферта и возврат" },
                 { href: LEGAL.privacyPath, label: "Конфиденциальность" },
@@ -132,6 +175,18 @@ export default function Header({ showNav = true }: HeaderProps) {
                   {item.label}
                 </Link>
               ))}
+              {publicAuth ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    publicAuth.openAuth("login");
+                  }}
+                  className="flex min-h-11 items-center rounded-lg px-3 py-2.5 text-sm font-medium text-studio-accent-light hover:bg-studio-surface"
+                >
+                  Войти в кабинет
+                </button>
+              ) : null}
             </nav>
           )}
           {isStudent && (

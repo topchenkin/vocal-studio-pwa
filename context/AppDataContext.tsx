@@ -294,8 +294,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
-  if (!hydrated) return null;
-
+  // Do not gate children on `hydrated`: it blanked the static HTML of every page
+  // (search bots saw an empty <body>). Nothing reads this context at the moment.
   return (
     <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>
   );

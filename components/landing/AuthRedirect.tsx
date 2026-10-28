@@ -2,10 +2,13 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import LandingPage from "@/components/landing/LandingPage";
 import { useAuth } from "@/context/AuthContext";
 
-export default function HomeContent() {
+/**
+ * Existing students and admin never see the marketing page: once the session is known
+ * they are sent to the cabinet. The landing itself stays in the static HTML for search bots.
+ */
+export default function AuthRedirect() {
   const { isGuest, isAdmin, loading } = useAuth();
   const router = useRouter();
 
@@ -14,10 +17,10 @@ export default function HomeContent() {
     router.replace(isAdmin ? "/dashboard/admin" : "/dashboard/student");
   }, [isAdmin, isGuest, loading, router]);
 
-  if (!loading && isGuest) return <LandingPage />;
+  if (isGuest) return null;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-studio-bg">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-studio-bg">
       <div className="h-9 w-9 animate-spin rounded-full border-2 border-studio-accent border-t-transparent" />
     </div>
   );

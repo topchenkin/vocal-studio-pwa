@@ -3,3 +3,6 @@ Allow: /
 Disallow: /admin
 Disallow: /gate
 Disallow: /dashboard
+Disallow: /pay
+
+Sitemap: https://www.uniquevocal.ru/sitemap.xml

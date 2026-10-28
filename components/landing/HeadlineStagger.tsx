@@ -1,10 +1,11 @@
 "use client";
 
+import { Fragment } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
-const LEAD = ["Голос", "раскрывается,", "когда", "рядом"] as const;
-const ACCENT = ["наставник", "и", "умная", "практика"] as const;
-const LABEL = "Голос раскрывается, когда рядом наставник и умная практика";
+const LEAD = ["Уроки", "вокала"] as const;
+const ACCENT = ["в", "Екатеринбурге", "и", "онлайн"] as const;
+const LABEL = "Уроки вокала в Екатеринбурге и онлайн";
 
 export default function HeadlineStagger() {
   const reduce = useReducedMotion();
@@ -30,24 +31,25 @@ export default function HeadlineStagger() {
       initial={reduce ? false : "hidden"}
       animate="show"
     >
+      {/* Real spaces between words: textContent must read as a sentence for search bots. */}
       {LEAD.map((item) => (
-        <motion.span
-          key={item}
-          variants={word}
-          className="mr-[0.28em] inline-block"
-        >
-          {item}
-        </motion.span>
+        <Fragment key={item}>
+          <motion.span variants={word} className="inline-block">
+            {item}
+          </motion.span>{" "}
+        </Fragment>
       ))}
       <span>
-        {ACCENT.map((item) => (
-          <motion.span
-            key={item}
-            variants={word}
-            className="mr-[0.28em] inline-block text-gradient last:mr-0"
-          >
-            {item}
-          </motion.span>
+        {ACCENT.map((item, index) => (
+          <Fragment key={item}>
+            <motion.span
+              variants={word}
+              className="inline-block text-gradient"
+            >
+              {item}
+            </motion.span>
+            {index < ACCENT.length - 1 ? " " : null}
+          </Fragment>
         ))}
       </span>
     </motion.h1>
