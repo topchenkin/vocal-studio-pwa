@@ -59,7 +59,7 @@ export default async function TeacherPage() {
       <p className="py-10 text-center text-sm text-studio-muted">
         Занятия{" "}
         <Link href={PUBLIC_PATHS.ekaterinburg} className="text-studio-accent-light underline">
-          очно в Екатеринбурге
+          лично
         </Link>{" "}
         и{" "}
         <Link href={PUBLIC_PATHS.online} className="text-studio-accent-light underline">

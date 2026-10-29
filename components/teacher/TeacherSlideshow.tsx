@@ -14,11 +14,14 @@ export default function TeacherSlideshow({
   alt,
   className,
   intervalMs = 5000,
+  autoplayMuted = false,
 }: {
   items: TeacherMedia[];
   alt: string;
   className?: string;
   intervalMs?: number;
+  /** Home preview: play the current clip with no sound. The teacher page keeps manual controls. */
+  autoplayMuted?: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -29,7 +32,7 @@ export default function TeacherSlideshow({
   const onVideo = items[current]?.kind === "video";
 
   useEffect(() => {
-    if (count < 2 || paused || onVideo) return;
+    if (count < 2 || paused || (onVideo && !autoplayMuted)) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
     const timer = window.setInterval(() => {
@@ -38,13 +41,21 @@ export default function TeacherSlideshow({
       }
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [count, intervalMs, paused, onVideo]);
+  }, [count, intervalMs, paused, onVideo, autoplayMuted]);
 
   useEffect(() => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     rootRef.current?.querySelectorAll("video").forEach((video) => {
-      if (video.dataset.slide !== String(current) && !video.paused) video.pause();
+      const active = video.dataset.slide === String(current);
+      if (!active) {
+        if (!video.paused) video.pause();
+        return;
+      }
+      if (!autoplayMuted || reduce) return;
+      video.muted = true;
+      void video.play().catch(() => undefined);
     });
-  }, [current]);
+  }, [current, autoplayMuted]);
 
   if (count === 0) return null;
 
@@ -88,7 +99,10 @@ export default function TeacherSlideshow({
             key={item.id}
             data-slide={itemIndex}
             src={`${teacherMediaUrl(item.path)}#t=0.1`}
-            controls
+            controls={!autoplayMuted}
+            muted={autoplayMuted}
+            autoPlay={autoplayMuted && active}
+            loop={autoplayMuted}
             playsInline
             preload={active ? "metadata" : "none"}
             aria-label={item.caption || alt}

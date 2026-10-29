@@ -23,7 +23,7 @@ import { useOptionalPublicAuth } from "@/components/landing/PublicAuth";
 import { useTheme } from "@/context/ThemeContext";
 
 const PUBLIC_NAV = [
-  { href: PUBLIC_PATHS.ekaterinburg, label: "Очно в Екатеринбурге" },
+  { href: PUBLIC_PATHS.ekaterinburg, label: "Лично" },
   { href: PUBLIC_PATHS.online, label: "Онлайн" },
   { href: TEACHER_CARD_PATH, label: "Преподаватель" },
 ] as const;
