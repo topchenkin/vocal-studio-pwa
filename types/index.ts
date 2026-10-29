@@ -440,6 +440,19 @@ export type TeacherCardRow = {
   updated_at: string;
 };
 
+/** `public.intro_quiz_answers` — one row per student, saved from the home-page quiz. */
+export type IntroQuizRow = {
+  user_id: string;
+  goal: "soul" | "event" | "record" | "stage";
+  experience: "never" | "self" | "before" | "perform";
+  barrier: "ear" | "shy" | "late" | "time" | "none";
+  outcome: "song" | "pitch" | "range" | "fear" | "ease";
+  format: "city" | "online";
+  cat_level: CatLevel;
+  created_at: string;
+  updated_at: string;
+};
+
 export interface VocalTestResult {
   [key: string]: unknown;
   id: string;
@@ -901,6 +914,15 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Pick<VocalTestResult, "payload">>;
+        Relationships: [];
+      };
+      intro_quiz_answers: {
+        Row: IntroQuizRow;
+        Insert: Omit<IntroQuizRow, "created_at" | "updated_at"> & {
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Omit<IntroQuizRow, "user_id">>;
         Relationships: [];
       };
       teacher_card: {

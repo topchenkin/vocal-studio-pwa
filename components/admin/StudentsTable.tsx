@@ -18,6 +18,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import NumberInput from "@/components/ui/NumberInput";
 import HomeworkAssigner from "@/components/admin/HomeworkAssigner";
+import IntroQuizBlock from "@/components/admin/IntroQuizBlock";
 import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -511,6 +512,8 @@ function StudentEditor({
             onChange={(value) => updateDraft("debt_amount", value)}
           />
         </div>
+
+        <IntroQuizBlock studentId={draft.id} mockMode={mockMode} />
 
         <HomeworkAssigner studentId={draft.id} mockMode={mockMode} />
 

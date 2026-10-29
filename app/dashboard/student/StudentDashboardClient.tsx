@@ -11,6 +11,7 @@ import VoicePathStrip from "@/components/student/VoicePathStrip";
 import { consumeRequestedCabinetTab } from "@/components/dashboard/CabinetTabLink";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+import { syncPendingIntroQuiz } from "@/lib/intro-quiz-sync";
 
 function legacyHub(tab: string | null): string | null {
   if (tab === "chat") return "/dashboard/student/schedule?section=chat";
@@ -47,6 +48,12 @@ export default function StudentDashboardClient() {
       router.replace("/dashboard/admin");
     }
   }, [isAuthenticated, isAdmin, loading, router]);
+
+  const profileId = profile?.id;
+  useEffect(() => {
+    if (!profileId || isAdmin) return;
+    void syncPendingIntroQuiz(profileId);
+  }, [profileId, isAdmin]);
 
   useEffect(() => {
     const fromUrl = searchParams.get("tab");

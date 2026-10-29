@@ -11,6 +11,7 @@ import HeadlineStagger from "@/components/landing/HeadlineStagger";
 import AuthRedirect from "@/components/landing/AuthRedirect";
 import Faq from "@/components/landing/Faq";
 import { AuthCta, PublicAuthProvider } from "@/components/landing/PublicAuth";
+import IntroQuiz from "@/components/landing/IntroQuiz";
 import TeacherPreview from "@/components/landing/TeacherPreview";
 import TrialCard from "@/components/landing/TrialCard";
 import type { TeacherCard } from "@/lib/teacher-card";
@@ -123,6 +124,12 @@ export default function LandingPage({ teacher }: { teacher: TeacherCard | null }
                   <AuthCta size="lg" className="cta-shimmer">
                     Записаться на пробный
                   </AuthCta>
+                  <a
+                    href="#quiz"
+                    className="inline-flex items-center justify-center rounded-2xl bg-studio-accent/10 px-6 py-3.5 text-base font-semibold text-studio-text ring-1 ring-studio-accent/50 transition hover:bg-studio-accent/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent"
+                  >
+                    Подобрать путь за 1 минуту
+                  </a>
                   <AuthCta
                     mode="login"
                     size="lg"
@@ -160,6 +167,10 @@ export default function LandingPage({ teacher }: { teacher: TeacherCard | null }
               </Link>
             ))}
           </section>
+
+          <div className="mt-10">
+            <IntroQuiz id="quiz" />
+          </div>
 
           <div className="mt-10">
             <TeacherPreview snapshot={teacher} />
