@@ -120,7 +120,7 @@ export default function UslugiPage() {
           <p className="mt-3 text-sm leading-relaxed">
             Возврат — по законодательству РФ, включая Закон «О защите прав
             потребителей», если услуга не оказана, оказана некачественно или с
-            нарушением срока. Заявка: {LEGAL.email} или {straightDashNodes(LEGAL.phone)}. Срок
+            нарушением срока. Заявка — через чат приложения. Срок
             ответа — до 10 рабочих дней, перевод — вручную через платёжный
             сервис. Чек НПД при возврате корректируется.
           </p>
@@ -142,7 +142,7 @@ export default function UslugiPage() {
             <RequisitesCard />
           </div>
         </article>
-        <SiteFooter />
+        <SiteFooter hideContacts />
       </div>
     </main>
   );

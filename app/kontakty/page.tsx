@@ -50,7 +50,7 @@ export default function ContactsPage() {
             <RequisitesCard />
           </div>
         </article>
-        <SiteFooter />
+        <SiteFooter hideContacts />
       </div>
     </main>
   );

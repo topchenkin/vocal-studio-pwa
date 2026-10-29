@@ -3,7 +3,6 @@ import Link from "next/link";
 import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
-import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 
@@ -36,7 +35,7 @@ export default function PrivacyPage() {
           </h2>
           <p className="mt-3 text-sm leading-relaxed">
             Оператор персональных данных: {LEGAL.fullName}, {LEGAL.status}, ИНН{" "}
-            {LEGAL.inn}, г. {LEGAL.city}. Контакты: {straightDashNodes(LEGAL.phone)}, {LEGAL.email}.
+            {LEGAL.inn}, г. {LEGAL.city}.
           </p>
 
           <h2 className="mt-8 font-display text-xl font-semibold">
@@ -94,7 +93,7 @@ export default function PrivacyPage() {
           <p className="mt-3 text-sm leading-relaxed">
             Можно запросить доступ, уточнение, ограничение обработки или
             удаление данных, а также отозвать согласие, если обработка на нём
-            основана. Обращение: {LEGAL.email} или {straightDashNodes(LEGAL.phone)}. Можно подать
+            основана. Обращение — через чат приложения. Можно подать
             жалобу в Роскомнадзор.
           </p>
 
@@ -121,7 +120,7 @@ export default function PrivacyPage() {
             </Link>
           </p>
         </article>
-        <SiteFooter />
+        <SiteFooter hideContacts />
       </div>
     </main>
   );

@@ -13,10 +13,13 @@ const links = [
 export default function SiteFooter({
   extra,
   home,
+  hideContacts,
 }: {
   extra?: ReactNode;
   /** Home page hides the self-employed line and the phone/email line. */
   home?: boolean;
+  /** Pages with requisites hide the phone and email line. */
+  hideContacts?: boolean;
 }) {
   return (
     <footer className="mt-10 border-t border-studio-border/60 pt-6 text-xs text-studio-muted">
@@ -38,7 +41,7 @@ export default function SiteFooter({
             {" · "}
             {LEGAL.city}
           </p>
-          {home ? null : (
+          {home || hideContacts ? null : (
             <p>
               <a className="hover:text-studio-text" href={LEGAL.phoneHref}>
                 {straightDashNodes(LEGAL.phone)}
