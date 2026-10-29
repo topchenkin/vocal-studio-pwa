@@ -31,7 +31,7 @@ export default function TeacherPreview({ snapshot }: { snapshot: TeacherCard | n
   return (
     <section className="grid gap-6 rounded-3xl bg-studio-card/60 p-4 ring-1 ring-studio-border sm:p-8 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:items-center">
       {photos.length > 0 ? (
-        <TeacherSlideshow photos={photos} alt={name} className="aspect-[4/5] w-full" />
+        <TeacherSlideshow items={photos} alt={name} className="aspect-[4/5] w-full" />
       ) : null}
       <div className={photos.length > 0 ? "" : "md:col-span-2"}>
         <p className="text-sm font-medium uppercase tracking-[0.24em] text-studio-accent">

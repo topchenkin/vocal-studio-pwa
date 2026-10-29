@@ -6,14 +6,16 @@ import { cn } from "@/lib/utils";
 import { teacherMediaUrl, type TeacherMedia } from "@/lib/teacher-card";
 
 const SWIPE_PX = 40;
+/** Native video controls live in the bottom strip; swipes there are scrubbing, not paging. */
+const VIDEO_CONTROLS_PX = 72;
 
 export default function TeacherSlideshow({
-  photos,
+  items,
   alt,
   className,
   intervalMs = 5000,
 }: {
-  photos: TeacherMedia[];
+  items: TeacherMedia[];
   alt: string;
   className?: string;
   intervalMs?: number;
@@ -21,11 +23,13 @@ export default function TeacherSlideshow({
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const startX = useRef<number | null>(null);
-  const count = photos.length;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const count = items.length;
   const current = count ? index % count : 0;
+  const onVideo = items[current]?.kind === "video";
 
   useEffect(() => {
-    if (count < 2 || paused) return;
+    if (count < 2 || paused || onVideo) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
     const timer = window.setInterval(() => {
@@ -34,7 +38,13 @@ export default function TeacherSlideshow({
       }
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [count, intervalMs, paused]);
+  }, [count, intervalMs, paused, onVideo]);
+
+  useEffect(() => {
+    rootRef.current?.querySelectorAll("video").forEach((video) => {
+      if (video.dataset.slide !== String(current) && !video.paused) video.pause();
+    });
+  }, [current]);
 
   if (count === 0) return null;
 
@@ -43,14 +53,19 @@ export default function TeacherSlideshow({
     setIndex((value) => (value + delta + count) % count);
   };
 
+  const caption = items[current]?.caption;
+
   return (
     <div
+      ref={rootRef}
       className={cn(
         "relative overflow-hidden rounded-3xl bg-studio-surface ring-1 ring-studio-border",
         className
       )}
       onPointerDown={(event) => {
-        startX.current = event.clientX;
+        const rect = event.currentTarget.getBoundingClientRect();
+        startX.current =
+          onVideo && event.clientY > rect.bottom - VIDEO_CONTROLS_PX ? null : event.clientX;
       }}
       onPointerUp={(event) => {
         if (startX.current == null) return;
@@ -62,24 +77,46 @@ export default function TeacherSlideshow({
       aria-roledescription="слайд-шоу"
       aria-label={alt}
     >
-      {photos.map((photo, photoIndex) => (
-        <img
-          key={photo.id}
-          src={teacherMediaUrl(photo.path)}
-          alt={photo.caption || alt}
-          draggable={false}
-          loading={photoIndex === 0 ? "eager" : "lazy"}
-          decoding="async"
-          className={cn(
-            "absolute inset-0 h-full w-full select-none object-cover transition-opacity duration-700",
-            photoIndex === current ? "opacity-100" : "opacity-0"
-          )}
-        />
-      ))}
+      {items.map((item, itemIndex) => {
+        const active = itemIndex === current;
+        const layer = cn(
+          "absolute inset-0 h-full w-full select-none transition-opacity duration-700",
+          active ? "opacity-100" : "pointer-events-none opacity-0"
+        );
+        return item.kind === "video" ? (
+          <video
+            key={item.id}
+            data-slide={itemIndex}
+            src={`${teacherMediaUrl(item.path)}#t=0.1`}
+            controls
+            playsInline
+            preload={active ? "metadata" : "none"}
+            aria-label={item.caption || alt}
+            className={cn(layer, "bg-black object-contain")}
+          />
+        ) : (
+          <img
+            key={item.id}
+            src={teacherMediaUrl(item.path)}
+            alt={item.caption || alt}
+            draggable={false}
+            loading={itemIndex === 0 ? "eager" : "lazy"}
+            decoding="async"
+            className={cn(layer, "object-cover")}
+          />
+        );
+      })}
 
-      {photos[current]?.caption ? (
-        <p className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-12 pt-10 text-sm text-white">
-          {photos[current].caption}
+      {caption ? (
+        <p
+          className={cn(
+            "pointer-events-none absolute inset-x-0 px-4 text-sm text-white",
+            onVideo
+              ? "top-0 bg-gradient-to-b from-black/75 to-transparent pb-10 pt-10"
+              : "bottom-0 bg-gradient-to-t from-black/75 to-transparent pb-12 pt-10"
+          )}
+        >
+          {caption}
         </p>
       ) : null}
 
@@ -89,7 +126,7 @@ export default function TeacherSlideshow({
             type="button"
             onClick={() => go(-1)}
             className="absolute left-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60 sm:flex"
-            aria-label="Предыдущее фото"
+            aria-label="Предыдущий слайд"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -97,26 +134,31 @@ export default function TeacherSlideshow({
             type="button"
             onClick={() => go(1)}
             className="absolute right-2 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60 sm:flex"
-            aria-label="Следующее фото"
+            aria-label="Следующий слайд"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
-          <div className="absolute inset-x-0 bottom-1 flex justify-center">
-            {photos.map((photo, dotIndex) => (
+          <div
+            className={cn(
+              "absolute inset-x-0 flex justify-center",
+              onVideo ? "top-1" : "bottom-1"
+            )}
+          >
+            {items.map((item, dotIndex) => (
               <button
-                key={photo.id}
+                key={item.id}
                 type="button"
                 onClick={() => {
                   setPaused(true);
                   setIndex(dotIndex);
                 }}
                 className="flex h-10 w-6 items-center justify-center"
-                aria-label={`Фото ${dotIndex + 1} из ${count}`}
+                aria-label={`${item.kind === "video" ? "Видео" : "Фото"} ${dotIndex + 1} из ${count}`}
                 aria-current={dotIndex === current}
               >
                 <span
                   className={cn(
-                    "h-2 rounded-full bg-white transition-all",
+                    "h-2 rounded-full bg-white shadow transition-all",
                     dotIndex === current ? "w-4 opacity-100" : "w-2 opacity-50"
                   )}
                 />

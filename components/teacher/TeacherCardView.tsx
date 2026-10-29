@@ -1,7 +1,6 @@
 "use client";
 
 import { Award } from "lucide-react";
-import TeacherReels from "@/components/teacher/TeacherReels";
 import TeacherSlideshow from "@/components/teacher/TeacherSlideshow";
 import YandexMusicEmbeds from "@/components/teacher/YandexMusicEmbeds";
 import { useLiveTeacherCard } from "@/components/teacher/useLiveTeacherCard";
@@ -33,33 +32,22 @@ export default function TeacherCardView({ snapshot }: { snapshot: TeacherCard | 
     );
   }
 
-  const photos = teacherPhotos(card);
-  const videos = teacherVideos(card);
+  const media = [...teacherPhotos(card), ...teacherVideos(card)];
   const paragraphs = bioParagraphs(card.bio);
   const hasMusic = card.musicLinks.some((link) => parseYandexMusicEmbed(link));
   const name = card.fullName || FALLBACK_NAME;
 
   return (
     <>
-      {/*
-        Mobile: photo → text → videos (DOM order). Desktop: text spans the right column,
-        videos fill the left column under the photo instead of landing after the long bio.
-      */}
-      <section className="grid gap-8 py-10 sm:py-14 md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:grid-rows-[auto_1fr] md:items-start lg:gap-x-12">
-        {photos.length > 0 ? (
-          <div className="md:col-start-1 md:row-start-1">
-            <TeacherSlideshow
-              photos={photos}
-              alt={name}
-              className="aspect-[4/5] w-full"
-            />
+      <section className="grid gap-8 py-10 sm:py-14 md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:items-start lg:gap-x-12">
+        {media.length > 0 ? (
+          <div className="md:sticky md:top-24">
+            <TeacherSlideshow items={media} alt={name} className="aspect-[4/5] w-full" />
           </div>
         ) : null}
         <div
           className={
-            photos.length > 0 || videos.length > 0
-              ? "max-w-2xl md:col-start-2 md:row-span-2 md:row-start-1"
-              : "mx-auto max-w-2xl text-center md:col-span-2"
+            media.length > 0 ? "max-w-2xl" : "mx-auto max-w-2xl text-center md:col-span-2"
           }
         >
           <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-studio-gold">
@@ -79,14 +67,6 @@ export default function TeacherCardView({ snapshot }: { snapshot: TeacherCard | 
             ))}
           </div>
         </div>
-        {videos.length > 0 ? (
-          <div className="md:col-start-1 md:row-start-2">
-            <h2 className="font-display text-3xl font-semibold">Видео</h2>
-            <div className="mt-5">
-              <TeacherReels videos={videos} />
-            </div>
-          </div>
-        ) : null}
       </section>
 
       {card.achievements.length > 0 ? (
