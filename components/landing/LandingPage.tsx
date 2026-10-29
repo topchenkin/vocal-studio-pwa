@@ -128,7 +128,7 @@ export default function LandingPage({ teacher }: { teacher: TeacherCard | null }
                     href="#quiz"
                     className="inline-flex items-center justify-center rounded-2xl bg-studio-accent/10 px-6 py-3.5 text-base font-semibold text-studio-text ring-1 ring-studio-accent/50 transition hover:bg-studio-accent/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent"
                   >
-                    Подобрать путь за 1 минуту
+                    Подобрать план за 1 минуту
                   </a>
                   <AuthCta
                     mode="login"

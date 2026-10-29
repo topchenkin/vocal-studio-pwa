@@ -13,7 +13,7 @@ export default function YandexMusicEmbeds({ links }: { links: string[] }) {
   return (
     <div className="space-y-4">
       {players.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4">
           {players.map((item) => (
             <iframe
               key={item.src}

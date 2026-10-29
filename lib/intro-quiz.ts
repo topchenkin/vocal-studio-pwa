@@ -20,7 +20,7 @@ export const INTRO_QUIZ_QUESTIONS: ReadonlyArray<QuizQuestion> = [
     key: "goal",
     title: "Зачем вам вокал?",
     options: [
-      { value: "soul", label: "Для души — петь любимые песни" },
+      { value: "soul", label: "Для себя / петь любимые песни" },
       { value: "event", label: "Выступить на событии: свадьба, концерт, корпоратив" },
       { value: "record", label: "Записать песню" },
       { value: "stage", label: "Сцена или профессия" },
@@ -131,7 +131,7 @@ const STEP_BY_OUTCOME: Record<IntroQuizAnswers["outcome"], string> = {
 };
 
 const GOAL_SHORT: Record<IntroQuizAnswers["goal"], string> = {
-  soul: "петь для души",
+  soul: "петь для себя",
   event: "выступить на событии",
   record: "записать песню",
   stage: "сцена и профессия",
