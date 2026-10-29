@@ -13,6 +13,7 @@ import {
   DUO_TIER_PRICES,
   SUBSCRIPTION_MONTH_OPTIONS,
   TIER_RANK,
+  formatAppTier,
   subscriptionTotal,
   type SubscriptionMonthOption,
 } from "@/lib/constants";
@@ -28,7 +29,7 @@ const duoPlans: Array<{
   title: string;
   price: number;
 }> = [
-  { tier: "standard", title: "Standard Duo", price: DUO_TIER_PRICES.standard },
+  { tier: "standard", title: "Standart Duo", price: DUO_TIER_PRICES.standard },
   { tier: "premium", title: "Premium Duo", price: DUO_TIER_PRICES.premium },
   { tier: "vip", title: "VIP Duo", price: DUO_TIER_PRICES.vip },
 ];
@@ -116,7 +117,7 @@ export default function DuoSubscriptionCard({
           <div className="min-w-0 flex-1">
             <p className="font-medium">
               {isOwner
-                ? `${duo?.tier ?? profile.app_sub_tier} Duo`
+                ? `${formatAppTier(duo?.tier ?? profile.app_sub_tier)} Duo`
                 : isMember
                   ? "Вы подключены к Duo"
                   : "Подписка Duo"}

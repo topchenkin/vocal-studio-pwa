@@ -15,13 +15,13 @@ export const metadata: Metadata = {
 };
 
 const INDIVIDUAL = [
-  { title: "Standard", price: APP_TIER_PRICES.standard, note: "1 месяц · ИИ-анализатор, чат, часть упражнений" },
+  { title: "Standart", price: APP_TIER_PRICES.standard, note: "1 месяц · ИИ-анализатор, чат, часть упражнений" },
   { title: "Premium", price: APP_TIER_PRICES.premium, note: "1 месяц · больше упражнений, обработка голоса и аккорды" },
   { title: "VIP", price: APP_TIER_PRICES.vip, note: "1 месяц · студийный трек, всё из Premium" },
 ];
 
 const DUO = [
-  { title: "Standard Duo", price: DUO_TIER_PRICES.standard, note: "два аккаунта Standard" },
+  { title: "Standart Duo", price: DUO_TIER_PRICES.standard, note: "два аккаунта Standart" },
   { title: "Premium Duo", price: DUO_TIER_PRICES.premium, note: "два аккаунта Premium" },
   { title: "VIP Duo", price: DUO_TIER_PRICES.vip, note: "два аккаунта VIP" },
 ];

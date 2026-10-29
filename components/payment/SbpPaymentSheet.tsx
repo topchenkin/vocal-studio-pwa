@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Smartphone } from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
+import { formatAppTier } from "@/lib/constants";
 import { startPayment, waitForPayment } from "@/lib/payment-client";
 import { paymentProviderLabel } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
@@ -54,7 +55,7 @@ function purposeLabel(purpose: PaymentPurpose) {
   if (purpose.type === "abonement") return "Оплата абонемента";
   if (purpose.type === "lesson") return "Оплата занятия";
   if (purpose.type === "test_payment") return "Тестовая оплата · 1 ₽";
-  return `Подписка ${purpose.tier}${
+  return `Подписка ${formatAppTier(purpose.tier)}${
     purpose.type === "duo_subscription" ? " Duo" : ""
   } · ${purpose.months} мес.`;
 }

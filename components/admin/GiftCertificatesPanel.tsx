@@ -316,7 +316,7 @@ export default function GiftCertificatesPanel() {
                 }
                 className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border"
               >
-                <option value="standard">Standard · {APP_TIER_PRICES.standard} ₽</option>
+                <option value="standard">Standart · {APP_TIER_PRICES.standard} ₽</option>
                 <option value="premium">Premium · {APP_TIER_PRICES.premium} ₽</option>
                 <option value="vip">VIP · {APP_TIER_PRICES.vip} ₽</option>
               </select>

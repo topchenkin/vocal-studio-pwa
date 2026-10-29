@@ -30,7 +30,7 @@ const tierRank: Record<AppSubscriptionTier, number> = {
 
 const tierLabel: Record<AppSubscriptionTier, string> = {
   none: "Free",
-  standard: "Standard",
+  standard: "Standart",
   premium: "Premium",
   vip: "VIP",
 };

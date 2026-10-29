@@ -22,6 +22,7 @@ import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
+import { formatAppTier } from "@/lib/constants";
 import CatLevelText from "@/components/ui/CatLevelText";
 import type {
   AppSubscriptionTier,
@@ -34,7 +35,7 @@ import type {
 
 const tierOptions: Array<{ value: AppSubscriptionTier; label: string }> = [
   { value: "none", label: "None" },
-  { value: "standard", label: "Standard" },
+  { value: "standard", label: "Standart" },
   { value: "premium", label: "Premium" },
   { value: "vip", label: "VIP" },
 ];
@@ -843,8 +844,8 @@ export default function StudentsTable() {
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-xl bg-studio-bg/50 p-3">
                   <p className="text-studio-muted">Платформа</p>
-                  <p className="mt-1 font-medium capitalize">
-                    {student.app_sub_tier}
+                  <p className="mt-1 font-medium">
+                    {formatAppTier(student.app_sub_tier)}
                     {student.app_sub_variant !== "individual" ? " Duo" : ""}
                   </p>
                   {student.app_sub_expires_at && (

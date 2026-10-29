@@ -36,7 +36,7 @@ const plans: Array<{
 }> = [
   {
     tier: "standard",
-    title: "Standard",
+    title: "Standart",
     subtitle: "Домашняя практика между уроками",
     price: APP_TIER_PRICES.standard,
     icon: Bot,
@@ -49,7 +49,7 @@ const plans: Array<{
     price: APP_TIER_PRICES.premium,
     icon: Sparkles,
     features: [
-      "Всё из Standard",
+      "Всё из Standart",
       "Больше упражнений",
       "Обработка голоса и аккорды",
     ],
@@ -246,7 +246,7 @@ export default function LandingPage({ teacher }: { teacher: TeacherCard | null }
             </div>
           </section>
 
-          <SiteFooter />
+          <SiteFooter home />
         </div>
       </main>
       <AuthRedirect />

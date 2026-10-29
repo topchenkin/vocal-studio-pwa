@@ -5,6 +5,7 @@ import { BellRing, Send, UsersRound, WalletCards } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { formatAppTier } from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
 import type {
   StudentFolder,
@@ -233,7 +234,7 @@ export default function NotificationForm() {
                     <option key={student.id} value={student.id}>
                       {student.full_name || student.email || student.id.slice(0, 8)}
                       {" · "}
-                      {student.app_sub_tier}
+                      {formatAppTier(student.app_sub_tier)}
                     </option>
                   ))}
                 </optgroup>

@@ -1,17 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Mail, MapPin, Phone } from "lucide-react";
+import { MapPin } from "lucide-react";
 import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
-import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: `Контакты и реквизиты — ${APP_NAME}`,
   description:
-    "Контакты и реквизиты Unique Vocal Studio: телефон, email, ИНН самозанятого, город Екатеринбург.",
+    "Реквизиты Unique Vocal Studio: ИНН самозанятого, город Екатеринбург.",
   alternates: { canonical: LEGAL.contactsPath },
 };
 
@@ -28,26 +27,7 @@ export default function ContactsPage() {
           <h1 className="mt-2 font-display text-3xl font-semibold sm:text-4xl">
             Контакты и реквизиты
           </h1>
-          <p className="mt-3 text-sm leading-relaxed text-studio-muted">
-            {LEGAL.contactHours}.
-          </p>
-
           <ul className="mt-6 space-y-3 text-sm">
-            <li className="flex items-center gap-3">
-              <Phone className="h-4 w-4 shrink-0 text-studio-accent" />
-              <a className="hover:text-studio-accent-light" href={LEGAL.phoneHref}>
-                {straightDashNodes(LEGAL.phone)}
-              </a>
-            </li>
-            <li className="flex items-center gap-3">
-              <Mail className="h-4 w-4 shrink-0 text-studio-accent" />
-              <a
-                className="hover:text-studio-accent-light"
-                href={`mailto:${LEGAL.email}`}
-              >
-                {LEGAL.email}
-              </a>
-            </li>
             <li className="flex items-center gap-3">
               <MapPin className="h-4 w-4 shrink-0 text-studio-accent" />
               <span>г. {LEGAL.city}</span>

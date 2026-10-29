@@ -22,6 +22,13 @@ export const SUBSCRIPTION_MONTH_OPTIONS = [1, 3, 6, 12] as const;
 export type SubscriptionMonthOption =
   (typeof SUBSCRIPTION_MONTH_OPTIONS)[number];
 
+/** Visible tier name. The stored code stays `standard`. */
+export function formatAppTier(tier: string | null | undefined): string {
+  if (!tier) return "";
+  if (tier === "standard") return "Standart";
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+}
+
 export const TIER_RANK = {
   none: 0,
   standard: 1,
@@ -39,7 +46,7 @@ export function subscriptionTotal(
 export const PLANS: SubscriptionPlan[] = [
   {
     id: "standard",
-    duration: "Standard",
+    duration: "Standart",
     months: 1,
     price: APP_TIER_PRICES.standard,
     pricePerMonth: APP_TIER_PRICES.standard,

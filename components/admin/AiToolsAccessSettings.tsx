@@ -25,6 +25,7 @@ const TOOL_ORDER: AiToolId[] = AI_TOOL_IDS;
 
 function tierLabel(tier: AppSubscriptionTier) {
   if (tier === "none") return "любой (без подписки)";
+  if (tier === "standard") return "Standart";
   return tier.charAt(0).toUpperCase() + tier.slice(1);
 }
 

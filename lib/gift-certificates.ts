@@ -1,3 +1,4 @@
+import { formatAppTier } from "@/lib/constants";
 import type {
   AppSubscriptionTier,
   GiftCertificateRow,
@@ -53,9 +54,7 @@ export function giftBenefitLine(cert: Pick<
   "kind" | "lessons_count" | "app_sub_tier"
 >) {
   const lessons = cert.lessons_count ?? 0;
-  const tier = cert.app_sub_tier
-    ? cert.app_sub_tier.charAt(0).toUpperCase() + cert.app_sub_tier.slice(1)
-    : "";
+  const tier = formatAppTier(cert.app_sub_tier);
   if (cert.kind === "lesson") return "1 занятие";
   if (cert.kind === "abonement") {
     return `${lessons} ${lessons === 1 ? "занятие" : lessons < 5 ? "занятия" : "занятий"}`;
@@ -71,9 +70,7 @@ export function giftIncludesLine(cert: Pick<
   const lessons = cert.lessons_count ?? 0;
   const lessonsWord =
     lessons === 1 ? "занятие" : lessons < 5 ? "занятия" : "занятий";
-  const tier = cert.app_sub_tier
-    ? cert.app_sub_tier.charAt(0).toUpperCase() + cert.app_sub_tier.slice(1)
-    : "";
+  const tier = formatAppTier(cert.app_sub_tier);
 
   if (cert.kind === "lesson") {
     return "Индивидуальное занятие по вокалу в студии Unique Vocal";

@@ -495,9 +495,10 @@ async function handleInit(req, res) {
     amount = monthly * months;
     purpose = "app_subscription";
     productCode = isDuo ? `${tier}_duo` : tier;
+    const tierTitle = tier === "standard" ? "Standart" : tier;
     description = isDuo
-      ? `Unique Vocal Studio — подписка ${tier} Duo · ${months} мес.`
-      : `Unique Vocal Studio — подписка ${tier} · ${months} мес.`;
+      ? `Unique Vocal Studio — подписка ${tierTitle} Duo · ${months} мес.`
+      : `Unique Vocal Studio — подписка ${tierTitle} · ${months} мес.`;
     metadata.tier = tier;
     metadata.is_duo = isDuo;
     metadata.months = months;

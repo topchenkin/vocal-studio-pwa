@@ -186,7 +186,7 @@ export default function VocalExercisePractice({
   const share = async () => {
     if (!take || sharing || !user) return;
     if (!canSend) {
-      setError("Отправка преподавателю доступна с подписки Standard.");
+      setError("Отправка преподавателю доступна с подписки Standart.");
       return;
     }
     setSharing(true);
@@ -431,7 +431,7 @@ export default function VocalExercisePractice({
                 href="/dashboard/student/subscription"
                 className="block rounded-xl bg-studio-accent/15 px-4 py-3 text-center text-sm text-studio-accent-light ring-1 ring-studio-accent/30"
               >
-                Отправка в чат — с подписки Standard
+                Отправка в чат — с подписки Standart
               </Link>
             )}
             <button

@@ -1,4 +1,3 @@
-import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { LEGAL } from "@/lib/legal";
 
 export default function RequisitesCard() {
@@ -14,27 +13,8 @@ export default function RequisitesCard() {
         <dd>Самозанятый (НПД)</dd>
         <dt className="text-studio-muted">ИНН</dt>
         <dd>{LEGAL.inn}</dd>
-        <dt className="text-studio-muted">ОГРНИП</dt>
-        <dd>не присваивается</dd>
         <dt className="text-studio-muted">Город</dt>
         <dd>{LEGAL.city}</dd>
-        <dt className="text-studio-muted">Телефон</dt>
-        <dd>
-          <a className="text-studio-accent-light underline" href={LEGAL.phoneHref}>
-            {straightDashNodes(LEGAL.phone)}
-          </a>
-        </dd>
-        <dt className="text-studio-muted">Email</dt>
-        <dd>
-          <a
-            className="text-studio-accent-light underline"
-            href={`mailto:${LEGAL.email}`}
-          >
-            {LEGAL.email}
-          </a>
-        </dd>
-        <dt className="text-studio-muted">Связь</dt>
-        <dd>{LEGAL.contactHours}</dd>
       </dl>
     </div>
   );

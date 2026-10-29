@@ -11,7 +11,7 @@ import SbpPaymentSheet, {
 import { useAuth } from "@/context/AuthContext";
 import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
-import { APP_TIER_PRICES, subscriptionTotal } from "@/lib/constants";
+import { APP_TIER_PRICES, formatAppTier, subscriptionTotal } from "@/lib/constants";
 import Link from "next/link";
 
 export default function SubscriptionStatus() {
@@ -20,10 +20,7 @@ export default function SubscriptionStatus() {
 
   if (!profile) return null;
 
-  const tierName =
-    tier === "none"
-      ? "Без подписки"
-      : `${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+  const tierName = tier === "none" ? "Без подписки" : formatAppTier(tier);
   const expiry =
     profile.app_sub_expires_at &&
     !Number.isNaN(new Date(profile.app_sub_expires_at).getTime())
@@ -77,7 +74,7 @@ export default function SubscriptionStatus() {
               }
             >
               <Sparkles className="h-4 w-4" />
-              Standard · 3 мес. ·{" "}
+              Standart · 3 мес. ·{" "}
               {subscriptionTotal(APP_TIER_PRICES.standard, 3).toLocaleString(
                 "ru-RU"
               )}{" "}

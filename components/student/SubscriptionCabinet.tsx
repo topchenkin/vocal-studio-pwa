@@ -25,7 +25,7 @@ import type { AppSubscriptionTier } from "@/types";
 
 const TIER_LABEL: Record<AppSubscriptionTier, string> = {
   none: "Нет активного тарифа",
-  standard: "Standard",
+  standard: "Standart",
   premium: "Premium",
   vip: "VIP",
 };

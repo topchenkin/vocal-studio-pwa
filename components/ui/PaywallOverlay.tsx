@@ -15,7 +15,7 @@ interface PaywallOverlayProps {
 
 export default function PaywallOverlay({
   title = "Доступно по подписке",
-  description = "Оформите Standard или выше, чтобы открыть этот раздел",
+  description = "Оформите Standart или выше, чтобы открыть этот раздел",
   onUpgrade,
   href = "/dashboard/student/subscription",
   buttonLabel = "Оформить подписку",

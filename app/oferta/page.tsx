@@ -285,8 +285,6 @@ export default function OfertaPage() {
               <dd>{LEGAL.city}</dd>
               <dt className="text-studio-muted">ИНН</dt>
               <dd>{LEGAL.inn}</dd>
-              <dt className="text-studio-muted">ОГРНИП</dt>
-              <dd>не присваивается (не является ИП)</dd>
               <dt className="text-studio-muted">Бренд</dt>
               <dd>{LEGAL.brand}</dd>
               <dt className="text-studio-muted">Сайт</dt>
@@ -295,23 +293,6 @@ export default function OfertaPage() {
                   {LEGAL.site.replace("https://", "")}
                 </a>
               </dd>
-              <dt className="text-studio-muted">Телефон</dt>
-              <dd>
-                <a className="text-studio-accent-light underline" href={LEGAL.phoneHref}>
-                  {straightDashNodes(LEGAL.phone)}
-                </a>
-              </dd>
-              <dt className="text-studio-muted">Email</dt>
-              <dd>
-                <a
-                  className="text-studio-accent-light underline"
-                  href={`mailto:${LEGAL.email}`}
-                >
-                  {LEGAL.email}
-                </a>
-              </dd>
-              <dt className="text-studio-muted">Связь</dt>
-              <dd>{LEGAL.contactHours}</dd>
             </dl>
           </div>
           <p className="mt-6 text-xs text-studio-muted">

@@ -10,7 +10,14 @@ const links = [
   { href: LEGAL.contactsPath, label: "Контакты и реквизиты" },
 ] as const;
 
-export default function SiteFooter({ extra }: { extra?: ReactNode }) {
+export default function SiteFooter({
+  extra,
+  home,
+}: {
+  extra?: ReactNode;
+  /** Home page hides the self-employed line and the phone/email line. */
+  home?: boolean;
+}) {
   return (
     <footer className="mt-10 border-t border-studio-border/60 pt-6 text-xs text-studio-muted">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -22,17 +29,26 @@ export default function SiteFooter({ extra }: { extra?: ReactNode }) {
             <span className="text-gradient">Studio</span>
           </p>
           <p>
-            {LEGAL.fullName} · самозанятый · ИНН {LEGAL.inn} · {LEGAL.city}
-          </p>
-          <p>
-            <a className="hover:text-studio-text" href={LEGAL.phoneHref}>
-              {straightDashNodes(LEGAL.phone)}
-            </a>
+            {LEGAL.fullName}
+            {home ? null : (
+              <>
+                {" · "}самозанятый · ИНН {LEGAL.inn}
+              </>
+            )}
             {" · "}
-            <a className="hover:text-studio-text" href={`mailto:${LEGAL.email}`}>
-              {LEGAL.email}
-            </a>
+            {LEGAL.city}
           </p>
+          {home ? null : (
+            <p>
+              <a className="hover:text-studio-text" href={LEGAL.phoneHref}>
+                {straightDashNodes(LEGAL.phone)}
+              </a>
+              {" · "}
+              <a className="hover:text-studio-text" href={`mailto:${LEGAL.email}`}>
+                {LEGAL.email}
+              </a>
+            </p>
+          )}
         </div>
         <nav className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {links.map((item) => (

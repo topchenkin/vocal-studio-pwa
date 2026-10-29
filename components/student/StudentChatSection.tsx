@@ -169,7 +169,7 @@ export default function StudentChatSection() {
         {!hasChatAccess && (
           <PaywallOverlay
             title="Чат с преподавателем"
-            description="Доступно с подпиской Standard и выше"
+            description="Доступно с подпиской Standart и выше"
             onUpgrade={() => router.push("/dashboard/student/subscription")}
             buttonLabel="Оформить подписку"
           />

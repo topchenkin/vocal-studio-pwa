@@ -13,6 +13,7 @@ import {
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
+import { formatAppTier } from "@/lib/constants";
 import { useAuth } from "@/context/AuthContext";
 import {
   isAllowedAudioFile,
@@ -404,7 +405,7 @@ export default function ContentManager() {
                 {item.description || "Без описания"}
               </p>
               <p className="mt-3 text-[10px] uppercase tracking-wide text-studio-accent">
-                {item.min_tier_required} ·{" "}
+                {formatAppTier(item.min_tier_required)} ·{" "}
                 {straightDashNodes(CAT_LEVEL_LABELS[item.min_cat_level])}{" "}
                 · {item.audience_mode}
               </p>
@@ -575,7 +576,7 @@ export default function ContentManager() {
               >
                 {tierOptions.map((tier) => (
                   <option key={tier} value={tier}>
-                    {tier === "none" ? "любой" : tier}
+                    {tier === "none" ? "любой" : formatAppTier(tier)}
                   </option>
                 ))}
               </select>

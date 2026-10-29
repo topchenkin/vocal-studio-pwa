@@ -1393,10 +1393,10 @@ create table if not exists public.subscription_products (
 
 insert into public.subscription_products (code, title, tier, variant, price_rub, features)
 values
-  ('standard', 'Standard', 'standard', 'individual', 990, '["AI-анализатор нот","Чат","Базовые упражнения"]'),
-  ('premium', 'Premium', 'premium', 'individual', 1990, '["Всё из Standard","AI-минусовки","Индивидуальные распевки"]'),
+  ('standard', 'Standart', 'standard', 'individual', 990, '["AI-анализатор нот","Чат","Базовые упражнения"]'),
+  ('premium', 'Premium', 'premium', 'individual', 1990, '["Всё из Standart","AI-минусовки","Индивидуальные распевки"]'),
   ('vip', 'VIP', 'vip', 'individual', 3990, '["Всё из Premium","Безлимитный AI","Студийный трек"]'),
-  ('standard_duo', 'Standard Duo', 'standard', 'duo_owner', 1490, '["Два аккаунта Standard"]'),
+  ('standard_duo', 'Standart Duo', 'standard', 'duo_owner', 1490, '["Два аккаунта Standart"]'),
   ('premium_duo', 'Premium Duo', 'premium', 'duo_owner', 2990, '["Два аккаунта Premium"]'),
   ('vip_duo', 'VIP Duo', 'vip', 'duo_owner', 5990, '["Два аккаунта VIP"]')
 on conflict (code) do nothing;
