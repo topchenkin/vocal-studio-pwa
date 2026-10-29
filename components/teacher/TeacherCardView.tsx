@@ -41,15 +41,17 @@ export default function TeacherCardView({ snapshot }: { snapshot: TeacherCard | 
 
   return (
     <>
-      <section className="grid gap-8 py-10 md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:items-center sm:py-14">
+      <section className="grid gap-8 py-10 sm:py-14 md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:items-start lg:gap-12">
         {photos.length > 0 ? (
-          <TeacherSlideshow
-            photos={photos}
-            alt={name}
-            className="aspect-[4/5] w-full"
-          />
+          <div className="md:sticky md:top-6">
+            <TeacherSlideshow
+              photos={photos}
+              alt={name}
+              className="aspect-[4/5] w-full"
+            />
+          </div>
         ) : null}
-        <div className={photos.length > 0 ? "" : "md:col-span-2 text-center"}>
+        <div className={photos.length > 0 ? "max-w-2xl" : "mx-auto max-w-2xl text-center md:col-span-2"}>
           <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-studio-gold">
             Преподаватель
           </p>

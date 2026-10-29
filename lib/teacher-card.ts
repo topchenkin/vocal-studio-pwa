@@ -194,6 +194,12 @@ export function parseYandexMusicEmbed(input: string): YandexMusicEmbed | null {
 }
 
 /**
+ * Next persists fetch results in .next/cache across builds, and `cache: "no-store"` would make the
+ * route dynamic (breaks `output: export`). A per-build header changes the cache key instead.
+ */
+const BUILD_STAMP = String(Date.now());
+
+/**
  * Build-time snapshot for the static HTML (search bots). Never throws: on any failure the
  * page ships empty and the client loads live data.
  */
@@ -208,7 +214,7 @@ export async function fetchTeacherCardSnapshot(): Promise<TeacherCard | null> {
       const res = await fetch(
         `${base}/rest/v1/teacher_card?id=eq.1&select=full_name,headline,bio,achievements,music_links,media`,
         {
-          headers: { apikey: key, Authorization: `Bearer ${key}` },
+          headers: { apikey: key, Authorization: `Bearer ${key}`, "x-uvs-build": BUILD_STAMP },
           signal: AbortSignal.timeout(8000),
         }
       );
