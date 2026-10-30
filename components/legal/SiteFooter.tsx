@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { straightDashNodes } from "@/components/ui/StraightDashText";
 import { LEGAL } from "@/lib/legal";
 
 const links = [
@@ -13,13 +12,10 @@ const links = [
 export default function SiteFooter({
   extra,
   home,
-  hideContacts,
 }: {
   extra?: ReactNode;
-  /** Home page hides the self-employed line and the phone/email line. */
+  /** Home page hides the self-employed line. */
   home?: boolean;
-  /** Pages with requisites hide the phone and email line. */
-  hideContacts?: boolean;
 }) {
   return (
     <footer className="mt-10 border-t border-studio-border/60 pt-6 text-xs text-studio-muted">
@@ -41,17 +37,6 @@ export default function SiteFooter({
             {" · "}
             {LEGAL.city}
           </p>
-          {home || hideContacts ? null : (
-            <p>
-              <a className="hover:text-studio-text" href={LEGAL.phoneHref}>
-                {straightDashNodes(LEGAL.phone)}
-              </a>
-              {" · "}
-              <a className="hover:text-studio-text" href={`mailto:${LEGAL.email}`}>
-                {LEGAL.email}
-              </a>
-            </p>
-          )}
         </div>
         <nav className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {links.map((item) => (

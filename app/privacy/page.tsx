@@ -120,7 +120,7 @@ export default function PrivacyPage() {
             </Link>
           </p>
         </article>
-        <SiteFooter hideContacts />
+        <SiteFooter />
       </div>
     </main>
   );

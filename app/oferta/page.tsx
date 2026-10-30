@@ -311,7 +311,7 @@ export default function OfertaPage() {
             </Link>
           </p>
         </article>
-        <SiteFooter hideContacts />
+        <SiteFooter />
       </div>
     </main>
   );

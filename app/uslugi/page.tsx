@@ -142,7 +142,7 @@ export default function UslugiPage() {
             <RequisitesCard />
           </div>
         </article>
-        <SiteFooter hideContacts />
+        <SiteFooter />
       </div>
     </main>
   );
