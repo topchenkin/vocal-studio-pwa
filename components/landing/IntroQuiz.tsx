@@ -5,6 +5,8 @@ import { ArrowLeft, RotateCcw } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { AuthCta } from "@/components/landing/PublicAuth";
+import CatLevelText from "@/components/ui/CatLevelText";
+import { CAT_LEVEL_IMAGES } from "@/lib/cat-levels";
 import {
   INTRO_QUIZ_QUESTIONS,
   computeIntroQuizResult,
@@ -180,6 +182,24 @@ export default function IntroQuiz({ id }: { id?: string }) {
             <p className="mt-4 rounded-2xl bg-studio-surface/80 p-4 text-sm ring-1 ring-studio-border">
               {result.barrierAnswer}
             </p>
+            <div className="mt-5 flex items-center gap-4 rounded-2xl bg-gradient-to-r from-studio-accent/10 to-transparent p-3 sm:mt-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={CAT_LEVEL_IMAGES[result.catLevel]}
+                alt={result.catLabel}
+                className="h-28 w-28 shrink-0 bg-transparent object-contain sm:h-36 sm:w-36"
+              />
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-studio-muted">
+                  Ваш уровень котика
+                </p>
+                <CatLevelText
+                  as="p"
+                  label={result.catLabel}
+                  className="mt-1 font-display text-xl font-semibold text-studio-accent-light sm:text-2xl"
+                />
+              </div>
+            </div>
           </div>
 
           <div>

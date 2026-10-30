@@ -6,12 +6,14 @@ import {
   Folder,
   FolderPlus,
   Link2,
+  MapPin,
   Minus,
   Pencil,
   Plus,
   Search,
   Trash2,
   UserRoundCheck,
+  Video,
 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -24,10 +26,12 @@ import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import { formatAppTier } from "@/lib/constants";
+import { normalizeOnlineLessonUrl } from "@/lib/lesson-format";
 import CatLevelText from "@/components/ui/CatLevelText";
 import type {
   AppSubscriptionTier,
   CatLevel,
+  LessonFormat,
   LessonPayType,
   StudentFolder,
   StudentFolderMember,
@@ -69,6 +73,8 @@ const mockStudents: StudentProfile[] = [
     cat_level: "basic",
     is_active_student: true,
     lesson_pay_type: "one_time",
+    lesson_format: "online",
+    online_lesson_url: "https://telemost.yandex.ru/j/00000000000000",
     custom_lesson_price: 3500,
     custom_abonement_price: 0,
     lessons_balance: 0,
@@ -166,7 +172,19 @@ function StudentEditor({
     setSaving(true);
     setError("");
 
+    const onlineUrl = normalizeOnlineLessonUrl(draft.online_lesson_url);
+    if (onlineUrl === null) {
+      setSaving(false);
+      setError("Ссылка для онлайн-занятия должна начинаться с https://");
+      return;
+    }
+
+    const lessonFormat: LessonFormat =
+      draft.lesson_format === "online" ? "online" : "offline";
+
     const updates = {
+      lesson_format: lessonFormat,
+      online_lesson_url: onlineUrl || null,
       is_active_student: draft.is_active_student,
       app_sub_tier: draft.app_sub_tier,
       app_sub_expires_at: draft.app_sub_expires_at || null,
@@ -275,6 +293,65 @@ function StudentEditor({
             />
           </button>
         </div>
+
+        <fieldset>
+          <legend className="mb-2 text-xs font-medium text-studio-muted">
+            Формат занятий
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                { value: "offline", label: "Очно", Icon: MapPin },
+                { value: "online", label: "Онлайн", Icon: Video },
+              ] as const
+            ).map(({ value, label, Icon }) => {
+              const checked = (draft.lesson_format ?? "offline") === value;
+              return (
+                <label
+                  key={value}
+                  className={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm ring-1 transition ${
+                    checked
+                      ? "bg-studio-accent/15 text-studio-accent-light ring-studio-accent"
+                      : "bg-studio-surface text-studio-muted ring-studio-border"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="lesson_format"
+                    value={value}
+                    checked={checked}
+                    onChange={() => updateDraft("lesson_format", value)}
+                    className="sr-only"
+                  />
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+          {draft.lesson_format === "online" && (
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+                Ссылка для онлайн-занятия
+              </span>
+              <input
+                type="url"
+                inputMode="url"
+                value={draft.online_lesson_url ?? ""}
+                onChange={(event) =>
+                  updateDraft("online_lesson_url", event.target.value)
+                }
+                maxLength={500}
+                placeholder="https://telemost.yandex.ru/j/…"
+                className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+              />
+              <span className="mt-1.5 block text-xs text-studio-muted">
+                Ученик увидит кнопку «Войти в Телемост» в карточке каждого
+                занятия.
+              </span>
+            </label>
+          )}
+        </fieldset>
 
         {draft.gift_certificate_id && (
           <AdminGiftNote
@@ -558,6 +635,7 @@ export default function StudentsTable() {
     "all"
   );
   const [folderFilter, setFolderFilter] = useState<string>("all");
+  const [formatTab, setFormatTab] = useState<LessonFormat>("offline");
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderSaving, setFolderSaving] = useState(false);
@@ -625,7 +703,17 @@ export default function StudentsTable() {
     void loadStudents();
   }, [isMockAdmin]);
 
-  const visibleStudents = students.filter((student) => {
+  const studentFormat = (student: StudentProfile): LessonFormat =>
+    student.lesson_format === "online" ? "online" : "offline";
+  const tabStudents = students.filter(
+    (student) => studentFormat(student) === formatTab
+  );
+  const onlineCount = students.filter(
+    (student) => studentFormat(student) === "online"
+  ).length;
+  const offlineCount = students.length - onlineCount;
+
+  const visibleStudents = tabStudents.filter((student) => {
     const query = search.trim().toLowerCase();
     const matchesSearch =
       !query ||
@@ -709,6 +797,35 @@ export default function StudentsTable() {
   return (
     <>
       <div className="mb-4 space-y-3">
+        <div
+          role="tablist"
+          aria-label="Формат занятий"
+          className="grid grid-cols-2 gap-1 rounded-2xl bg-studio-surface p-1 ring-1 ring-studio-border sm:inline-grid sm:min-w-[22rem]"
+        >
+          {(
+            [
+              { value: "offline", label: "Очные", count: offlineCount, Icon: MapPin },
+              { value: "online", label: "Онлайн", count: onlineCount, Icon: Video },
+            ] as const
+          ).map(({ value, label, count, Icon }) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={formatTab === value}
+              onClick={() => setFormatTab(value)}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent ${
+                formatTab === value
+                  ? "bg-gradient-to-r from-studio-accent to-purple-600 text-white shadow-glow"
+                  : "text-studio-muted hover:text-studio-text"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {label} · {count}
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-col gap-3 lg:flex-row">
           <label className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-studio-muted" />
@@ -761,7 +878,7 @@ export default function StudentsTable() {
                 : "bg-studio-surface text-studio-muted ring-studio-border"
             }`}
           >
-            Все ученики · {students.length}
+            Все ученики · {tabStudents.length}
           </button>
           {folders.map((folder) => (
             <button
@@ -777,8 +894,11 @@ export default function StudentsTable() {
               <Folder className="h-3.5 w-3.5" />
               {folder.name} ·{" "}
               {
-                members.filter((member) => member.folder_id === folder.id)
-                  .length
+                members.filter(
+                  (member) =>
+                    member.folder_id === folder.id &&
+                    tabStudents.some((s) => s.id === member.student_id)
+                ).length
               }
             </button>
           ))}
@@ -841,6 +961,20 @@ export default function StudentsTable() {
                     />
                     {student.cat_exam_ready ? " · готов к экзамену" : ""}
                   </p>
+                  {studentFormat(student) === "online" && (
+                    <p
+                      className={`mt-1 flex items-center gap-1 text-[10px] ${
+                        student.online_lesson_url
+                          ? "text-studio-muted"
+                          : "text-amber-300"
+                      }`}
+                    >
+                      <Video className="h-3 w-3" />
+                      {student.online_lesson_url
+                        ? "Ссылка на занятие указана"
+                        : "Ссылка на занятие не указана"}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -940,7 +1074,11 @@ export default function StudentsTable() {
         <p className="rounded-2xl bg-studio-surface py-10 text-center text-sm text-studio-muted ring-1 ring-studio-border">
           {students.length === 0
             ? "Зарегистрированных учеников пока нет"
-            : "По выбранным фильтрам учеников нет"}
+            : tabStudents.length === 0
+              ? formatTab === "online"
+                ? "Онлайн-учеников пока нет — формат задаётся в карточке ученика"
+                : "Очных учеников пока нет"
+              : "По выбранным фильтрам учеников нет"}
         </p>
       )}
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}

@@ -8,6 +8,7 @@ import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import { useStudentRetention } from "@/hooks/useStudentRetention";
 import SingTodayCard from "@/components/student/SingTodayCard";
 import VoicePathStrip from "@/components/student/VoicePathStrip";
+import OnlineLessonGuide from "@/components/student/OnlineLessonGuide";
 import { consumeRequestedCabinetTab } from "@/components/dashboard/CabinetTabLink";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
@@ -133,6 +134,7 @@ export default function StudentDashboardClient() {
       <div className="mt-5 space-y-8">
         <SingTodayCard board={board} onClosed={reloadRetention} />
         <VoicePathStrip board={board} />
+        <OnlineLessonGuide />
         <StudentHomeHub progress={progress} board={board} />
       </div>
     </DashboardLayout>

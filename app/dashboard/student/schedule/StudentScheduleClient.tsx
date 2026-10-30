@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import HubPills from "@/components/student/HubPills";
 import UpcomingLessons from "@/components/student/UpcomingLessons";
+import OnlineLessonGuide from "@/components/student/OnlineLessonGuide";
 import StudentChatSection from "@/components/student/StudentChatSection";
 import SubscriptionStatus from "@/components/student/SubscriptionStatus";
 import GiftRedeemCard from "@/components/student/GiftRedeemCard";
@@ -83,6 +84,7 @@ export default function StudentScheduleClient() {
         ) : (
           <div className="space-y-8">
             <StudentActivityStrip progress={progress} variant="lessons" />
+            <OnlineLessonGuide />
             <UpcomingLessons />
             <SubscriptionStatus />
             <GiftRedeemCard />

@@ -12,9 +12,12 @@ import {
   History,
   List,
   Snowflake,
+  Video,
 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
-import Button from "@/components/ui/Button";
+import Button, { buttonSizes, buttonVariants } from "@/components/ui/Button";
+import { cn } from "@/lib/utils";
+import { isOnlineStudent, safeOnlineLessonUrl } from "@/lib/lesson-format";
 import Modal from "@/components/ui/Modal";
 import SbpPaymentSheet, {
   type PaymentPurpose,
@@ -50,6 +53,8 @@ export default function UpcomingLessons() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
 
+  const online = isOnlineStudent(profile);
+  const onlineUrl = safeOnlineLessonUrl(profile?.online_lesson_url);
   const payType = profile?.lesson_pay_type;
   const lessonPrice = Number(profile?.custom_lesson_price) || 0;
   const abonementPrice = Number(profile?.custom_abonement_price) || 0;
@@ -602,6 +607,27 @@ export default function UpcomingLessons() {
                   )}
                 </div>
               </div>
+
+              {scope === "history" || frozen || !online ? null : onlineUrl ? (
+                <a
+                  href={onlineUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    "relative mt-4 inline-flex min-h-11 w-full touch-manipulation items-center justify-center gap-2 font-semibold transition-all duration-300 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-studio-accent sm:w-auto",
+                    buttonVariants.primary,
+                    buttonSizes.md
+                  )}
+                >
+                  <Video className="h-4 w-4" />
+                  Войти в Телемост
+                </a>
+              ) : (
+                <p className="relative mt-4 flex items-center gap-2 rounded-xl bg-studio-accent/10 px-3 py-2.5 text-xs text-studio-accent-light">
+                  <Video className="h-4 w-4 shrink-0" />
+                  Ссылку на онлайн-занятие преподаватель добавит заранее — загляните сюда перед уроком.
+                </p>
+              )}
 
               {scope === "history" ? null : requestPending ? (
                 <div className="relative mt-4 space-y-2">

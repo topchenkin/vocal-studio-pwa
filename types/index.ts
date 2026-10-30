@@ -7,6 +7,7 @@ export type AppSubscriptionVariant =
   | "duo_member";
 
 export type LessonPayType = "abonement" | "one_time";
+export type LessonFormat = "offline" | "online";
 
 export type CatLevel = "beginner" | "basic" | "pro" | "star";
 
@@ -61,6 +62,8 @@ export interface StudentProfile {
   cat_last_checkin_on?: string | null;
   is_active_student: boolean;
   lesson_pay_type: LessonPayType;
+  lesson_format?: LessonFormat;
+  online_lesson_url?: string | null;
   custom_lesson_price: number;
   custom_abonement_price: number;
   lessons_balance: number;
