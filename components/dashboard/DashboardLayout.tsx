@@ -72,7 +72,26 @@ export default function DashboardLayout({
           </div>
         )}
 
-        <div className={cn(compact ? "mt-3 flex min-h-0 flex-1 flex-col" : "mt-8")}>
+        {!compact && student && (
+          <div className="mt-6">
+            <h1 className="truncate font-display text-2xl font-semibold sm:text-3xl">
+              {title}
+            </h1>
+            {subtitle ? (
+              <p className="mt-1 text-sm text-studio-muted">{subtitle}</p>
+            ) : null}
+          </div>
+        )}
+
+        <div
+          className={cn(
+            compact
+              ? "mt-3 flex min-h-0 flex-1 flex-col"
+              : student
+                ? "mt-4"
+                : "mt-8"
+          )}
+        >
           {children}
         </div>
       </div>

@@ -441,9 +441,9 @@ export default function UpcomingLessons() {
               key={lesson.id}
               className={
                 frozen
-                  ? "relative overflow-hidden rounded-2xl bg-studio-surface/70 p-4 ring-1 ring-cyan-300/20"
+                  ? "relative overflow-hidden rounded-2xl bg-studio-surface/70 p-4 ring-1 ring-studio-accent/20"
                   : catHighlight
-                    ? "relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-300/10 via-studio-surface to-studio-accent/15 p-4 ring-1 ring-amber-300/35 shadow-[0_0_28px_rgba(251,191,36,0.12)]"
+                    ? "relative overflow-hidden rounded-2xl bg-gradient-to-br from-studio-gold/10 via-studio-surface to-studio-accent/15 p-4 ring-1 ring-studio-gold/35 shadow-[0_0_28px_rgba(251,191,36,0.12)]"
                     : endedUnpaid
                       ? "rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border"
                       : "rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border"
@@ -452,7 +452,7 @@ export default function UpcomingLessons() {
               {frozen ? (
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_0%,rgba(186,230,253,0.18),transparent_46%),linear-gradient(135deg,rgba(165,180,252,0.08),transparent_55%)]"
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_0%,rgba(192,132,252,0.18),transparent_46%),linear-gradient(135deg,rgba(192,132,252,0.08),transparent_55%)]"
                 />
               ) : null}
 
@@ -465,24 +465,24 @@ export default function UpcomingLessons() {
                   <div
                     className={`flex h-12 w-12 flex-col items-center justify-center rounded-xl text-xs ${
                       frozen
-                        ? "bg-cyan-300/10 text-cyan-100/80"
+                        ? "bg-studio-accent/10 text-studio-accent-light/80"
                         : catHighlight
-                          ? "bg-amber-300/15 text-amber-200"
+                          ? "bg-studio-gold/15 text-studio-gold"
                           : "bg-studio-accent/10"
                     }`}
                   >
                     <span
                       className={`font-bold ${
                         frozen
-                          ? "text-cyan-100"
+                          ? "text-studio-accent-light"
                           : catHighlight
-                            ? "text-amber-200"
+                            ? "text-studio-gold"
                             : "text-studio-accent"
                       }`}
                     >
                       {date.getDate()}
                     </span>
-                    <span className="text-[10px] text-studio-muted">
+                    <span className="text-xs text-studio-muted">
                       {date.toLocaleDateString("ru-RU", { month: "short" })}
                     </span>
                   </div>
@@ -502,24 +502,24 @@ export default function UpcomingLessons() {
                       })}
                     </p>
                     {lesson.is_recurring ? (
-                      <p className="mt-1 text-[11px] text-studio-accent-light">
+                      <p className="mt-1 text-xs text-studio-accent-light">
                         Еженедельное занятие
                       </p>
                     ) : null}
                     {frozen ? (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-cyan-100/80">
+                      <p className="mt-1 flex items-center gap-1 text-xs text-studio-accent-light/80">
                         <Snowflake className="h-3 w-3" />
                         Заморожено до оплаты абонемента
                       </p>
                     ) : null}
                     {catHighlight ? (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-100/90">
+                      <p className="mt-1 flex items-center gap-1 text-xs text-studio-gold">
                         <Cat className="h-3 w-3" />
                         Котик, урок сегодня — можно кинуть корм
                       </p>
                     ) : null}
                     {endedUnpaid ? (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-studio-muted">
+                      <p className="mt-1 flex items-center gap-1 text-xs text-studio-muted">
                         <Cat className="h-3 w-3" />
                         Урок уже прошёл, котик всё ещё ждёт корм
                       </p>
@@ -530,7 +530,7 @@ export default function UpcomingLessons() {
                 <div className="relative flex shrink-0 flex-col items-end gap-1.5">
                   {showAbonementPay ? (
                     <>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-red-400">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-red-400">
                         Не оплачен
                       </p>
                       {abonementPrice > 0 ? (
@@ -547,12 +547,12 @@ export default function UpcomingLessons() {
                           Оплатить абонемент
                         </Button>
                       ) : (
-                        <p className="max-w-[9.5rem] text-right text-[11px] text-studio-muted">
+                        <p className="max-w-[9.5rem] text-right text-xs text-studio-muted">
                           Стоимость абонемента ещё не указана
                         </p>
                       )}
                       {abonementPrice > 0 ? (
-                        <p className="text-[11px] text-studio-muted">
+                        <p className="text-xs text-studio-muted">
                           {formatRub(abonementPrice)}
                         </p>
                       ) : null}
@@ -563,8 +563,8 @@ export default function UpcomingLessons() {
                         <p
                           className={
                             catHighlight
-                              ? "flex items-center gap-1 text-[11px] font-semibold text-amber-200"
-                              : "text-[11px] font-medium text-studio-muted"
+                              ? "flex items-center gap-1 text-xs font-semibold text-studio-gold"
+                              : "text-xs font-medium text-studio-muted"
                           }
                         >
                           {catHighlight ? <Fish className="h-3 w-3" /> : null}
@@ -586,12 +586,12 @@ export default function UpcomingLessons() {
                           Оплатить
                         </Button>
                       ) : (
-                        <p className="max-w-[9.5rem] text-right text-[11px] text-studio-muted">
+                        <p className="max-w-[9.5rem] text-right text-xs text-studio-muted">
                           Стоимость урока ещё не указана
                         </p>
                       )}
                       {lessonPrice > 0 ? (
-                        <p className="text-[11px] text-studio-muted">
+                        <p className="text-xs text-studio-muted">
                           {formatRub(lessonPrice)}
                         </p>
                       ) : null}
@@ -599,8 +599,8 @@ export default function UpcomingLessons() {
                   ) : paid && payType === "one_time" ? (
                     <Badge variant="success">Оплачен</Badge>
                   ) : frozen ? (
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-300/10 ring-1 ring-cyan-200/20">
-                      <Snowflake className="h-4 w-4 text-cyan-100/80" />
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-studio-accent/10 ring-1 ring-studio-accent/20">
+                      <Snowflake className="h-4 w-4 text-studio-accent-light/80" />
                     </span>
                   ) : (
                     <Badge variant="success">Запланирован</Badge>
@@ -774,7 +774,7 @@ export default function UpcomingLessons() {
           {cancelLesson &&
           new Date(cancelLesson.datetime).getTime() - Date.now() <
             24 * 60 * 60 * 1000 ? (
-            <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-200 ring-1 ring-amber-400/20">
+            <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-studio-gold ring-1 ring-amber-400/20">
               До урока меньше 24 часов: при подтверждении отмены занятие
               спишется с абонемента или уйдёт в задолженность.
             </p>

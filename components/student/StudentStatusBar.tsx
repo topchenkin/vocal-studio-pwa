@@ -2,19 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Flame, LogOut, Moon, Star, Sun } from "lucide-react";
+import { LogOut, Moon, Sun } from "lucide-react";
+import { CAT_LEVEL_IMAGES } from "@/lib/cat-levels";
 import Logo from "@/components/Logo";
 import NotificationBell from "@/components/notifications/NotificationBell";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import type { CatLevel } from "@/types";
-
-const CAT_MARK: Record<CatLevel, string> = {
-  beginner: "/stickers/sticker-cat-wave.png",
-  basic: "/stickers/sticker-cat-sing.png",
-  pro: "/stickers/sticker-cat-headphones.png",
-  star: "/stickers/sticker-cat-star.png",
-};
 
 export default function StudentStatusBar() {
   const { profile, signOut } = useAuth();
@@ -22,9 +16,7 @@ export default function StudentStatusBar() {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const level = (profile?.cat_level ?? "beginner") as CatLevel;
-  const streak = Number(profile?.cat_streak_days) || 0;
-  const xp = Number(profile?.cat_xp) || 0;
-  const cat = CAT_MARK[level] ?? CAT_MARK.beginner;
+  const cat = CAT_LEVEL_IMAGES[level] ?? CAT_LEVEL_IMAGES.beginner;
 
   useEffect(() => {
     if (!open) return;
@@ -49,20 +41,6 @@ export default function StudentStatusBar() {
       </Link>
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <span
-          className="inline-flex h-10 items-center gap-1 rounded-full bg-studio-surface px-2.5 text-sm ring-1 ring-studio-border"
-          title="Серия дней"
-        >
-          <Flame className="h-3.5 w-3.5 text-orange-300" />
-          <span className="tabular-nums">{streak}</span>
-        </span>
-        <span
-          className="inline-flex h-10 items-center gap-1 rounded-full bg-studio-surface px-2.5 text-sm ring-1 ring-studio-border"
-          title="Опыт котика"
-        >
-          <Star className="h-3.5 w-3.5 text-studio-gold" />
-          <span className="tabular-nums">{xp}</span>
-        </span>
         <NotificationBell compact />
         <div className="relative" ref={menuRef}>
           <button

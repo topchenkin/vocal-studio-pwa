@@ -7,16 +7,19 @@ import StudentHomeHub from "@/components/student/StudentHomeHub";
 import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import { useStudentRetention } from "@/hooks/useStudentRetention";
 import SingTodayCard from "@/components/student/SingTodayCard";
-import VoicePathStrip from "@/components/student/VoicePathStrip";
 import OnlineLessonGuide from "@/components/student/OnlineLessonGuide";
+import MilestoneCard from "@/components/student/MilestoneCard";
+import NextLessonCard from "@/components/student/NextLessonCard";
+import QuizPlanCard from "@/components/student/QuizPlanCard";
+import LastLessonNote from "@/components/student/LastLessonNote";
 import { consumeRequestedCabinetTab } from "@/components/dashboard/CabinetTabLink";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { syncPendingIntroQuiz } from "@/lib/intro-quiz-sync";
 
 function legacyHub(tab: string | null): string | null {
-  if (tab === "chat") return "/dashboard/student/schedule?section=chat";
-  if (tab === "lessons") return "/dashboard/student/schedule?section=lessons";
+  if (tab === "chat") return "/dashboard/student/chat";
+  if (tab === "lessons") return "/dashboard/student/schedule";
   if (tab === "notes") return "/dashboard/student/exercises?section=homework";
   if (tab === "audio") return "/dashboard/student/exercises?section=audio";
   return null;
@@ -64,8 +67,8 @@ export default function StudentDashboardClient() {
     if (tab === "chat") {
       const params = new URLSearchParams(searchParams.toString());
       params.delete("tab");
-      params.set("section", "chat");
-      router.replace(`/dashboard/student/schedule?${params.toString()}`);
+      const query = params.toString();
+      router.replace(`/dashboard/student/chat${query ? `?${query}` : ""}`);
       return;
     }
     router.replace(next);
@@ -131,10 +134,13 @@ export default function StudentDashboardClient() {
       bottomInset
       student
     >
-      <div className="mt-5 space-y-8">
-        <SingTodayCard board={board} onClosed={reloadRetention} />
-        <VoicePathStrip board={board} />
+      <div className="space-y-4">
+        <MilestoneCard progress={progress} />
+        <NextLessonCard progress={progress} />
+        <QuizPlanCard progress={progress} />
         <OnlineLessonGuide />
+        <SingTodayCard board={board} onClosed={reloadRetention} />
+        <LastLessonNote />
         <StudentHomeHub progress={progress} board={board} />
       </div>
     </DashboardLayout>

@@ -3,25 +3,46 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import { BookOpen, CalendarDays, Home, SlidersHorizontal } from "lucide-react";
+import {
+  CalendarDays,
+  Ellipsis,
+  Home,
+  MessageCircle,
+  Mic,
+} from "lucide-react";
 
 const items = [
-  { href: "/dashboard/student", label: "Главная", icon: Home, exact: true },
   {
-    href: "/dashboard/student/exercises",
-    label: "Обучение",
-    icon: BookOpen,
-  },
-  {
-    href: "/dashboard/student/ai-tools",
-    label: "Лаборатория",
-    icon: SlidersHorizontal,
-    also: ["/dashboard/student/pro-test"],
+    href: "/dashboard/student",
+    label: "Главная",
+    icon: Home,
+    exact: true,
+    also: ["/dashboard/student/progress"],
   },
   {
     href: "/dashboard/student/schedule",
-    label: "Расписание",
+    label: "Занятия",
     icon: CalendarDays,
+  },
+  {
+    href: "/dashboard/student/exercises",
+    label: "Практика",
+    icon: Mic,
+  },
+  {
+    href: "/dashboard/student/chat",
+    label: "Чат",
+    icon: MessageCircle,
+  },
+  {
+    href: "/dashboard/student/more",
+    label: "Ещё",
+    icon: Ellipsis,
+    also: [
+      "/dashboard/student/subscription",
+      "/dashboard/student/ai-tools",
+      "/dashboard/student/pro-test",
+    ],
   },
 ] as const;
 
@@ -36,7 +57,7 @@ export default function StudentBottomNav() {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-studio-border bg-studio-bg/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
         aria-label="Разделы кабинета"
       >
-        <div className="mx-auto grid max-w-6xl grid-cols-4 px-1 pt-1">
+        <div className="mx-auto grid max-w-6xl grid-cols-5 px-1 pt-1">
           {items.map((item) => {
             const Icon = item.icon;
             const extra = "also" in item ? item.also : [];
@@ -50,7 +71,7 @@ export default function StudentBottomNav() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium ${
+                className={`relative flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium ${
                   active ? "text-studio-accent-light" : "text-studio-muted"
                 }`}
               >

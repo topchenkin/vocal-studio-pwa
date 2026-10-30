@@ -3,17 +3,26 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AudioLines, Layers, Mic, Music2, Repeat, Stars } from "lucide-react";
+import {
+  ArrowLeft,
+  AudioLines,
+  ChevronRight,
+  ClipboardList,
+  Layers,
+  Lock,
+  Mic,
+  Music2,
+  Repeat,
+  Stars,
+} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import HubPills from "@/components/student/HubPills";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
 import PitchShiftStudio from "@/components/ai/PitchShiftStudio";
 import MultitrackMixer from "@/components/ai/MultitrackMixer";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
-import StudentActivityStrip from "@/components/student/StudentActivityStrip";
-import { useCabinetProgress } from "@/hooks/useCabinetProgress";
+import { formatAppTier } from "@/lib/constants";
 import {
   canAccessAiTool,
   defaultAiToolAccessMap,
@@ -38,22 +47,52 @@ const ChordLoopGenerator = dynamic(
 const TABS: Array<{
   id: ToolTab;
   label: string;
+  text: string;
   icon: typeof Mic;
 }> = [
-  { id: "tuner", label: "Нейроанализатор нот", icon: Mic },
-  { id: "timbre", label: "Вокальный архетип", icon: Stars },
-  { id: "mixer", label: "Сведение дорожек", icon: Layers },
-  { id: "pitchshift", label: "Изменение тональности", icon: Music2 },
-  { id: "vocalfx", label: "Обработка голоса", icon: AudioLines },
-  { id: "chordloop", label: "Генератор аккордов", icon: Repeat },
+  {
+    id: "tuner",
+    label: "Нейроанализатор нот",
+    text: "Покажет, насколько точно вы попадаете в ноты",
+    icon: Mic,
+  },
+  {
+    id: "timbre",
+    label: "Вокальный архетип",
+    text: "Подскажет, какой у вас тип голоса",
+    icon: Stars,
+  },
+  {
+    id: "mixer",
+    label: "Сведение дорожек",
+    text: "Запись и сведение дорожек на телефоне",
+    icon: Layers,
+  },
+  {
+    id: "pitchshift",
+    label: "Изменение тональности",
+    text: "Подберёт удобную тональность песни",
+    icon: Music2,
+  },
+  {
+    id: "vocalfx",
+    label: "Обработка голоса",
+    text: "Обработка записанного голоса",
+    icon: AudioLines,
+  },
+  {
+    id: "chordloop",
+    label: "Генератор аккордов",
+    text: "Аккордовая основа для распевки",
+    icon: Repeat,
+  },
 ];
 
 export default function AiToolsPage() {
   const { isAuthenticated, isAdmin, loading, tier } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<ToolTab>("tuner");
+  const [tab, setTab] = useState<ToolTab | null>(null);
   const [access, setAccess] = useState<AiToolAccessMap>(defaultAiToolAccessMap);
-  const { progress } = useCabinetProgress();
 
   useEffect(() => {
     if (loading) return;
@@ -94,53 +133,97 @@ export default function AiToolsPage() {
     (item) => isAdmin || access[item.id]?.enabled !== false
   );
 
-  const activeTab = visibleTabs.some((item) => item.id === tab)
-    ? tab
-    : (visibleTabs[0]?.id ?? "tuner");
+  const active = visibleTabs.find((item) => item.id === tab) ?? null;
 
   return (
     <DashboardLayout
-      title="Нейросети"
-      subtitle="Анализ нот, архетип, сведение, обработка голоса и генератор аккордов"
+      title={active ? (access[active.id]?.title || active.label) : "Лаборатория"}
+      subtitle={
+        active ? undefined : "Инструменты, которые помогают слышать и развивать голос"
+      }
       bottomInset
       student
     >
-      <div className="mt-5">
-      <StudentActivityStrip progress={progress} variant="lab" />
+      {active ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setTab(null)}
+            className="mb-4 inline-flex min-h-11 items-center gap-1.5 text-sm text-studio-muted hover:text-studio-text"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Все инструменты
+          </button>
 
-      <HubPills
-        label="Лаборатория"
-        value={activeTab}
-        onChange={setTab}
-        items={visibleTabs.map((item) => ({
-          id: item.id,
-          label: access[item.id]?.title || item.label,
-        }))}
-      />
-      <Link
-        href="/dashboard/student/pro-test"
-        className="mb-5 inline-flex min-h-11 items-center text-sm font-medium text-studio-accent-light"
-      >
-        Проф. тест
-      </Link>
-
-      {activeTab === "tuner" && <PitchAnalyzer locked={locked("tuner")} />}
-      {activeTab === "timbre" && (
-        <TimbreMatcher locked={locked("timbre")} />
+          {active.id === "tuner" && <PitchAnalyzer locked={locked("tuner")} />}
+          {active.id === "timbre" && (
+            <TimbreMatcher locked={locked("timbre")} />
+          )}
+          {active.id === "mixer" && (
+            <MultitrackMixer locked={locked("mixer")} />
+          )}
+          {active.id === "pitchshift" && (
+            <PitchShiftStudio locked={locked("pitchshift")} />
+          )}
+          {active.id === "vocalfx" && (
+            <VocalFxBox locked={locked("vocalfx")} />
+          )}
+          {active.id === "chordloop" && (
+            <ChordLoopGenerator locked={locked("chordloop")} />
+          )}
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {visibleTabs.map((item) => {
+            const Icon = item.icon;
+            const isLocked = locked(item.id);
+            const minTier = access[item.id]?.min_tier ?? "none";
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                className="flex min-h-[4.5rem] w-full items-center gap-3 rounded-2xl bg-studio-card p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent/40"
+              >
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-studio-accent/15 text-studio-accent-light">
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">
+                    {access[item.id]?.title || item.label}
+                  </span>
+                  <span className="block text-sm text-studio-muted">
+                    {item.text}
+                  </span>
+                </span>
+                {isLocked ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-studio-gold/15 px-2.5 py-1 text-xs font-medium text-studio-gold">
+                    <Lock className="h-3 w-3" />
+                    {formatAppTier(minTier)}
+                  </span>
+                ) : (
+                  <ChevronRight className="h-5 w-5 shrink-0 text-studio-muted" />
+                )}
+              </button>
+            );
+          })}
+          <Link
+            href="/dashboard/student/pro-test"
+            className="flex min-h-[4.5rem] items-center gap-3 rounded-2xl bg-studio-card p-4 ring-1 ring-studio-border transition hover:ring-studio-accent/40"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-studio-gold/15 text-studio-gold">
+              <ClipboardList className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">Проф. тест</span>
+              <span className="block text-sm text-studio-muted">
+                Короткий зачёт на уровень котика
+              </span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-studio-muted" />
+          </Link>
+        </div>
       )}
-      {activeTab === "mixer" && (
-        <MultitrackMixer locked={locked("mixer")} />
-      )}
-      {activeTab === "pitchshift" && (
-        <PitchShiftStudio locked={locked("pitchshift")} />
-      )}
-      {activeTab === "vocalfx" && (
-        <VocalFxBox locked={locked("vocalfx")} />
-      )}
-      {activeTab === "chordloop" && (
-        <ChordLoopGenerator locked={locked("chordloop")} />
-      )}
-      </div>
     </DashboardLayout>
   );
 }

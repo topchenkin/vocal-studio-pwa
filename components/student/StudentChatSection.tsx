@@ -14,14 +14,15 @@ import type { GroupChat } from "@/types";
 type ChatMode = "teacher" | "groups";
 
 export default function StudentChatSection() {
-  const { user, tier } = useAuth();
+  const { user, tier, profile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<ChatMode>("teacher");
   const [groups, setGroups] = useState<GroupChat[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
-  const hasChatAccess = tier !== "none";
+  // Students enrolled in the studio always reach their teacher; others need a subscription.
+  const hasChatAccess = tier !== "none" || Boolean(profile?.is_active_student);
   const activeGroupId = selectedGroupId ?? groups[0]?.id ?? null;
   const { messages: teacherMessages, error: teacherError, sending: sendingTeacher, send: sendTeacher, edit: editTeacher, remove: removeTeacher } =
     useChatMessages(user?.id ?? null);
@@ -169,7 +170,7 @@ export default function StudentChatSection() {
         {!hasChatAccess && (
           <PaywallOverlay
             title="Чат с преподавателем"
-            description="Доступно с подпиской Standart и выше"
+            description="Доступно ученикам студии и с подпиской Standart и выше"
             onUpgrade={() => router.push("/dashboard/student/subscription")}
             buttonLabel="Оформить подписку"
           />

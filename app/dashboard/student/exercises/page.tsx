@@ -44,14 +44,14 @@ function ExercisesHub() {
 
   return (
     <DashboardLayout
-      title="Обучение"
+      title="Практика"
       subtitle="Распевки, задания преподавателя и ваши записи"
       bottomInset
       student
     >
-      <div className="mt-5">
+      <div>
         <HubPills
-          label="Обучение"
+          label="Практика"
           value={section}
           onChange={select}
           items={[

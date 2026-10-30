@@ -4,9 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Lock, Play, Video } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
-import StudentActivityStrip from "@/components/student/StudentActivityStrip";
 import VoicePathStrip from "@/components/student/VoicePathStrip";
-import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import { useStudentRetention } from "@/hooks/useStudentRetention";
 import { supabase } from "@/lib/supabase";
 import { rewriteSupabaseAssetUrl } from "@/lib/supabase-origin";
@@ -100,7 +98,6 @@ const demoExercises: Exercise[] = [
 
 export default function ExerciseLibrary() {
   const { user, tier, refreshProfile } = useAuth();
-  const { progress } = useCabinetProgress();
   const { board } = useStudentRetention();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +190,6 @@ export default function ExerciseLibrary() {
 
   return (
     <>
-      <StudentActivityStrip progress={progress} variant="exercises" />
       <div className="mb-8">
         <VoicePathStrip board={board} />
       </div>

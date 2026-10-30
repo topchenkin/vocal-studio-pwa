@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, Circle } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { logPracticeSeconds } from "@/lib/practice-log";
 import {
@@ -112,8 +113,8 @@ export default function SingTodayCard({
 
   return (
     <section className="rounded-3xl bg-studio-card p-5 ring-1 ring-studio-border">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-studio-muted">
-        Сегодня
+      <p className="text-sm font-medium text-studio-accent-light">
+        Спеть сегодня
       </p>
       <h2 className="mt-1 font-display text-2xl font-semibold">{step.title}</h2>
       <p className="mt-2 text-sm text-studio-muted">{step.line}</p>
@@ -128,20 +129,16 @@ export default function SingTodayCard({
         </p>
       )}
 
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
         {QUESTS.map((quest) => {
           const done = board.quests[quest.key];
           return (
-            <li key={quest.key} className="flex items-center gap-2 text-sm">
-              <span
-                className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] ring-1 ${
-                  done
-                    ? "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40"
-                    : "text-studio-muted ring-studio-border"
-                }`}
-              >
-                {done ? "✓" : ""}
-              </span>
+            <li key={quest.key} className="flex items-center gap-1.5 text-sm">
+              {done ? (
+                <CheckCircle2 className="h-4 w-4 text-studio-gold" />
+              ) : (
+                <Circle className="h-4 w-4 text-studio-border" />
+              )}
               <span className={done ? "text-studio-text" : "text-studio-muted"}>
                 {quest.label}
               </span>
