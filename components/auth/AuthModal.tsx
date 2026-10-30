@@ -202,7 +202,6 @@ export default function AuthModal({
                 onChange={(event) => setFullName(event.target.value)}
                 autoComplete="name"
                 className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
-                placeholder="Как на сертификате"
               />
             </label>
             <label className="block">
