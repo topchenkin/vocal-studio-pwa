@@ -10,7 +10,11 @@ import {
 } from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
 import { formatAppTier } from "@/lib/constants";
-import { startPayment, waitForPayment } from "@/lib/payment-client";
+import {
+  fetchPaymentMethods,
+  startPayment,
+  waitForPayment,
+} from "@/lib/payment-client";
 import { paymentProviderLabel, type PaymentGateway } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
@@ -99,6 +103,8 @@ export default function SbpPaymentSheet({
   const [gateway, setGateway] = useState<PaymentGateway>("yookassa");
   const pollRef = useRef<AbortController | null>(null);
 
+  const beginRef = useRef<(next: PaymentGateway) => void>(() => {});
+
   useEffect(() => {
     if (!open) {
       pollRef.current?.abort();
@@ -106,8 +112,21 @@ export default function SbpPaymentSheet({
       setPhase("choose");
       setGateway("yookassa");
       setError("");
+      return;
     }
+    // Offer the choice only when international cards are switched on;
+    // otherwise go straight to SBP / RU cards as before.
+    let cancelled = false;
+    setGateway("yookassa");
+    setError("");
+    setPhase("init");
+    void fetchPaymentMethods().then((methods) => {
+      if (cancelled) return;
+      if (methods.international) setPhase("choose");
+      else beginRef.current("yookassa");
+    });
     return () => {
+      cancelled = true;
       pollRef.current?.abort();
     };
   }, [open]);
@@ -152,6 +171,7 @@ export default function SbpPaymentSheet({
     },
     [purpose]
   );
+  beginRef.current = begin;
 
   const intl = gateway === "prodamus";
   const label = paymentProviderLabel(gateway);

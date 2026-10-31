@@ -446,7 +446,7 @@ async function handleInit(req, res) {
 
   const useProdamus = body.provider === "prodamus";
   const providerId = useProdamus ? "prodamus" : "yookassa";
-  if (useProdamus && !prodamus.isReady()) {
+  if (useProdamus && !prodamus.isInternational()) {
     return json(res, 503, {
       error: "Оплата международной картой временно недоступна",
     });
@@ -764,6 +764,10 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const path = url.pathname.replace(/\/+$/, "") || "/";
+
+    if (path === "/api/payments/methods") {
+      return json(res, 200, { international: prodamus.isInternational() });
+    }
 
     if (
       path === "/health" ||

@@ -14,6 +14,14 @@ const APP_ORIGIN = (
 ).replace(/\/$/, "");
 const FORM_URL = (process.env.PRODAMUS_URL || "").replace(/\/+$/, "");
 const SECRET_KEY = process.env.PRODAMUS_SECRET_KEY || "";
+/**
+ * Foreign-card methods must be enabled on the payform by Prodamus support.
+ * Until PRODAMUS_INTERNATIONAL=1 the app hides the button, because the form
+ * would otherwise open with Russian methods only.
+ */
+const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
+  String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
+);
 
 /**
  * Methods offered for the "international card" button. Prodamus ignores the
@@ -134,9 +142,13 @@ export const prodamus = {
     return Boolean(FORM_URL && SECRET_KEY);
   },
   isTest: false,
+  isInternational() {
+    return Boolean(FORM_URL && SECRET_KEY && INTERNATIONAL_ENABLED);
+  },
   healthExtra() {
     return {
       prodamusReady: Boolean(FORM_URL && SECRET_KEY),
+      prodamusInternational: INTERNATIONAL_ENABLED,
       prodamusForm: FORM_URL || null,
     };
   },

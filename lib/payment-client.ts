@@ -152,6 +152,20 @@ export async function startPayment(
   return payload;
 }
 
+/** Which optional gateways are switched on (the button is hidden otherwise). */
+export async function fetchPaymentMethods(): Promise<{ international: boolean }> {
+  try {
+    const response = await fetch(`${PAYMENT_API_BASE}/methods`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return { international: false };
+    const payload = (await response.json()) as { international?: boolean };
+    return { international: payload.international === true };
+  } catch {
+    return { international: false };
+  }
+}
+
 export async function createGiftPaymentLink(certificateId: string) {
   const payload = await postPayment("/init-gift", { certificateId });
   return payload.paymentUrl!;

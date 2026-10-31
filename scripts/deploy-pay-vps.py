@@ -100,6 +100,9 @@ def env_file_bytes() -> bytes:
     if local.get("PRODAMUS_URL") and local.get("PRODAMUS_SECRET_KEY"):
         lines.append(f"PRODAMUS_URL={local['PRODAMUS_URL']}")
         lines.append(f"PRODAMUS_SECRET_KEY={local['PRODAMUS_SECRET_KEY']}")
+        # Set to 1 only after Prodamus support enabled foreign cards on the page.
+        if local.get("PRODAMUS_INTERNATIONAL"):
+            lines.append(f"PRODAMUS_INTERNATIONAL={local['PRODAMUS_INTERNATIONAL']}")
     if agent_id:
         lines.append(f"YOOKASSA_AGENT_ID={agent_id}")
     if payout_secret:
