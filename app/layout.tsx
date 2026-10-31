@@ -41,6 +41,9 @@ export const metadata: Metadata = {
   formatDetection: {
     telephone: false,
   },
+  verification: {
+    yandex: "1b479f807291e83b",
+  },
   manifest: "/manifest.json",
   icons: {
     icon: [
