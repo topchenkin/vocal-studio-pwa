@@ -18,6 +18,7 @@ import {
   type CabinetAccessMap,
   type CabinetFeatureId,
 } from "@/lib/studio-access";
+import { formatAppTier } from "@/lib/constants";
 import type { AppSubscriptionTier } from "@/types";
 
 const TIER_OPTIONS: AppSubscriptionTier[] = [
@@ -31,8 +32,7 @@ const TOOL_ORDER: AiToolId[] = AI_TOOL_IDS;
 
 function tierLabel(tier: AppSubscriptionTier) {
   if (tier === "none") return "Без подписки";
-  if (tier === "standard") return "Standart";
-  return tier.charAt(0).toUpperCase() + tier.slice(1);
+  return formatAppTier(tier);
 }
 
 export default function AiToolsAccessSettings() {

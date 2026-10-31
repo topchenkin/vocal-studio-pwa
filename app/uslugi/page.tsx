@@ -4,7 +4,12 @@ import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
-import { APP_NAME, APP_TIER_PRICES, DUO_TIER_PRICES } from "@/lib/constants";
+import {
+  APP_NAME,
+  APP_TIER_PRICES,
+  DUO_TIER_PRICES,
+  duoMonthlySaving,
+} from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 
 export const metadata: Metadata = {
@@ -21,9 +26,21 @@ const INDIVIDUAL = [
 ];
 
 const DUO = [
-  { title: "Standart Duo", price: DUO_TIER_PRICES.standard, note: "два аккаунта Standart" },
-  { title: "Premium Duo", price: DUO_TIER_PRICES.premium, note: "два аккаунта Premium" },
-  { title: "VIP Duo", price: DUO_TIER_PRICES.vip, note: "два аккаунта VIP" },
+  {
+    title: "Standart Duo",
+    price: DUO_TIER_PRICES.standard,
+    note: `два кабинета Standart · экономия ${duoMonthlySaving("standard").toLocaleString("ru-RU")} ₽/мес против двух подписок`,
+  },
+  {
+    title: "Premium Duo",
+    price: DUO_TIER_PRICES.premium,
+    note: `два кабинета Premium · экономия ${duoMonthlySaving("premium").toLocaleString("ru-RU")} ₽/мес против двух подписок`,
+  },
+  {
+    title: "VIP Duo",
+    price: DUO_TIER_PRICES.vip,
+    note: `два кабинета VIP · экономия ${duoMonthlySaving("vip").toLocaleString("ru-RU")} ₽/мес против двух подписок`,
+  },
 ];
 
 function rub(value: number) {
@@ -74,7 +91,10 @@ export default function UslugiPage() {
 
           <h2 className="mt-8 font-display text-xl font-semibold">Duo</h2>
           <p className="mt-3 text-sm leading-relaxed">
-            Один платит, доступ получают два аккаунта.
+            Duo есть на каждом уровне: Standart, Premium и VIP. Один человек
+            платит, второго подключает по email. У каждого свой кабинет: уроки,
+            Котик и прогресс не смешиваются. Дешевле двух отдельных подписок
+            примерно на четверть.
           </p>
           <ul className="mt-4 space-y-2 text-sm">
             {DUO.map((plan) => (

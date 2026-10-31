@@ -41,9 +41,28 @@ export const SUBSCRIPTION_PERIOD_DISCOUNT: Record<
 
 /** Visible tier name. The stored code stays `standard`. */
 export function formatAppTier(tier: string | null | undefined): string {
-  if (!tier) return "";
+  if (!tier || tier === "none") return "";
   if (tier === "standard") return "Standart";
-  return tier.charAt(0).toUpperCase() + tier.slice(1);
+  if (tier === "premium") return "Premium";
+  if (tier === "vip") return "VIP";
+  return tier;
+}
+
+export type PaidAppTier = keyof typeof APP_TIER_PRICES;
+
+/** How much cheaper Duo is than two individual monthly plans. */
+export function duoMonthlySaving(tier: PaidAppTier): number {
+  return APP_TIER_PRICES[tier] * 2 - DUO_TIER_PRICES[tier];
+}
+
+/** Duo vs two individual plans for a prepaid period (after the same %). */
+export function duoPeriodSaving(
+  tier: PaidAppTier,
+  months: SubscriptionMonthOption
+): number {
+  const twoSolo = subscriptionTotal(APP_TIER_PRICES[tier], months) * 2;
+  const duo = subscriptionTotal(DUO_TIER_PRICES[tier], months);
+  return twoSolo - duo;
 }
 
 export const TIER_RANK = {

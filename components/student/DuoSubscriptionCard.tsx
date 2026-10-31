@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link2, UsersRound } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -10,11 +10,14 @@ import SbpPaymentSheet, {
 } from "@/components/payment/SbpPaymentSheet";
 import { useAuth } from "@/context/AuthContext";
 import {
+  APP_TIER_PRICES,
   DUO_TIER_PRICES,
   PLAN_FEATURES,
   PLAN_SUMMARIES,
   SUBSCRIPTION_MONTH_OPTIONS,
   TIER_RANK,
+  duoMonthlySaving,
+  duoPeriodSaving,
   formatAppTier,
   subscriptionDiscountPercent,
   subscriptionListTotal,
@@ -40,30 +43,21 @@ const duoPlans: Array<{
     title: "Standart Duo",
     price: DUO_TIER_PRICES.standard,
     summary: PLAN_SUMMARIES.standard,
-    features: [
-      ...PLAN_FEATURES.standard,
-      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
-    ],
+    features: [...PLAN_FEATURES.standard],
   },
   {
     tier: "premium",
     title: "Premium Duo",
     price: DUO_TIER_PRICES.premium,
     summary: PLAN_SUMMARIES.premium,
-    features: [
-      ...PLAN_FEATURES.premium,
-      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
-    ],
+    features: [...PLAN_FEATURES.premium],
   },
   {
     tier: "vip",
     title: "VIP Duo",
     price: DUO_TIER_PRICES.vip,
     summary: PLAN_SUMMARIES.vip,
-    features: [
-      ...PLAN_FEATURES.vip,
-      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
-    ],
+    features: [...PLAN_FEATURES.vip],
   },
 ];
 
@@ -71,6 +65,10 @@ function isActive(profile: StudentProfile) {
   if (profile.app_sub_tier === "none") return false;
   if (!profile.app_sub_expires_at) return true;
   return new Date(profile.app_sub_expires_at).getTime() > Date.now();
+}
+
+function rub(value: number) {
+  return `${value.toLocaleString("ru-RU")}\u00a0₽`;
 }
 
 export default function DuoSubscriptionCard({
@@ -131,14 +129,11 @@ export default function DuoSubscriptionCard({
   const isOwner = profile.app_sub_variant === "duo_owner";
   const isMember = profile.app_sub_variant === "duo_member";
   const active = isActive(profile);
-
-  const visibleDuoPlans = useMemo(() => {
-    if (!active || !isOwner) return duoPlans;
-    const current = duo?.tier ?? profile.app_sub_tier;
-    return duoPlans.filter(
-      (plan) => TIER_RANK[plan.tier] >= TIER_RANK[current]
-    );
-  }, [active, duo?.tier, isOwner, profile.app_sub_tier]);
+  const currentDuoTier = isOwner
+    ? (duo?.tier ?? profile.app_sub_tier)
+    : "none";
+  const currentRank =
+    isOwner && active ? TIER_RANK[currentDuoTier] : TIER_RANK.none;
 
   return (
     <>
@@ -150,19 +145,19 @@ export default function DuoSubscriptionCard({
           <div className="min-w-0 flex-1">
             <p className="font-medium">
               {isOwner
-                ? `${formatAppTier(duo?.tier ?? profile.app_sub_tier)} Duo`
+                ? `${formatAppTier(currentDuoTier)} Duo`
                 : isMember
                   ? "Вы подключены к Duo"
-                  : "Подписка Duo"}
+                  : "Duo на Standart, Premium и VIP"}
             </p>
-            <p className="mt-1 text-xs text-studio-muted">
-              {isOwner && duo?.status === "active"
-                ? "Друг подключён. Сменить его может только администратор."
-                : isOwner
-                  ? "Подключите один аккаунт друга по email."
-                  : isMember
-                    ? "У вас общий доступ к платформе, но личные уроки, Котик и баланс."
-                    : "Одна оплата — два аккаунта. Уроки и прогресс остаются личными."}
+            <p className="mt-1 text-xs leading-relaxed text-studio-muted">
+              {isMember
+                ? "У вас общий доступ к платформе, но личные уроки, Котик и баланс."
+                : isOwner && duo?.status === "active"
+                  ? "Друг подключён. Сменить его может только администратор."
+                  : isOwner
+                    ? "Подключите один аккаунт друга по email."
+                    : "Один человек платит — два кабинета. Для семьи, пары или друга: у каждого свои уроки, Котик и прогресс. Дешевле двух отдельных подписок примерно на четверть."}
             </p>
             {isOwner && profile.app_sub_expires_at && (
               <p className="mt-1 text-xs text-studio-gold">
@@ -174,6 +169,27 @@ export default function DuoSubscriptionCard({
             )}
           </div>
         </div>
+
+        {!isMember && (
+          <ul className="mt-4 space-y-2">
+            {duoPlans.map((plan) => {
+              const save = duoMonthlySaving(plan.tier);
+              const twoSolo = APP_TIER_PRICES[plan.tier] * 2;
+              return (
+                <li
+                  key={plan.tier}
+                  className="rounded-xl bg-studio-bg/40 px-3 py-2.5 ring-1 ring-studio-border"
+                >
+                  <p className="text-sm font-medium">{plan.title}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-studio-muted">
+                    {rub(plan.price)}/мес за двоих вместо {rub(twoSolo)} ·
+                    экономия {rub(save)}/мес
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         {!isMember && (
           <Button
@@ -197,15 +213,20 @@ export default function DuoSubscriptionCard({
         open={plansOpen}
         onClose={() => setPlansOpen(false)}
         title="Тарифы Duo"
-        size="sm"
+        size="lg"
       >
+        <p className="mb-4 text-xs leading-relaxed text-studio-muted">
+          Duo есть на каждом уровне. Один платит, второго подключает по email.
+          Уроки, Котик и прогресс у каждого свои — это не общий аккаунт, а два
+          полноценных кабинета дешевле двух отдельных подписок.
+        </p>
         <div className="mb-4 flex flex-wrap gap-2">
           {SUBSCRIPTION_MONTH_OPTIONS.map((option) => (
             <button
               key={option}
               type="button"
               onClick={() => setMonths(option)}
-              className={`rounded-xl px-3 py-2 text-xs ring-1 transition ${
+              className={`min-h-10 rounded-xl px-3 py-2 text-xs ring-1 transition ${
                 months === option
                   ? "bg-studio-accent/15 text-studio-accent-light ring-studio-accent"
                   : "bg-studio-surface text-studio-muted ring-studio-border"
@@ -219,15 +240,23 @@ export default function DuoSubscriptionCard({
           ))}
         </div>
         <div className="space-y-2">
-          {visibleDuoPlans.map((plan) => {
+          {duoPlans.map((plan) => {
             const amount = subscriptionTotal(plan.price, months);
             const list = subscriptionListTotal(plan.price, months);
             const pct = subscriptionDiscountPercent(months);
+            const save = duoPeriodSaving(plan.tier, months);
+            const twoSolo =
+              subscriptionTotal(APP_TIER_PRICES[plan.tier], months) * 2;
+            const blocked = TIER_RANK[plan.tier] < currentRank;
+            const isCurrent =
+              isOwner && active && plan.tier === currentDuoTier;
             return (
               <button
                 key={plan.tier}
                 type="button"
+                disabled={blocked}
                 onClick={() => {
+                  if (blocked) return;
                   setPlansOpen(false);
                   setPayment({
                     type: "duo_subscription",
@@ -236,30 +265,44 @@ export default function DuoSubscriptionCard({
                     amount,
                   });
                 }}
-                className="flex w-full items-center justify-between rounded-xl bg-studio-surface p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent"
+                className={`flex w-full items-start justify-between rounded-xl bg-studio-surface p-4 text-left ring-1 transition ${
+                  blocked
+                    ? "cursor-not-allowed opacity-50 ring-studio-border"
+                    : "ring-studio-border hover:ring-studio-accent"
+                }`}
               >
                 <span className="min-w-0 pr-3">
-                  <span className="block font-medium">{plan.title}</span>
+                  <span className="block font-medium">
+                    {plan.title}
+                    {isCurrent ? " · ваш тариф" : ""}
+                  </span>
                   <span className="mt-0.5 block text-xs text-studio-muted">
                     {plan.summary}
                   </span>
+                  <span className="mt-1 block text-xs text-studio-gold">
+                    {blocked
+                      ? "Понижение недоступно"
+                      : `Экономия ${rub(save)} против двух ${formatAppTier(plan.tier)} (${rub(twoSolo)})`}
+                  </span>
                   <span className="mt-1 block text-xs text-studio-muted">
-                    {plan.price.toLocaleString("ru-RU")} ₽/мес · {months} мес.
+                    {rub(plan.price)}/мес · {months} мес.
                     {pct > 0 ? ` −${pct}%` : ""}
                   </span>
                   <ul className="mt-2 space-y-1 text-xs text-studio-muted">
                     {plan.features.map((item) => (
                       <li key={item}>{item}</li>
                     ))}
+                    <li>
+                      Один платёж — два кабинета {formatAppTier(plan.tier)}.
+                      Уроки и прогресс личные
+                    </li>
                   </ul>
                 </span>
-                <span className="text-right">
-                  <span className="block font-semibold">
-                    {amount.toLocaleString("ru-RU")} ₽
-                  </span>
+                <span className="shrink-0 text-right">
+                  <span className="block font-semibold">{rub(amount)}</span>
                   {pct > 0 ? (
                     <span className="text-xs text-studio-muted line-through">
-                      {list.toLocaleString("ru-RU")} ₽
+                      {rub(list)}
                     </span>
                   ) : null}
                 </span>
