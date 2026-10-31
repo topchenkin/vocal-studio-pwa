@@ -83,7 +83,7 @@ export default function VocalReportCard({
         </p>
         <p className="mt-1 text-xs text-studio-muted">
           {payload.mode === "scale"
-            ? straightDashNodes("Гамма C4-E4-G4")
+            ? straightDashNodes("Арпеджио C4-E4-G4")
             : `Нота ${payload.targetLabel}`}{" "}
           · {payload.durationSec}с
         </p>

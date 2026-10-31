@@ -73,7 +73,7 @@ export function stringifyVocalReportPayload(payload: VocalReportPayload): string
 /** Human line for notifications + JSON the chat UI renders as a card. */
 export function vocalReportChatText(payload: VocalReportPayload): string {
   const modeLabel =
-    payload.mode === "scale" ? "гамма C4–E4–G4" : `нота ${payload.targetLabel}`;
+    payload.mode === "scale" ? "арпеджио C4–E4–G4" : `нота ${payload.targetLabel}`;
   return `📊 Отчёт вокалиста · ${payload.overallScore}/100 · ${modeLabel}\n${stringifyVocalReportPayload(payload)}`.slice(
     0,
     2000

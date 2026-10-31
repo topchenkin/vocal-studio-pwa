@@ -386,7 +386,7 @@ export default function PitchAnalyzer({
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              Сначала прослушайте ноту или гамму — так слышно тональность.
+              Сначала прослушайте ноту или арпеджио — так слышно тональность.
               Потом 10 секунд поёте в микрофон: тест покажет, насколько чисто
               держите звук.
             </p>
@@ -422,7 +422,7 @@ export default function PitchAnalyzer({
                 : "bg-studio-card text-studio-muted ring-studio-border"
             }`}
           >
-            Гамма
+            Арпеджио
           </button>
         </div>
 
@@ -508,7 +508,7 @@ export default function PitchAnalyzer({
         ) : (
           <div className="mt-4 rounded-xl bg-studio-card p-4 ring-1 ring-studio-border">
             <p className="text-center text-xs uppercase tracking-wide text-studio-muted">
-              Гамма · по ~3 секунды на ступень
+              Арпеджио · по ~3 секунды на ступень
             </p>
             <div className="mt-3 flex items-center justify-center gap-2 sm:gap-3">
               {SCALE_STEPS.map((step, index) => {
@@ -557,7 +557,7 @@ export default function PitchAnalyzer({
               ) : (
                 <>
                   <Volume2 className="h-4 w-4" />
-                  Прослушать гамму до — ми — соль
+                  Прослушать арпеджио до — ми — соль
                 </>
               )}
             </Button>
@@ -611,7 +611,7 @@ export default function PitchAnalyzer({
             ? "Запись 10 секунд…"
             : testMode === "note"
               ? `Начать тест · ${describeNote(targetNote)}`
-              : straightDashNodes("Начать тест · гамма C-E-G")}
+              : straightDashNodes("Начать тест · арпеджио C-E-G")}
         </Button>
       </div>
       )}

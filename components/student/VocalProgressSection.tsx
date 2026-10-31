@@ -18,7 +18,7 @@ function groupKey(item: VocalTestResultRow): string {
 }
 
 function groupTitle(item: VocalTestResultRow): string {
-  return item.mode === "scale" ? "Гамма C-E-G" : `Нота ${item.target_label}`;
+  return item.mode === "scale" ? "Арпеджио C-E-G" : `Нота ${item.target_label}`;
 }
 
 function attemptsWord(count: number): string {
@@ -88,7 +88,7 @@ export default function VocalProgressSection() {
     <section>
       <h3 className="font-display text-lg font-semibold">История тестов</h3>
       <p className="mb-3 text-xs text-studio-muted">
-        Сгруппировано по нотам и гамме — так видно, как растёт каждая.
+        Сгруппировано по нотам и арпеджио — так видно, как растёт каждая.
       </p>
       {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
       {items.length === 0 ? (

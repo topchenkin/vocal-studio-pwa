@@ -304,7 +304,7 @@ export function mentorFeedback(
 
 export function formatReportChatMessage(report: VocalReport): string {
   const modeLabel =
-    report.mode === "scale" ? "гамма C4–E4–G4" : `нота ${report.targetLabel}`;
+    report.mode === "scale" ? "арпеджио C4–E4–G4" : `нота ${report.targetLabel}`;
   return [
     "📊 Отчёт вокалиста (AI-тест)",
     `Режим: ${modeLabel} · ${report.durationSec}с`,
