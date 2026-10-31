@@ -340,6 +340,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (error) return { error: mapBackendError(error) };
 
+        // GoTrue hides existing confirmed accounts: 200, no session, empty identities,
+        // and no confirmation email. Treat that as "already registered".
+        const identities = data.user?.identities ?? [];
+        if (data.user && !data.session && identities.length === 0) {
+          return {
+            error:
+              "Эта почта уже зарегистрирована. Войдите или восстановите пароль.",
+          };
+        }
+
         if (data.session && data.user) {
           // Ensure name is on the profile before client-side redeem fallback.
           await supabase.rpc("update_own_profile", {

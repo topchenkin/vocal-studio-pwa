@@ -104,7 +104,7 @@ export default function AuthModal({
       return;
     }
     if (mode === "register" && !fullName.trim()) {
-      setError("Укажите имя — как на подарочном сертификате");
+      setError("Укажите имя");
       return;
     }
     if (mode === "register" && !phone.trim()) {
@@ -136,10 +136,13 @@ export default function AuthModal({
     }
 
     if (result.needsEmailConfirmation) {
-      if (code.length === 12) storePendingGift(code);
+      const hasGift = code.length === 12;
+      if (hasGift) storePendingGift(code);
       setAwaitingConfirm(true);
       setMessage(
-        "Проверьте почту и подтвердите регистрацию. После входа сертификат активируется сам, если имя совпадает."
+        hasGift
+          ? "Проверьте почту и подтвердите регистрацию. После входа сертификат активируется сам, если имя совпадает."
+          : "Проверьте почту и подтвердите регистрацию."
       );
       return;
     }
@@ -233,7 +236,7 @@ export default function AuthModal({
         <p className="text-sm leading-relaxed text-studio-muted">
           {mode === "login"
             ? "Войдите в личный кабинет Unique Vocal Studio."
-            : "Создайте аккаунт. Если есть подарок — введите код. Имя должно совпасть с сертификатом."}
+            : "Создайте аккаунт. Если есть подарок — введите код, имя должно совпасть с сертификатом."}
         </p>
 
         {mode === "register" && (
