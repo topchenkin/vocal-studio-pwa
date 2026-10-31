@@ -23,18 +23,6 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
 
-/**
- * Methods offered for the "international card" button. Prodamus ignores the
- * filter if none of these is enabled on the page, so the list is safe.
- */
-const INTERNATIONAL_METHODS = [
-  "ACUSDKB",
-  "ACEURKB",
-  "ACUSDGTL",
-  "ACEURGTL",
-  "monetaworld",
-].join("|");
-
 function stringifyDeep(value) {
   if (Array.isArray(value)) return value.map(stringifyDeep);
   if (value && typeof value === "object") {
@@ -156,7 +144,7 @@ export const prodamus = {
    * Build a signed link and ask Prodamus for its short form (do=link).
    * `invId` is our payment_transactions.invoice_no.
    */
-  async createPayment({ outSum, invId, description, email, international }) {
+  async createPayment({ outSum, invId, description, email }) {
     const successUrl = `${APP_ORIGIN}/pay/success?invoice=${encodeURIComponent(String(invId))}`;
     const data = {
       do: "link",
@@ -173,8 +161,8 @@ export const prodamus = {
       callbackType: "json",
       _param_invoice_no: String(invId),
     };
+    // The payform has one card field; foreign cards are recognised by BIN.
     if (email) data.customer_email = email;
-    if (international) data.available_payment_methods = INTERNATIONAL_METHODS;
 
     // Raw unicode first; Prodamus verifies like PHP, so retry escaped on reject.
     let lastError;

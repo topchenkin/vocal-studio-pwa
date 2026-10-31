@@ -595,7 +595,6 @@ async function handleInit(req, res) {
           invId,
           description,
           email: email || null,
-          international: true,
         })
       : await yookassa.createPayment({
           outSum,
