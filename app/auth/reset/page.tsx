@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
+import { mapBackendError } from "@/lib/supabase-errors";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -18,8 +19,8 @@ export default function ResetPasswordPage() {
     event.preventDefault();
     setError("");
     setMessage("");
-    if (password.length < 6) {
-      setError("Пароль не короче 6 символов");
+    if (password.length < 8) {
+      setError("Пароль не короче 8 символов");
       return;
     }
     if (password !== confirm) {
@@ -27,18 +28,25 @@ export default function ResetPasswordPage() {
       return;
     }
     setSubmitting(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setSubmitting(false);
-    if (updateError) {
-      setError(
-        updateError.message.includes("session")
-          ? "Ссылка устарела. Запросите новую из окна входа."
-          : updateError.message
-      );
-      return;
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) {
+        console.error("[uvs:auth] update password", updateError.message);
+        setError(
+          /session/i.test(updateError.message)
+            ? "Ссылка устарела. Запросите новую из окна входа."
+            : mapBackendError(updateError)
+        );
+        return;
+      }
+      setMessage("Пароль обновлён. Можно входить в кабинет.");
+      window.setTimeout(() => router.replace("/"), 1200);
+    } catch (err) {
+      console.error("[uvs:auth] update password", err);
+      setError(mapBackendError(err));
+    } finally {
+      setSubmitting(false);
     }
-    setMessage("Пароль обновлён. Можно входить в кабинет.");
-    window.setTimeout(() => router.replace("/"), 1200);
   };
 
   return (

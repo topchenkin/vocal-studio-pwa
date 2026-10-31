@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { formatGiftCode, normalizeGiftCode } from "@/lib/gift-certificates";
 import { supabase } from "@/lib/supabase";
+import { mapBackendError } from "@/lib/supabase-errors";
 
 type AuthMode = "login" | "register";
 
@@ -90,8 +91,13 @@ export default function AuthModal({
     setError("");
     setMessage("");
 
-    if (!email.trim() || password.length < 6) {
-      setError("Введите email и пароль не короче 6 символов");
+    if (!email.trim() || !password) {
+      setError("Введите email и пароль");
+      return;
+    }
+    // Existing students may still have 6-7 char passwords: strict length only for new accounts.
+    if (mode === "register" && password.length < 8) {
+      setError("Пароль не короче 8 символов");
       return;
     }
     if (mode === "register" && !fullName.trim()) {
@@ -160,16 +166,23 @@ export default function AuthModal({
       return;
     }
     setSubmitting(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
-      email.trim(),
-      { redirectTo: `${window.location.origin}/auth/reset` }
-    );
-    setSubmitting(false);
-    if (resetError) {
-      setError(resetError.message);
-      return;
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo: `${window.location.origin}/auth/reset` }
+      );
+      if (resetError) {
+        console.error("[uvs:auth] reset password", resetError.message);
+        setError(mapBackendError(resetError));
+        return;
+      }
+      setMessage("Если аккаунт есть, отправили ссылку на почту. Откройте её с этого телефона.");
+    } catch (err) {
+      console.error("[uvs:auth] reset password", err);
+      setError(mapBackendError(err));
+    } finally {
+      setSubmitting(false);
     }
-    setMessage("Если аккаунт есть, отправили ссылку на почту. Откройте её с этого телефона.");
   };
 
   const switchMode = () => {
@@ -264,7 +277,7 @@ export default function AuthModal({
                 mode === "login" ? "current-password" : "new-password"
               }
               className="w-full rounded-xl bg-studio-surface px-4 py-3 pr-11 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
-              placeholder="Минимум 6 символов"
+              placeholder={mode === "register" ? "Минимум 8 символов" : "Пароль"}
             />
             <button
               type="button"

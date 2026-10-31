@@ -26,20 +26,43 @@ function pickErrorText(value: unknown): string | null {
   return null;
 }
 
+/** Known GoTrue (Supabase Auth) English messages → Russian student copy. */
+function translateAuthMessage(text: string): string {
+  if (/invalid login credentials/i.test(text)) return "Неверная почта или пароль.";
+  if (/already (been )?registered|already exists/i.test(text))
+    return "Эта почта уже зарегистрирована. Войдите или восстановите пароль.";
+  if (/email not confirmed/i.test(text))
+    return "Почта ещё не подтверждена. Откройте письмо со ссылкой подтверждения.";
+  if (/error sending .*email|sending .*email/i.test(text))
+    return "Не удалось отправить письмо. Попробуйте позже или напишите преподавателю.";
+  if (/rate limit|too many requests|for security purposes/i.test(text))
+    return "Слишком много попыток. Подождите минуту и повторите.";
+  if (/new password should be different|same password/i.test(text))
+    return "Новый пароль должен отличаться от старого.";
+  if (/password should be|weak password|at least \d+ char/i.test(text))
+    return "Пароль слишком короткий или простой. Используйте не менее 8 символов.";
+  if (/unable to validate email|invalid format|invalid email/i.test(text))
+    return "Проверьте адрес почты.";
+  if (/otp.*expired|token.*(expired|invalid)|link.*expired/i.test(text))
+    return "Ссылка устарела. Запросите новую на экране входа.";
+  return text;
+}
+
 /** Human-readable auth/backend error; never returns `{}` / empty object stringification. */
 export function mapBackendError(error: unknown, fallback?: string): string {
   const fb = fallback ?? SUPABASE_UNREACHABLE_RU;
   if (isLikelyUnreachableBackend(error)) return SUPABASE_UNREACHABLE_RU;
 
   if (typeof error === "string") {
-    return pickErrorText(error) ?? fb;
+    const text = pickErrorText(error);
+    return text ? translateAuthMessage(text) : fb;
   }
 
   if (error && typeof error === "object") {
     const obj = error as Record<string, unknown>;
     for (const key of ["message", "error_description", "msg", "error", "code"] as const) {
       const text = pickErrorText(obj[key]);
-      if (text) return text;
+      if (text) return translateAuthMessage(text);
     }
   }
 
