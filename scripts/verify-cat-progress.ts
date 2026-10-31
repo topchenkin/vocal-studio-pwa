@@ -112,5 +112,7 @@ const analyzer = readFileSync(
 assert.ok(analyzer.includes('variant === "exam"'));
 assert.ok(analyzer.includes('awardCatXp("analyzer")'));
 assert.ok(analyzer.includes("usePracticeHeartbeat"));
+assert.ok(analyzer.includes("playReferenceNotes"));
+assert.ok(analyzer.includes("Прослушать"));
 
 console.log("cat progress: ok");

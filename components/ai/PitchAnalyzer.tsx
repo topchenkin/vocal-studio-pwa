@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +11,7 @@ import {
   Shuffle,
   Square,
   Target,
+  Volume2,
   Waves,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -41,6 +42,7 @@ import {
 import { awardCatXp, submitVocalTestForReview } from "@/lib/cat-xp";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
+import { playReferenceNotes, stopReferenceTone } from "@/lib/reference-tone";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
@@ -68,8 +70,14 @@ export default function PitchAnalyzer({
   const [sendNote, setSendNote] = useState("");
   const [savedResultId, setSavedResultId] = useState<string | null>(null);
   const [micSilent, setMicSilent] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const previewGen = useRef(0);
+  const previewingRef = useRef(false);
 
   const { listening, testing, testProgress, error, live } = analyzer;
+
+  useEffect(() => () => stopReferenceTone(), []);
 
   const zone: TuneZone = !live.voiced
     ? "silent"
@@ -90,7 +98,43 @@ export default function PitchAnalyzer({
     return targetNoteAtTime(testMode, tMs, TEST_MS, targetNote);
   }, [testing, testProgress, testMode, targetNote]);
 
+  const haltPreview = () => {
+    previewGen.current += 1;
+    previewingRef.current = false;
+    stopReferenceTone();
+    setPreviewing(false);
+  };
+
+  const playPreview = async () => {
+    if (testing) return;
+    if (previewingRef.current) {
+      haltPreview();
+      return;
+    }
+    setPreviewError("");
+    const gen = previewGen.current + 1;
+    previewGen.current = gen;
+    previewingRef.current = true;
+    setPreviewing(true);
+    try {
+      const notes = testMode === "scale" ? [...SCALE_STEPS] : [targetNote];
+      await playReferenceNotes(notes);
+    } catch (err) {
+      if (previewGen.current === gen) {
+        setPreviewError(
+          err instanceof Error ? err.message : "Не удалось проиграть ноту"
+        );
+      }
+    } finally {
+      if (previewGen.current === gen) {
+        previewingRef.current = false;
+        setPreviewing(false);
+      }
+    }
+  };
+
   const startProfessionalTest = async () => {
+    haltPreview();
     setSendNote("");
     setSentOk(false);
     setSavedResultId(null);
@@ -170,12 +214,17 @@ export default function PitchAnalyzer({
 
   const liveTargetHz = frequencyFromMidi(midiFromNoteLabel(targetNote));
 
+  const chooseTargetNote = (note: string) => {
+    if (note !== targetNote) haltPreview();
+    setTargetNote(note);
+  };
+
   const cycleTargetNote = (dir: -1 | 1) => {
     const list = PRACTICE_NOTES as readonly string[];
     const idx = list.indexOf(targetNote);
     const base = idx >= 0 ? idx : 0;
     const next = list[(base + dir + list.length) % list.length] ?? "G4";
-    setTargetNote(next);
+    chooseTargetNote(next);
   };
 
   if (locked) {
@@ -337,10 +386,9 @@ export default function PitchAnalyzer({
           <div className="min-w-0 flex-1">
             <h3 className="font-medium">Профессиональный вокальный тест</h3>
             <p className="mt-1 text-sm text-studio-muted">
-              10 секунд — и вы увидите, насколько чисто держите ноту или гамму.
-              Это не «просто попеть»: тест ставит оценку как на прослушивании
-              и показывает, где голос уходит. Хотите удивить себя — нажмите
-              старт.
+              Сначала прослушайте ноту или гамму — так слышно тональность.
+              Потом 10 секунд поёте в микрофон: тест покажет, насколько чисто
+              держите звук.
             </p>
           </div>
         </div>
@@ -349,7 +397,10 @@ export default function PitchAnalyzer({
           <button
             type="button"
             disabled={testing}
-            onClick={() => setTestMode("note")}
+            onClick={() => {
+              haltPreview();
+              setTestMode("note");
+            }}
             className={`rounded-xl px-3 py-3 text-sm font-medium ring-1 transition ${
               testMode === "note"
                 ? "bg-studio-accent/15 text-studio-text ring-studio-accent/40"
@@ -361,7 +412,10 @@ export default function PitchAnalyzer({
           <button
             type="button"
             disabled={testing}
-            onClick={() => setTestMode("scale")}
+            onClick={() => {
+              haltPreview();
+              setTestMode("scale");
+            }}
             className={`rounded-xl px-3 py-3 text-sm font-medium ring-1 transition ${
               testMode === "scale"
                 ? "bg-studio-accent/15 text-studio-text ring-studio-accent/40"
@@ -388,9 +442,11 @@ export default function PitchAnalyzer({
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <div className="min-w-[7rem] text-center">
-                <p className="font-display text-4xl font-semibold">{targetNote}</p>
+                <p className="font-display text-4xl font-semibold">
+                  {describeNote(targetNote)}
+                </p>
                 <p className="mt-1 text-xs text-studio-muted">
-                  {describeNote(targetNote)} · ~{Math.round(liveTargetHz)} Hz
+                  {targetNote} · ~{Math.round(liveTargetHz)} Hz
                 </p>
               </div>
               <button
@@ -409,7 +465,7 @@ export default function PitchAnalyzer({
                   key={n}
                   type="button"
                   disabled={testing}
-                  onClick={() => setTargetNote(n)}
+                  onClick={() => chooseTargetNote(n)}
                   className={`rounded-lg px-2.5 py-1 text-xs font-medium ring-1 transition disabled:opacity-40 ${
                     targetNote === n
                       ? "bg-studio-accent/20 text-studio-accent-light ring-studio-accent/40"
@@ -420,11 +476,30 @@ export default function PitchAnalyzer({
                 </button>
               ))}
             </div>
+            <Button
+              className="mt-3"
+              fullWidth
+              variant="secondary"
+              disabled={testing}
+              onClick={() => void playPreview()}
+            >
+              {previewing ? (
+                <>
+                  <Square className="h-4 w-4 fill-current" />
+                  Стоп
+                </>
+              ) : (
+                <>
+                  <Volume2 className="h-4 w-4" />
+                  Прослушать {describeNote(targetNote)}
+                </>
+              )}
+            </Button>
             <button
               type="button"
               disabled={testing}
-              onClick={() => setTargetNote(pickPracticeNote(targetNote))}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text disabled:opacity-40"
+              onClick={() => chooseTargetNote(pickPracticeNote(targetNote))}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl py-2 text-sm text-studio-muted ring-1 ring-studio-border transition hover:text-studio-text disabled:opacity-40"
             >
               <Shuffle className="h-4 w-4" />
               Случайная нота
@@ -455,10 +530,10 @@ export default function PitchAnalyzer({
                           : "bg-studio-bg ring-studio-border"
                       }`}
                     >
-                      <p className="font-display text-2xl font-semibold">{step}</p>
-                      <p className="text-[10px] text-studio-muted">
+                      <p className="font-display text-2xl font-semibold">
                         {describeNote(step)}
                       </p>
+                      <p className="text-[10px] text-studio-muted">{step}</p>
                     </div>
                   </div>
                 );
@@ -467,7 +542,35 @@ export default function PitchAnalyzer({
             <p className="mt-3 text-center text-xs text-studio-muted">
               Спойте по очереди: до → ми → соль
             </p>
+            <Button
+              className="mt-3"
+              fullWidth
+              variant="secondary"
+              disabled={testing}
+              onClick={() => void playPreview()}
+            >
+              {previewing ? (
+                <>
+                  <Square className="h-4 w-4 fill-current" />
+                  Стоп
+                </>
+              ) : (
+                <>
+                  <Volume2 className="h-4 w-4" />
+                  Прослушать гамму до — ми — соль
+                </>
+              )}
+            </Button>
           </div>
+        )}
+
+        {listening && !testing && (
+          <p className="mt-3 text-center text-xs text-studio-muted">
+            Слушайте эталон в наушниках — иначе микрофон услышит колонку.
+          </p>
+        )}
+        {previewError && (
+          <p className="mt-3 text-center text-sm text-red-400">{previewError}</p>
         )}
 
         {testing && (
@@ -477,11 +580,9 @@ export default function PitchAnalyzer({
                 Сейчас спойте
               </p>
               <p className="mt-1 font-display text-3xl font-semibold text-amber-100">
-                {liveTargetNote}
-              </p>
-              <p className="mt-0.5 text-xs text-studio-muted">
                 {describeNote(liveTargetNote)}
               </p>
+              <p className="mt-0.5 text-xs text-studio-muted">{liveTargetNote}</p>
             </div>
             <div>
               <div className="mb-1 flex justify-between text-xs text-studio-muted">
@@ -509,7 +610,7 @@ export default function PitchAnalyzer({
           {testing
             ? "Запись 10 секунд…"
             : testMode === "note"
-              ? `Начать тест · нота ${targetNote}`
+              ? `Начать тест · ${describeNote(targetNote)}`
               : straightDashNodes("Начать тест · гамма C-E-G")}
         </Button>
       </div>
