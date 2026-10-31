@@ -1,8 +1,10 @@
 /**
- * YooKassa-only pay-api for the static PWA.
+ * pay-api for the static PWA: YooKassa (SBP / RU cards) + Prodamus
+ * (international cards only, selected by the client with provider=prodamus).
  */
 import { createServer } from "node:http";
 import { yookassa } from "./providers.mjs";
+import { parseFormBody, prodamus, verifySignature } from "./prodamus.mjs";
 
 const PORT = Number(process.env.PORT) || 8791;
 const BIND = process.env.BIND || "127.0.0.1";
@@ -82,14 +84,14 @@ function parseMonths(raw) {
   return months;
 }
 
-async function confirmPayment(invoiceNo, outSum, externalId) {
+async function confirmPayment(invoiceNo, outSum, externalId, provider = "yookassa") {
   return sb("/rest/v1/rpc/confirm_payment", {
     method: "POST",
     body: JSON.stringify({
       p_invoice_no: Number(invoiceNo),
       p_out_sum: Number(outSum),
       p_external_id: externalId || null,
-      p_provider: "yookassa",
+      p_provider: provider,
     }),
   });
 }
@@ -195,7 +197,7 @@ async function handleStatus(req, res) {
   if (!invoiceNo) return json(res, 400, { error: "Нет номера счёта" });
 
   const txRes = await sb(
-    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&student_id=eq.${encodeURIComponent(user.id)}&select=id,invoice_no,amount_rub,external_id,status,student_id,purpose&limit=1`
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&student_id=eq.${encodeURIComponent(user.id)}&select=id,invoice_no,amount_rub,external_id,status,student_id,purpose,provider&limit=1`
   );
   if (!txRes.ok) {
     return json(res, 500, { error: "Не удалось прочитать счёт" });
@@ -212,6 +214,11 @@ async function handleStatus(req, res) {
   }
   if (tx.status === "failed" || tx.status === "cancelled") {
     return json(res, 200, { status: "failed", paid: false, invoiceNo });
+  }
+
+  // Prodamus has no status API: only its signed webhook confirms the invoice.
+  if (tx.provider === "prodamus") {
+    return json(res, 200, { status: "pending", paid: false, invoiceNo });
   }
 
   try {
@@ -376,7 +383,7 @@ function samePaymentIntent(tx, purpose, metadata) {
 async function findReusableInvoice(studentId, purpose, metadata, amount) {
   const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   const res = await sb(
-    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(studentId)}&purpose=eq.${encodeURIComponent(purpose)}&status=eq.pending&amount_rub=eq.${encodeURIComponent(String(amount))}&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,metadata&order=created_at.desc&limit=20`
+    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(studentId)}&purpose=eq.${encodeURIComponent(purpose)}&provider=eq.yookassa&status=eq.pending&amount_rub=eq.${encodeURIComponent(String(amount))}&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,metadata&order=created_at.desc&limit=20`
   );
   if (!res.ok) return null;
   const rows = await res.json();
@@ -394,6 +401,24 @@ async function findReusableInvoice(studentId, purpose, metadata, amount) {
   } catch {
     return null;
   }
+}
+
+async function findReusableProdamus(studentId, purpose, metadata, amount) {
+  const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const res = await sb(
+    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(studentId)}&purpose=eq.${encodeURIComponent(purpose)}&provider=eq.prodamus&status=eq.pending&amount_rub=eq.${encodeURIComponent(String(amount))}&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,metadata&order=created_at.desc&limit=20`
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  const list = Array.isArray(rows) ? rows : [];
+  const tx = list.find(
+    (row) => row.metadata?.prodamus_url && samePaymentIntent(row, purpose, metadata)
+  );
+  if (!tx) return null;
+  return {
+    paymentUrl: String(tx.metadata.prodamus_url),
+    invoiceNo: Number(tx.invoice_no),
+  };
 }
 
 async function handleInit(req, res) {
@@ -419,6 +444,14 @@ async function handleInit(req, res) {
     return json(res, 403, { error: "Оплата доступна ученикам" });
   }
 
+  const useProdamus = body.provider === "prodamus";
+  const providerId = useProdamus ? "prodamus" : "yookassa";
+  if (useProdamus && !prodamus.isReady()) {
+    return json(res, 503, {
+      error: "Оплата международной картой временно недоступна",
+    });
+  }
+
   const kind = String(body.type || "");
   let purpose = "";
   let amount = 0;
@@ -429,7 +462,7 @@ async function handleInit(req, res) {
   let months = null;
   let lessonsCount = null;
   const metadata = {
-    is_test: yookassa.isTest,
+    is_test: useProdamus ? prodamus.isTest : yookassa.isTest,
   };
 
   if (kind === "debt") {
@@ -515,14 +548,16 @@ async function handleInit(req, res) {
   metadata.description = description;
 
   const outSum = money(amount);
-  const reusable = await findReusableInvoice(user.id, purpose, metadata, Number(outSum));
+  const reusable = useProdamus
+    ? await findReusableProdamus(user.id, purpose, metadata, Number(outSum))
+    : await findReusableInvoice(user.id, purpose, metadata, Number(outSum));
   if (reusable) {
     return json(res, 200, {
       paymentUrl: reusable.paymentUrl,
       invoiceNo: reusable.invoiceNo,
       amount: Number(outSum),
-      isTest: yookassa.isTest,
-      provider: "yookassa",
+      isTest: useProdamus ? prodamus.isTest : yookassa.isTest,
+      provider: providerId,
       months,
       reused: true,
     });
@@ -536,7 +571,7 @@ async function handleInit(req, res) {
       product_code: productCode,
       purpose,
       amount_rub: Number(outSum),
-      provider: "yookassa",
+      provider: providerId,
       status: "pending",
       metadata,
     }),
@@ -554,31 +589,115 @@ async function handleInit(req, res) {
   let paymentUrl;
   let externalId = null;
   try {
-    const payment = await yookassa.createPayment({
-      outSum,
-      invId,
-      description,
-      email: email || null,
-    });
+    const payment = useProdamus
+      ? await prodamus.createPayment({
+          outSum,
+          invId,
+          description,
+          email: email || null,
+          international: true,
+        })
+      : await yookassa.createPayment({
+          outSum,
+          invId,
+          description,
+          email: email || null,
+        });
     paymentUrl = payment.paymentUrl;
     externalId = payment.externalId;
   } catch (error) {
-    console.error("payment init failed", error);
+    console.error("[uvs:pay] payment init failed", providerId, error);
+    if (useProdamus) {
+      await markInvoiceFailed(tx.id);
+      return json(res, 502, {
+        error: "Не удалось открыть оплату международной картой. Попробуйте ещё раз.",
+      });
+    }
     return json(res, 502, {
       error:
         error instanceof Error ? error.message : "Не удалось создать платёж",
     });
   }
 
-  await patchExternalId(tx.id, externalId);
+  if (useProdamus) {
+    // Keep the link so a repeated tap reuses the same invoice.
+    await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        metadata: { ...metadata, prodamus_url: paymentUrl },
+      }),
+    });
+  } else {
+    await patchExternalId(tx.id, externalId);
+  }
   return json(res, 200, {
     paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: yookassa.isTest,
-    provider: "yookassa",
+    isTest: useProdamus ? prodamus.isTest : yookassa.isTest,
+    provider: providerId,
     months,
   });
+}
+
+async function handleProdamusWebhook(req, res) {
+  if (req.method !== "POST") return json(res, 405, { error: "method" });
+  const raw = await readBody(req);
+  const contentType = String(req.headers["content-type"] || "");
+  let data;
+  try {
+    data =
+      contentType.includes("json") || raw.trim().startsWith("{")
+        ? JSON.parse(raw || "{}")
+        : parseFormBody(raw);
+  } catch {
+    return json(res, 400, { error: "invalid body" });
+  }
+
+  if (!verifySignature(data, req.headers.sign)) {
+    console.error("[uvs:prodamus] webhook rejected: bad signature");
+    return json(res, 400, { error: "bad signature" });
+  }
+
+  const status = String(data.payment_status || "");
+  const invoiceNo = Number(data.order_num || data._param_invoice_no || 0);
+  console.log("[uvs:prodamus] webhook", status || "unknown", invoiceNo || "no-invoice");
+  if (status !== "success") {
+    return json(res, 200, { ok: true, ignored: status || "unknown" });
+  }
+  if (!invoiceNo) return json(res, 400, { error: "missing invoice" });
+
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider&limit=1`
+  );
+  const rows = txRes.ok ? await txRes.json() : [];
+  const tx = Array.isArray(rows) ? rows[0] : rows;
+  if (!tx) return json(res, 404, { error: "invoice not found" });
+  // A Prodamus webhook may only settle Prodamus invoices.
+  if (tx.provider !== "prodamus") {
+    console.error("[uvs:prodamus] invoice belongs to", tx.provider, invoiceNo);
+    return json(res, 400, { error: "wrong provider" });
+  }
+  if (tx.status === "confirmed") return json(res, 200, { ok: true, already: true });
+
+  // The price is fixed by our signed link; the webhook sum may be reported
+  // in the card currency, so only log a mismatch.
+  const paid = Number(data.sum);
+  if (Number.isFinite(paid) && Math.abs(paid - Number(tx.amount_rub)) > 0.009) {
+    console.warn("[uvs:prodamus] sum differs", invoiceNo, paid, tx.amount_rub);
+  }
+
+  const confirm = await confirmPayment(
+    invoiceNo,
+    tx.amount_rub,
+    String(data.order_id || data.payment_init || "") || null,
+    "prodamus"
+  );
+  if (!confirm.ok) {
+    console.error("[uvs:prodamus] confirm failed", confirm.status, await confirm.text());
+    return json(res, 500, { error: "confirm failed" });
+  }
+  return json(res, 200, { ok: true });
 }
 
 async function handleYookassaWebhook(req, res) {
@@ -663,6 +782,7 @@ const server = createServer(async (req, res) => {
         isTest: yookassa.isTest,
         yookassaReady: yookassa.isReady(),
         ...yookassa.healthExtra(),
+        ...prodamus.healthExtra(),
         auth,
         payouts,
         payoutsSbpOk: payouts.authOk === true && payouts.sbpAvailable === true,
@@ -680,6 +800,7 @@ const server = createServer(async (req, res) => {
     if (path === "/api/payments/status") return handleStatus(req, res);
     if (path === "/api/payments/init-gift") return handleInitGift(req, res);
     if (path === "/api/yookassa/webhook") return handleYookassaWebhook(req, res);
+    if (path === "/api/prodamus/webhook") return handleProdamusWebhook(req, res);
 
     return json(res, 404, { error: "not found" });
   } catch (error) {

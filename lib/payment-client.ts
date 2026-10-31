@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { PAYMENT_API_BASE } from "@/lib/payment-config";
+import { PAYMENT_API_BASE, type PaymentGateway } from "@/lib/payment-config";
 import type { PaymentPurpose } from "@/components/payment/SbpPaymentSheet";
 
 type InitResponse = {
@@ -126,8 +126,11 @@ export async function waitForPayment(
   return { status: "pending" as const, paid: false, invoiceNo };
 }
 
-export async function startPayment(purpose: PaymentPurpose) {
-  const body =
+export async function startPayment(
+  purpose: PaymentPurpose,
+  gateway: PaymentGateway = "yookassa"
+) {
+  const base =
     purpose.type === "debt"
       ? { type: "debt" }
       : purpose.type === "abonement"
@@ -141,6 +144,7 @@ export async function startPayment(purpose: PaymentPurpose) {
                 tier: purpose.tier,
                 months: purpose.months,
               };
+  const body = gateway === "prodamus" ? { ...base, provider: "prodamus" } : base;
 
   const payload = await postPayment("/init", body);
   rememberCheckout(payload.invoiceNo);

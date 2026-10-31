@@ -11,7 +11,7 @@ import {
 export default function PayReturnRedirect({ result }: { result: "ok" | "fail" }) {
   const [message, setMessage] = useState(
     result === "ok"
-      ? "Проверяем оплату в ЮKassa…"
+      ? "Проверяем оплату…"
       : "Оплата не завершена, проверяем статус…"
   );
   const back = typeof window === "undefined" ? "/dashboard/student?tab=lessons" : readPayReturnPath();

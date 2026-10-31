@@ -48,7 +48,7 @@ def local_env() -> dict[str, str]:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
     for key, value in os.environ.items():
-        if key.startswith("YOOKASSA_") or key in {
+        if key.startswith(("YOOKASSA_", "PRODAMUS_")) or key in {
             "PAYMENT_PROVIDER",
             "UVS_SSH_PASS",
             "SUPABASE_SERVICE_ROLE_KEY",
@@ -96,6 +96,10 @@ def env_file_bytes() -> bytes:
         f"YOOKASSA_IS_TEST={local.get('YOOKASSA_IS_TEST', '1')}",
         "NEXT_PUBLIC_APP_URL=https://www.uniquevocal.ru",
     ]
+    # Prodamus (international cards). Optional: without it provider=prodamus returns 503.
+    if local.get("PRODAMUS_URL") and local.get("PRODAMUS_SECRET_KEY"):
+        lines.append(f"PRODAMUS_URL={local['PRODAMUS_URL']}")
+        lines.append(f"PRODAMUS_SECRET_KEY={local['PRODAMUS_SECRET_KEY']}")
     if agent_id:
         lines.append(f"YOOKASSA_AGENT_ID={agent_id}")
     if payout_secret:
@@ -140,7 +144,7 @@ def main() -> None:
         run(client, "mkdir -p /opt/pay-api /etc/uniquevocal /opt/uvs-migrate")
         sftp = client.open_sftp()
         try:
-            for name in ("server.mjs", "providers.mjs", "package.json"):
+            for name in ("server.mjs", "providers.mjs", "prodamus.mjs", "package.json"):
                 src = PAY / name
                 if not src.is_file():
                     continue

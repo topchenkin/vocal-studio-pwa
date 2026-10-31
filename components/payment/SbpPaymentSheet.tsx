@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Smartphone } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  CheckCircle2,
+  CreditCard,
+  Globe2,
+  Loader2,
+  Smartphone,
+} from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
 import { formatAppTier } from "@/lib/constants";
 import { startPayment, waitForPayment } from "@/lib/payment-client";
-import { paymentProviderLabel } from "@/lib/payment-config";
+import { paymentProviderLabel, type PaymentGateway } from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
 export type SubscriptionMonths = 1 | 3 | 6 | 12;
@@ -36,6 +42,8 @@ type PaymentPurpose =
     }
   | { type: "test_payment"; amount: number };
 
+type Phase = "choose" | "init" | "waiting" | "paid" | "error";
+
 function SbpLogo() {
   return (
     <div className="flex items-center gap-2">
@@ -46,6 +54,17 @@ function SbpLogo() {
         <i className="rounded-sm bg-purple-500" />
       </span>
       <span className="text-lg font-bold">СБП</span>
+    </div>
+  );
+}
+
+function IntlLogo() {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="grid h-10 w-10 place-items-center rounded-xl bg-studio-accent/20 text-studio-accent-light">
+        <Globe2 className="h-6 w-6" />
+      </span>
+      <span className="text-lg font-bold">Visa · Mastercard</span>
     </div>
   );
 }
@@ -76,69 +95,74 @@ export default function SbpPaymentSheet({
   onCloseRef.current = onClose;
   onSuccessRef.current = onSuccess;
   const [error, setError] = useState("");
-  const [phase, setPhase] = useState<"init" | "waiting" | "paid" | "error">(
-    "init"
-  );
+  const [phase, setPhase] = useState<Phase>("choose");
+  const [gateway, setGateway] = useState<PaymentGateway>("yookassa");
   const pollRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!open) {
       pollRef.current?.abort();
       pollRef.current = null;
-      setPhase("init");
+      setPhase("choose");
+      setGateway("yookassa");
       setError("");
-      return;
     }
-
-    setError("");
-    setPhase("init");
-    const ac = new AbortController();
-    pollRef.current = ac;
-
-    void startPayment(purpose)
-      .then(async (payload) => {
-        if (ac.signal.aborted) return;
-        setPhase("waiting");
-        const invoiceNo = Number(payload.invoiceNo);
-        if (!invoiceNo) {
-          throw new Error("Счёт создан без номера");
-        }
-        const result = await waitForPayment(invoiceNo, { signal: ac.signal });
-        if (ac.signal.aborted) return;
-        if (result.status === "confirmed" || result.paid) {
-          setPhase("paid");
-          window.dispatchEvent(new Event("uvs-profile-updated"));
-          onSuccessRef.current?.();
-          window.setTimeout(() => onCloseRef.current(), 1200);
-          return;
-        }
-        if (result.status === "failed") {
-          setPhase("error");
-          setError("Оплата не прошла. Можно попробовать ещё раз.");
-          return;
-        }
-        setPhase("waiting");
-      })
-      .catch((caught: unknown) => {
-        if (ac.signal.aborted) return;
-        setPhase("error");
-        setError(
-          caught instanceof Error ? caught.message : "Не удалось открыть оплату"
-        );
-      });
-
     return () => {
-      ac.abort();
+      pollRef.current?.abort();
     };
-  }, [open, purpose]);
+  }, [open]);
+
+  const begin = useCallback(
+    (next: PaymentGateway) => {
+      pollRef.current?.abort();
+      const ac = new AbortController();
+      pollRef.current = ac;
+      setGateway(next);
+      setError("");
+      setPhase("init");
+
+      void startPayment(purpose, next)
+        .then(async (payload) => {
+          if (ac.signal.aborted) return;
+          setPhase("waiting");
+          const invoiceNo = Number(payload.invoiceNo);
+          if (!invoiceNo) throw new Error("Счёт создан без номера");
+          const result = await waitForPayment(invoiceNo, { signal: ac.signal });
+          if (ac.signal.aborted) return;
+          if (result.status === "confirmed" || result.paid) {
+            setPhase("paid");
+            window.dispatchEvent(new Event("uvs-profile-updated"));
+            onSuccessRef.current?.();
+            window.setTimeout(() => onCloseRef.current(), 1200);
+            return;
+          }
+          if (result.status === "failed") {
+            setPhase("error");
+            setError("Оплата не прошла. Можно попробовать ещё раз.");
+          }
+        })
+        .catch((caught: unknown) => {
+          if (ac.signal.aborted) return;
+          console.error("[uvs:pay] start failed", caught);
+          setPhase("error");
+          setError(
+            caught instanceof Error ? caught.message : "Не удалось открыть оплату"
+          );
+        });
+    },
+    [purpose]
+  );
+
+  const intl = gateway === "prodamus";
+  const label = paymentProviderLabel(gateway);
+  const title =
+    phase === "choose" ? "Способ оплаты" : intl ? "Международная карта" : "Оплата по СБП";
 
   return (
     <BottomSheet open={open} onClose={phase === "init" ? () => {} : onClose}>
       <div className="pr-10">
-        <SbpLogo />
-        <h2 className="mt-5 font-display text-3xl font-semibold">
-          Оплата по СБП
-        </h2>
+        {phase === "choose" || !intl ? <SbpLogo /> : <IntlLogo />}
+        <h2 className="mt-5 font-display text-3xl font-semibold">{title}</h2>
         <p className="mt-1 text-sm text-studio-muted">{purposeLabel(purpose)}</p>
       </div>
 
@@ -146,7 +170,44 @@ export default function SbpPaymentSheet({
         {purpose.amount.toLocaleString("ru-RU")} ₽
       </p>
 
-      {phase === "paid" ? (
+      {phase === "choose" ? (
+        <div className="mt-6 flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => begin("yookassa")}
+            className="flex min-h-[3.5rem] w-full items-center gap-3 rounded-xl bg-studio-accent px-5 py-3 text-left text-sm font-semibold text-white"
+          >
+            <Smartphone className="h-5 w-5 shrink-0" />
+            <span>
+              Оплатить по СБП или картой РФ
+              <span className="block text-xs font-normal text-white/70">
+                Быстро, через приложение банка
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => begin("prodamus")}
+            className="flex min-h-[3.5rem] w-full items-center gap-3 rounded-xl border border-studio-border bg-studio-bg/40 px-5 py-3 text-left text-sm font-semibold"
+          >
+            <CreditCard className="h-5 w-5 shrink-0 text-studio-accent-light" />
+            <span>
+              Оплатить международной картой
+              <span className="block text-xs font-normal text-studio-muted">
+                Visa и Mastercard банков других стран · сумма в ₽ пересчитается
+                в валюту карты
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl px-6 py-3 text-sm text-studio-muted"
+          >
+            Отмена
+          </button>
+        </div>
+      ) : phase === "paid" ? (
         <div className="flex flex-col items-center py-10 text-center">
           <CheckCircle2 className="h-10 w-10 text-emerald-400" />
           <p className="mt-4 text-sm text-studio-accent-light">
@@ -157,15 +218,15 @@ export default function SbpPaymentSheet({
         <div className="flex flex-col items-center py-10 text-center">
           <Loader2 className="h-10 w-10 animate-spin text-studio-accent" />
           <p className="mt-4 text-sm text-studio-muted">
-            Страница {paymentProviderLabel()} открыта. Как только оплата пройдёт,
-            статус обновится сам.
+            Страница {label} открыта. Как только оплата пройдёт, статус обновится
+            сам.
           </p>
         </div>
       ) : phase === "init" && !error ? (
         <div className="flex flex-col items-center py-10 text-center">
           <Loader2 className="h-10 w-10 animate-spin text-studio-accent" />
           <p className="mt-4 text-sm text-studio-muted">
-            Открываем страницу оплаты {paymentProviderLabel()}…
+            Открываем страницу оплаты {label}…
           </p>
         </div>
       ) : (
@@ -175,44 +236,7 @@ export default function SbpPaymentSheet({
           )}
           <button
             type="button"
-            onClick={() => {
-              setError("");
-              setPhase("init");
-              const ac = new AbortController();
-              pollRef.current?.abort();
-              pollRef.current = ac;
-              void startPayment(purpose)
-                .then(async (payload) => {
-                  if (ac.signal.aborted) return;
-                  setPhase("waiting");
-                  const invoiceNo = Number(payload.invoiceNo);
-                  if (!invoiceNo) throw new Error("Счёт создан без номера");
-                  const result = await waitForPayment(invoiceNo, {
-                    signal: ac.signal,
-                  });
-                  if (ac.signal.aborted) return;
-                  if (result.status === "confirmed" || result.paid) {
-                    setPhase("paid");
-                    window.dispatchEvent(new Event("uvs-profile-updated"));
-                    onSuccessRef.current?.();
-                    window.setTimeout(() => onCloseRef.current(), 1200);
-                    return;
-                  }
-                  if (result.status === "failed") {
-                    setPhase("error");
-                    setError("Оплата не прошла. Можно попробовать ещё раз.");
-                  }
-                })
-                .catch((caught: unknown) => {
-                  if (ac.signal.aborted) return;
-                  setPhase("error");
-                  setError(
-                    caught instanceof Error
-                      ? caught.message
-                      : "Не удалось открыть оплату"
-                  );
-                });
-            }}
+            onClick={() => begin(gateway)}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-studio-accent px-6 py-3 text-sm font-semibold text-white"
           >
             <Smartphone className="h-4 w-4" />
@@ -220,10 +244,13 @@ export default function SbpPaymentSheet({
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              setError("");
+              setPhase("choose");
+            }}
             className="mt-3 w-full rounded-xl px-6 py-3 text-sm text-studio-muted"
           >
-            Отмена
+            Выбрать другой способ
           </button>
         </>
       )}
