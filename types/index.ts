@@ -1021,6 +1021,10 @@ export interface Database {
         Args: Record<string, never>;
         Returns: undefined;
       };
+      expire_app_subscriptions: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
       upgrade_app_subscription: {
         Args: { new_tier: "standard" | "premium" | "vip" };
         Returns: undefined;

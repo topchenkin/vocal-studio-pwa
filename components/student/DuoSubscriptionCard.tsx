@@ -18,13 +18,16 @@ import {
   TIER_RANK,
   duoMonthlySaving,
   duoPeriodSaving,
+  effectiveAppTier,
   formatAppTier,
   subscriptionDiscountPercent,
   subscriptionListTotal,
+  subscriptionMonthlyRate,
   subscriptionTotal,
   type SubscriptionMonthOption,
 } from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
+import { formatStudioExpiry } from "@/lib/studio-tz";
 import type {
   AppSubscriptionTier,
   DuoSubscription,
@@ -62,9 +65,7 @@ const duoPlans: Array<{
 ];
 
 function isActive(profile: StudentProfile) {
-  if (profile.app_sub_tier === "none") return false;
-  if (!profile.app_sub_expires_at) return true;
-  return new Date(profile.app_sub_expires_at).getTime() > Date.now();
+  return effectiveAppTier(profile.app_sub_tier, profile.app_sub_expires_at) !== "none";
 }
 
 function rub(value: number) {
@@ -144,9 +145,9 @@ export default function DuoSubscriptionCard({
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-medium">
-              {isOwner
+              {isOwner && active
                 ? `${formatAppTier(currentDuoTier)} Duo`
-                : isMember
+                : isMember && active
                   ? "Вы подключены к Duo"
                   : "Duo на Standart, Premium и VIP"}
             </p>
@@ -161,10 +162,8 @@ export default function DuoSubscriptionCard({
             </p>
             {isOwner && profile.app_sub_expires_at && (
               <p className="mt-1 text-xs text-studio-gold">
-                До{" "}
-                {new Date(profile.app_sub_expires_at).toLocaleDateString(
-                  "ru-RU"
-                )}
+                {active ? "До" : "Истекла"}{" "}
+                {formatStudioExpiry(profile.app_sub_expires_at)}
               </p>
             )}
           </div>
@@ -244,6 +243,7 @@ export default function DuoSubscriptionCard({
             const amount = subscriptionTotal(plan.price, months);
             const list = subscriptionListTotal(plan.price, months);
             const pct = subscriptionDiscountPercent(months);
+            const monthlyRate = subscriptionMonthlyRate(plan.price, months);
             const save = duoPeriodSaving(plan.tier, months);
             const twoSolo =
               subscriptionTotal(APP_TIER_PRICES[plan.tier], months) * 2;
@@ -285,7 +285,17 @@ export default function DuoSubscriptionCard({
                       : `Экономия ${rub(save)} против двух ${formatAppTier(plan.tier)} (${rub(twoSolo)})`}
                   </span>
                   <span className="mt-1 block text-xs text-studio-muted">
-                    {rub(plan.price)}/мес · {months} мес.
+                    {pct > 0 ? (
+                      <>
+                        <span className="line-through">{rub(plan.price)}/мес</span>
+                        {" "}
+                        {rub(monthlyRate)}/мес
+                      </>
+                    ) : (
+                      <>{rub(plan.price)}/мес</>
+                    )}
+                    {" · "}
+                    {months} мес.
                     {pct > 0 ? ` −${pct}%` : ""}
                   </span>
                   <ul className="mt-2 space-y-1 text-xs text-studio-muted">

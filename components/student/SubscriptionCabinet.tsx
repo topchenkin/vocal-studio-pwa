@@ -23,6 +23,7 @@ import {
   type SubscriptionMonthOption,
 } from "@/lib/constants";
 import { formatPrice } from "@/lib/storage";
+import { formatStudioExpiry } from "@/lib/studio-tz";
 import {
   isStudioTrialPremium,
   STUDIO_TRIAL_END_LABEL,
@@ -30,7 +31,7 @@ import {
 import type { AppSubscriptionTier } from "@/types";
 
 const TIER_LABEL: Record<AppSubscriptionTier, string> = {
-  none: "Нет активного тарифа",
+  none: "Без подписки",
   standard: "Standart",
   premium: "Premium",
   vip: "VIP",
@@ -40,11 +41,7 @@ function formatExpiry(iso: string | null | undefined) {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString("ru-RU", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  return formatStudioExpiry(date, "long");
 }
 
 function isSubscriptionActive(
@@ -310,6 +307,7 @@ export default function SubscriptionCabinet() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             plans={visiblePlans}
+            months={months}
           />
 
           {duoMember ? (

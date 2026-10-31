@@ -26,7 +26,12 @@ import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
-import { formatAppTier } from "@/lib/constants";
+import { effectiveAppTier, formatAppTier } from "@/lib/constants";
+import {
+  formatStudioExpiry,
+  studioDateKey,
+  studioEndOfDayIso,
+} from "@/lib/studio-tz";
 import { normalizeOnlineLessonUrl } from "@/lib/lesson-format";
 import CatLevelText from "@/components/ui/CatLevelText";
 import type {
@@ -40,7 +45,7 @@ import type {
 } from "@/types";
 
 const tierOptions: Array<{ value: AppSubscriptionTier; label: string }> = [
-  { value: "none", label: "None" },
+  { value: "none", label: "Без подписки" },
   { value: "standard", label: "Standart" },
   { value: "premium", label: "Premium" },
   { value: "vip", label: "VIP" },
@@ -433,19 +438,26 @@ function StudentEditor({
               type="date"
               value={
                 draft.app_sub_expires_at
-                  ? draft.app_sub_expires_at.slice(0, 10)
+                  ? studioDateKey(draft.app_sub_expires_at)
                   : ""
               }
               onChange={(event) => {
                 const value = event.target.value;
                 updateDraft(
                   "app_sub_expires_at",
-                  value ? `${value}T23:59:59.000Z` : null
+                  value ? studioEndOfDayIso(value) : null
                 );
               }}
               className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
             />
           </label>
+          {effectiveAppTier(draft.app_sub_tier, draft.app_sub_expires_at) ===
+            "none" &&
+            draft.app_sub_tier !== "none" && (
+              <p className="mt-2 text-xs text-studio-gold">
+                Срок истёк — в кабинете сейчас «Без подписки».
+              </p>
+            )}
         </fieldset>
 
         <fieldset className="rounded-2xl bg-studio-accent/5 p-4 ring-1 ring-studio-accent/20">
@@ -715,6 +727,15 @@ export default function StudentsTable() {
     }
 
     const loadStudents = async () => {
+      try {
+        await supabase.rpc("expire_app_subscriptions");
+      } catch (error) {
+        console.error(
+          "[uvs:admin]",
+          "expire subscriptions failed",
+          error instanceof Error ? error.message : error
+        );
+      }
       const [studentsResult, foldersResult, membersResult] = await Promise.all([
         supabase
           .from("profiles")
@@ -778,7 +799,9 @@ export default function StudentsTable() {
         ? student.is_active_student
         : !student.is_active_student);
     const matchesTier =
-      tierFilter === "all" || student.app_sub_tier === tierFilter;
+      tierFilter === "all" ||
+      effectiveAppTier(student.app_sub_tier, student.app_sub_expires_at) ===
+        tierFilter;
     const matchesFolder =
       folderFilter === "all" ||
       members.some(
@@ -1082,15 +1105,26 @@ export default function StudentsTable() {
                 <div className="rounded-xl bg-studio-bg/50 p-3">
                   <p className="text-studio-muted">Платформа</p>
                   <p className="mt-1 font-medium">
-                    {formatAppTier(student.app_sub_tier)}
-                    {student.app_sub_variant !== "individual" ? " Duo" : ""}
+                    {(() => {
+                      const shown = effectiveAppTier(
+                        student.app_sub_tier,
+                        student.app_sub_expires_at
+                      );
+                      if (shown === "none") return "Без подписки";
+                      return `${formatAppTier(shown)}${
+                        student.app_sub_variant !== "individual" ? " Duo" : ""
+                      }`;
+                    })()}
                   </p>
                   {student.app_sub_expires_at && (
                     <p className="mt-1 text-[10px] text-studio-gold">
-                      до{" "}
-                      {new Date(student.app_sub_expires_at).toLocaleDateString(
-                        "ru-RU"
-                      )}
+                      {effectiveAppTier(
+                        student.app_sub_tier,
+                        student.app_sub_expires_at
+                      ) === "none"
+                        ? "истекла "
+                        : "до "}
+                      {formatStudioExpiry(student.app_sub_expires_at)}
                     </p>
                   )}
                 </div>

@@ -48,6 +48,29 @@ export function formatAppTier(tier: string | null | undefined): string {
   return tier;
 }
 
+export function isAppSubscriptionExpired(
+  expiresAt: string | null | undefined,
+  now = Date.now()
+): boolean {
+  if (!expiresAt) return false;
+  const ts = new Date(expiresAt).getTime();
+  return Number.isFinite(ts) && ts <= now;
+}
+
+export function effectiveAppTier(
+  tier: string | null | undefined,
+  expiresAt: string | null | undefined,
+  now = Date.now()
+): "none" | "standard" | "premium" | "vip" {
+  const raw =
+    tier === "standard" || tier === "premium" || tier === "vip"
+      ? tier
+      : "none";
+  if (raw === "none") return "none";
+  if (isAppSubscriptionExpired(expiresAt, now)) return "none";
+  return raw;
+}
+
 export type PaidAppTier = keyof typeof APP_TIER_PRICES;
 
 /** How much cheaper Duo is than two individual monthly plans. */
@@ -93,6 +116,15 @@ export function subscriptionTotal(
   const pct = SUBSCRIPTION_PERIOD_DISCOUNT[months];
   if (!pct) return list;
   return Math.round((list * (100 - pct)) / 100 / 10) * 10;
+}
+
+/** Honest ₽/month for a prepaid period, whole rubles. */
+export function subscriptionMonthlyRate(
+  monthly: number,
+  months: SubscriptionMonthOption
+): number {
+  if (months <= 1) return monthly;
+  return Math.round(subscriptionTotal(monthly, months) / months);
 }
 
 export const PLAN_SUMMARIES = {

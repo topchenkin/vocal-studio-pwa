@@ -29,6 +29,7 @@ import {
   withTimeout,
   SUPABASE_UNREACHABLE_RU,
 } from "@/lib/supabase-errors";
+import { effectiveAppTier } from "@/lib/constants";
 import type {
   AppSubscriptionTier,
   StudentProfile,
@@ -149,6 +150,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         writeCachedProfile(null);
         setProfileError(null);
         return;
+      }
+
+      try {
+        await withTimeout(supabase.rpc("expire_app_subscriptions"), 4000);
+      } catch {
+        // Access still treats a past expires_at as none.
       }
 
       const { profile: loadedProfile, unreachable } = await fetchProfile(
@@ -484,12 +491,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadProfile, user]);
 
   const role: UserRole = profile?.role ?? (user ? "student" : "guest");
-  const rawTier = profile?.app_sub_tier ?? "none";
-  const expired =
-    Boolean(profile?.app_sub_expires_at) &&
-    new Date(profile!.app_sub_expires_at!).getTime() <= Date.now();
-  const tier: AppSubscriptionTier =
-    rawTier !== "none" && expired ? "none" : rawTier;
+  const tier: AppSubscriptionTier = effectiveAppTier(
+    profile?.app_sub_tier,
+    profile?.app_sub_expires_at
+  );
 
   const value = useMemo<AuthContextValue>(
     () => ({

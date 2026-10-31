@@ -1,15 +1,29 @@
 "use client";
 
 import type { SubscriptionPlan } from "@/lib/types";
+import {
+  subscriptionMonthlyRate,
+  type SubscriptionMonthOption,
+} from "@/lib/constants";
 import { formatPrice } from "@/lib/storage";
 
 type Props = {
   plan: SubscriptionPlan;
   selected: boolean;
   onSelect: () => void;
+  months?: SubscriptionMonthOption;
 };
 
-export default function SubscriptionCard({ plan, selected, onSelect }: Props) {
+export default function SubscriptionCard({
+  plan,
+  selected,
+  onSelect,
+  months = 1,
+}: Props) {
+  const listMonthly = plan.pricePerMonth;
+  const effectiveMonthly = subscriptionMonthlyRate(listMonthly, months);
+  const showDiscount = months > 1 && effectiveMonthly < listMonthly;
+
   return (
     <button
       type="button"
@@ -64,18 +78,18 @@ export default function SubscriptionCard({ plan, selected, onSelect }: Props) {
         </div>
 
         <div className="shrink-0 text-right">
+          {showDiscount ? (
+            <p className="text-sm text-studio-muted line-through">
+              {formatPrice(listMonthly)} ₽/мес
+            </p>
+          ) : null}
           <p className="font-display text-2xl font-semibold">
-            {formatPrice(plan.price)}
+            {formatPrice(effectiveMonthly)}
             <span className="text-sm font-sans font-normal text-studio-muted">
               {" "}
               ₽/мес
             </span>
           </p>
-          {plan.months > 1 && (
-            <p className="text-xs text-studio-gold">
-              за {plan.months} мес. · {formatPrice(plan.price)} ₽
-            </p>
-          )}
         </div>
       </div>
 

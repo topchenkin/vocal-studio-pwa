@@ -1,19 +1,21 @@
 "use client";
 
 import SubscriptionCard from "./SubscriptionCard";
-import { PLANS } from "@/lib/constants";
+import { PLANS, type SubscriptionMonthOption } from "@/lib/constants";
 import type { SubscriptionPlan } from "@/lib/types";
 
 interface SubscriptionSelectorProps {
   selectedId: string;
   onSelect: (id: string) => void;
   plans?: SubscriptionPlan[];
+  months?: SubscriptionMonthOption;
 }
 
 export default function SubscriptionSelector({
   selectedId,
   onSelect,
   plans = PLANS,
+  months = 1,
 }: SubscriptionSelectorProps) {
   return (
     <div className="space-y-3" role="radiogroup" aria-label="Выбор тарифа">
@@ -23,6 +25,7 @@ export default function SubscriptionSelector({
           plan={plan}
           selected={selectedId === plan.id}
           onSelect={() => onSelect(plan.id)}
+          months={months}
         />
       ))}
     </div>

@@ -42,6 +42,23 @@ export function studioWallToUtcIso(date: string, time: string) {
   return new Date(`${date}T${clock}${STUDIO_UTC_OFFSET}`).toISOString();
 }
 
+/** Inclusive end of a civil date in the studio zone. */
+export function studioEndOfDayIso(date: string) {
+  return new Date(`${date}T23:59:59.999${STUDIO_UTC_OFFSET}`).toISOString();
+}
+
+export function formatStudioExpiry(
+  value: Date | string,
+  style: "short" | "long" = "short"
+) {
+  return formatStudioDate(
+    value,
+    style === "long"
+      ? { day: "numeric", month: "long", year: "numeric" }
+      : { day: "2-digit", month: "2-digit", year: "numeric" }
+  );
+}
+
 export function formatStudioDate(
   value: Date | string,
   options: Intl.DateTimeFormatOptions = {}
