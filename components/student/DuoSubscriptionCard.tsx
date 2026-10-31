@@ -11,6 +11,8 @@ import SbpPaymentSheet, {
 import { useAuth } from "@/context/AuthContext";
 import {
   DUO_TIER_PRICES,
+  PLAN_FEATURES,
+  PLAN_SUMMARIES,
   SUBSCRIPTION_MONTH_OPTIONS,
   TIER_RANK,
   formatAppTier,
@@ -30,10 +32,39 @@ const duoPlans: Array<{
   tier: Exclude<AppSubscriptionTier, "none">;
   title: string;
   price: number;
+  summary: string;
+  features: string[];
 }> = [
-  { tier: "standard", title: "Standart Duo", price: DUO_TIER_PRICES.standard },
-  { tier: "premium", title: "Premium Duo", price: DUO_TIER_PRICES.premium },
-  { tier: "vip", title: "VIP Duo", price: DUO_TIER_PRICES.vip },
+  {
+    tier: "standard",
+    title: "Standart Duo",
+    price: DUO_TIER_PRICES.standard,
+    summary: PLAN_SUMMARIES.standard,
+    features: [
+      ...PLAN_FEATURES.standard,
+      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
+    ],
+  },
+  {
+    tier: "premium",
+    title: "Premium Duo",
+    price: DUO_TIER_PRICES.premium,
+    summary: PLAN_SUMMARIES.premium,
+    features: [
+      ...PLAN_FEATURES.premium,
+      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
+    ],
+  },
+  {
+    tier: "vip",
+    title: "VIP Duo",
+    price: DUO_TIER_PRICES.vip,
+    summary: PLAN_SUMMARIES.vip,
+    features: [
+      ...PLAN_FEATURES.vip,
+      "Один платёж — доступ на двух аккаунтах. Уроки и прогресс личные",
+    ],
+  },
 ];
 
 function isActive(profile: StudentProfile) {
@@ -207,12 +238,20 @@ export default function DuoSubscriptionCard({
                 }}
                 className="flex w-full items-center justify-between rounded-xl bg-studio-surface p-4 text-left ring-1 ring-studio-border transition hover:ring-studio-accent"
               >
-                <span>
+                <span className="min-w-0 pr-3">
                   <span className="block font-medium">{plan.title}</span>
-                  <span className="text-xs text-studio-muted">
+                  <span className="mt-0.5 block text-xs text-studio-muted">
+                    {plan.summary}
+                  </span>
+                  <span className="mt-1 block text-xs text-studio-muted">
                     {plan.price.toLocaleString("ru-RU")} ₽/мес · {months} мес.
                     {pct > 0 ? ` −${pct}%` : ""}
                   </span>
+                  <ul className="mt-2 space-y-1 text-xs text-studio-muted">
+                    {plan.features.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
                 </span>
                 <span className="text-right">
                   <span className="block font-semibold">

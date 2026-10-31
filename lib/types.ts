@@ -62,6 +62,8 @@ export interface SubscriptionPlan {
   price: number;
   pricePerMonth: number;
   badge?: string;
+  summary?: string;
+  features?: string[];
 }
 
 export type PaymentMethod = "sbp" | "card";

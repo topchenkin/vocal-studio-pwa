@@ -76,6 +76,36 @@ export function subscriptionTotal(
   return Math.round((list * (100 - pct)) / 100 / 10) * 10;
 }
 
+export const PLAN_SUMMARIES = {
+  standard: "Домашняя практика между уроками",
+  premium: "Больше материала и внимания к деталям",
+  vip: "Студийный формат и полный набор инструментов",
+} as const;
+
+export const PLAN_FEATURES = {
+  standard: [
+    "Нейроанализатор нот: видно ноту, частоту и попадание в реальном времени",
+    "Проф. тест: 10 секунд, оценка как на прослушивании, отчёт преподавателю",
+    "Чат с преподавателем",
+    "Распевки и упражнения уровня Standart",
+    "Кабинет: расписание, перенос занятий, домашние задания и свои записи",
+  ],
+  premium: [
+    "Всё из Standart",
+    "Расширенный набор упражнений и распевок",
+    "Вокальный архетип: подсказка по типу голоса и сравнение со звёздами",
+    "Сведение дорожек: запись и микс на телефоне",
+    "Изменение тональности минуса под ваш голос",
+    "Обработка записанного голоса",
+    "Генератор аккордов для распевки и импровизации",
+  ],
+  vip: [
+    "Всё из Premium",
+    "Запись студийного трека с преподавателем",
+    "Студийный формат работы и полный набор лаборатории",
+  ],
+} as const;
+
 export const PLANS: SubscriptionPlan[] = [
   {
     id: "standard",
@@ -83,6 +113,8 @@ export const PLANS: SubscriptionPlan[] = [
     months: 1,
     price: APP_TIER_PRICES.standard,
     pricePerMonth: APP_TIER_PRICES.standard,
+    summary: PLAN_SUMMARIES.standard,
+    features: [...PLAN_FEATURES.standard],
   },
   {
     id: "premium",
@@ -91,6 +123,8 @@ export const PLANS: SubscriptionPlan[] = [
     price: APP_TIER_PRICES.premium,
     pricePerMonth: APP_TIER_PRICES.premium,
     badge: "Популярный",
+    summary: PLAN_SUMMARIES.premium,
+    features: [...PLAN_FEATURES.premium],
   },
   {
     id: "vip",
@@ -98,6 +132,8 @@ export const PLANS: SubscriptionPlan[] = [
     months: 1,
     price: APP_TIER_PRICES.vip,
     pricePerMonth: APP_TIER_PRICES.vip,
+    summary: PLAN_SUMMARIES.vip,
+    features: [...PLAN_FEATURES.vip],
   },
 ];
 
