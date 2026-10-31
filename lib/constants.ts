@@ -1,4 +1,5 @@
 import type { SubscriptionPlan, User, Lesson, Notification, Note, ChatMessage } from "./types";
+import { isStudioTrialActive } from "@/lib/studio-trial";
 
 export const APP_NAME = "Unique Vocal Studio";
 export const APP_SHORT_NAME = "Unique Vocal";
@@ -66,9 +67,11 @@ export function effectiveAppTier(
     tier === "standard" || tier === "premium" || tier === "vip"
       ? tier
       : "none";
-  if (raw === "none") return "none";
-  if (isAppSubscriptionExpired(expiresAt, now)) return "none";
-  return raw;
+  const live =
+    raw !== "none" && !isAppSubscriptionExpired(expiresAt, now) ? raw : "none";
+  if (live !== "none") return live;
+  if (isStudioTrialActive(now)) return "premium";
+  return "none";
 }
 
 export type PaidAppTier = keyof typeof APP_TIER_PRICES;

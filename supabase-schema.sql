@@ -2574,10 +2574,13 @@ as $$
         and coalesce(a.enabled, true)
         and public.feature_tier_rank(
           case
-            when p.app_sub_expires_at is not null
-                 and p.app_sub_expires_at <= now()
-              then 'none'
-            else coalesce(p.app_sub_tier, 'none')
+            when (p.app_sub_expires_at is null or p.app_sub_expires_at > now())
+                 and coalesce(p.app_sub_tier, 'none') is distinct from 'none'
+              then coalesce(p.app_sub_tier, 'none')
+            when now() < timestamptz '2026-11-11 00:00:00+05'
+                 and coalesce(p.role, 'student') = 'student'
+              then 'premium'
+            else 'none'
           end
         ) >= public.feature_tier_rank(coalesce(a.min_tier, 'none'))
     );
@@ -2597,6 +2600,7 @@ set search_path = public
 as $$
 declare
   n integer;
+  trial_end timestamptz := timestamptz '2026-11-11 00:00:00+05';
 begin
   update public.duo_subscriptions as d
   set status = 'cancelled',
@@ -2617,6 +2621,24 @@ begin
     and app_sub_expires_at <= now();
 
   get diagnostics n = row_count;
+
+  if now() < trial_end then
+    update public.profiles
+    set
+      app_sub_tier = 'premium',
+      app_sub_expires_at = trial_end
+    where role = 'student'
+      and deleted_at is null
+      and coalesce(app_sub_variant, 'individual') = 'individual'
+      and (
+        coalesce(app_sub_tier, 'none') = 'none'
+        or (
+          app_sub_expires_at is not null
+          and app_sub_expires_at <= now()
+        )
+      );
+  end if;
+
   return coalesce(n, 0);
 end;
 $$;
