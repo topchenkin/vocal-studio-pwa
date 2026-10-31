@@ -16,8 +16,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: LEGAL.offerPath, priority: 0.2 },
     { path: LEGAL.privacyPath, priority: 0.2 },
   ];
+  const lastModified = new Date();
   return pages.map(({ path, priority }) => ({
     url: `${LEGAL.site}${path === "/" ? "" : path}`,
+    lastModified,
+    changeFrequency: "weekly" as const,
     priority,
   }));
 }
