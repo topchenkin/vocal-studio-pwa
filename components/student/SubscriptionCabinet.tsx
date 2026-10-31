@@ -17,6 +17,8 @@ import {
   PLANS,
   SUBSCRIPTION_MONTH_OPTIONS,
   TIER_RANK,
+  subscriptionDiscountPercent,
+  subscriptionListTotal,
   subscriptionTotal,
   type SubscriptionMonthOption,
 } from "@/lib/constants";
@@ -114,6 +116,8 @@ export default function SubscriptionCabinet() {
   }, [selectedId, visiblePlans]);
 
   const total = subscriptionTotal(selected.pricePerMonth, months);
+  const listTotal = subscriptionListTotal(selected.pricePerMonth, months);
+  const periodDiscount = subscriptionDiscountPercent(months);
   const isRenewal = active && selectedTier === tier;
 
   const checkout = () => {
@@ -277,8 +281,8 @@ export default function SubscriptionCabinet() {
             </h3>
             <p className="mt-1 text-sm text-studio-muted">
               {active
-                ? "Можно продлить текущий тариф или перейти на более высокий. Понижение недоступно. Оплата 1 / 3 / 6 / 12 месяцев сразу, без автопродления."
-                : "Выберите тариф и срок 1, 3, 6 или 12 месяцев. Оплата через СБП на странице ЮKassa."}
+                ? "Можно продлить текущий тариф или перейти на более высокий. Понижение недоступно. 3 месяца −10%, 6 месяцев −15%, год −20%. Без автопродления."
+                : "Выберите тариф и срок. 3 месяца −10%, 6 месяцев −15%, год −20%. Оплата через СБП на странице ЮKassa."}
             </p>
           </div>
 
@@ -295,6 +299,9 @@ export default function SubscriptionCabinet() {
                 }`}
               >
                 {option} мес.
+                {subscriptionDiscountPercent(option) > 0
+                  ? ` −${subscriptionDiscountPercent(option)}%`
+                  : ""}
               </button>
             ))}
           </div>
@@ -315,7 +322,16 @@ export default function SubscriptionCabinet() {
               {isRenewal ? "Продлить" : active ? "Апгрейд" : "Оформить"} ·{" "}
               {formatPrice(total)} ₽
               <span className="ml-1 text-sm font-normal opacity-80">
-                ({months} мес.)
+                {periodDiscount > 0 ? (
+                  <>
+                    <span className="line-through opacity-70">
+                      {formatPrice(listTotal)} ₽
+                    </span>{" "}
+                    · {months} мес. −{periodDiscount}%
+                  </>
+                ) : (
+                  <>({months} мес.)</>
+                )}
               </span>
             </Button>
           )}

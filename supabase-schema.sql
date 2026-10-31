@@ -1509,10 +1509,10 @@ insert into public.subscription_products (code, title, tier, variant, price_rub,
 values
   ('standard', 'Standart', 'standard', 'individual', 990, '["AI-анализатор нот","Чат","Базовые упражнения"]'),
   ('premium', 'Premium', 'premium', 'individual', 1990, '["Всё из Standart","AI-минусовки","Индивидуальные распевки"]'),
-  ('vip', 'VIP', 'vip', 'individual', 3990, '["Всё из Premium","Безлимитный AI","Студийный трек"]'),
+  ('vip', 'VIP', 'vip', 'individual', 2990, '["Всё из Premium","Безлимитный AI","Студийный трек"]'),
   ('standard_duo', 'Standart Duo', 'standard', 'duo_owner', 1490, '["Два аккаунта Standart"]'),
   ('premium_duo', 'Premium Duo', 'premium', 'duo_owner', 2990, '["Два аккаунта Premium"]'),
-  ('vip_duo', 'VIP Duo', 'vip', 'duo_owner', 5990, '["Два аккаунта VIP"]')
+  ('vip_duo', 'VIP Duo', 'vip', 'duo_owner', 4490, '["Два аккаунта VIP"]')
 on conflict (code) do nothing;
 
 create table if not exists public.payment_transactions (

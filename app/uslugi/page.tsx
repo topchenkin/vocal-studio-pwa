@@ -53,8 +53,9 @@ export default function UslugiPage() {
           </h2>
           <p className="mt-3 text-sm leading-relaxed">
             Доступ к личному кабинету Unique Vocal: упражнения, чат с
-            преподавателем, {straightDashNodes("ИИ-инструменты")} в объёме тарифа. Срок указан у
-            каждого тарифа.
+            преподавателем, {straightDashNodes("ИИ-инструменты")} в объёме тарифа. Цена ниже —
+            за 1 месяц. При оплате сразу 3 / 6 / 12 месяцев скидка 10% / 15% /
+            20%.
           </p>
           <ul className="mt-4 space-y-2 text-sm">
             {INDIVIDUAL.map((plan) => (

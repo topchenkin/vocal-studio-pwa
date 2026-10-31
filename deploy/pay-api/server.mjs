@@ -15,9 +15,11 @@ const SUPABASE_URL = (
 ).replace(/\/$/, "");
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-const TIER_PRICES = { standard: 990, premium: 1990, vip: 3990 };
-const DUO_PRICES = { standard: 1490, premium: 2990, vip: 5990 };
+const TIER_PRICES = { standard: 990, premium: 1990, vip: 2990 };
+const DUO_PRICES = { standard: 1490, premium: 2990, vip: 4490 };
 const ALLOWED_MONTHS = new Set([1, 3, 6, 12]);
+/** Keep in sync with lib/constants.ts SUBSCRIPTION_PERIOD_DISCOUNT. */
+const PERIOD_DISCOUNT = { 1: 0, 3: 10, 6: 15, 12: 20 };
 const TEST_PAYMENT_AMOUNT = 1;
 
 function json(res, status, body) {
@@ -82,6 +84,13 @@ function parseMonths(raw) {
   const months = Number(raw);
   if (!ALLOWED_MONTHS.has(months)) return null;
   return months;
+}
+
+function subscriptionAmount(monthly, months) {
+  const list = Number(monthly) * Number(months);
+  const pct = PERIOD_DISCOUNT[months] || 0;
+  if (!pct) return list;
+  return Math.round((list * (100 - pct)) / 100 / 10) * 10;
 }
 
 async function confirmPayment(invoiceNo, outSum, externalId, provider = "yookassa") {
@@ -525,7 +534,7 @@ async function handleInit(req, res) {
       return json(res, 400, { error: "Тариф Duo меняет владелец подписки" });
     }
     const monthly = isDuo ? DUO_PRICES[tier] : TIER_PRICES[tier];
-    amount = monthly * months;
+    amount = subscriptionAmount(monthly, months);
     purpose = "app_subscription";
     productCode = isDuo ? `${tier}_duo` : tier;
     const tierTitle = tier === "standard" ? "Standart" : tier;

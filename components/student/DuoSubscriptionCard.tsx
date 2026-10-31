@@ -14,6 +14,8 @@ import {
   SUBSCRIPTION_MONTH_OPTIONS,
   TIER_RANK,
   formatAppTier,
+  subscriptionDiscountPercent,
+  subscriptionListTotal,
   subscriptionTotal,
   type SubscriptionMonthOption,
 } from "@/lib/constants";
@@ -179,12 +181,17 @@ export default function DuoSubscriptionCard({
               }`}
             >
               {option} мес.
+              {subscriptionDiscountPercent(option) > 0
+                ? ` −${subscriptionDiscountPercent(option)}%`
+                : ""}
             </button>
           ))}
         </div>
         <div className="space-y-2">
           {visibleDuoPlans.map((plan) => {
             const amount = subscriptionTotal(plan.price, months);
+            const list = subscriptionListTotal(plan.price, months);
+            const pct = subscriptionDiscountPercent(months);
             return (
               <button
                 key={plan.tier}
@@ -204,10 +211,18 @@ export default function DuoSubscriptionCard({
                   <span className="block font-medium">{plan.title}</span>
                   <span className="text-xs text-studio-muted">
                     {plan.price.toLocaleString("ru-RU")} ₽/мес · {months} мес.
+                    {pct > 0 ? ` −${pct}%` : ""}
                   </span>
                 </span>
-                <span className="font-semibold">
-                  {amount.toLocaleString("ru-RU")} ₽
+                <span className="text-right">
+                  <span className="block font-semibold">
+                    {amount.toLocaleString("ru-RU")} ₽
+                  </span>
+                  {pct > 0 ? (
+                    <span className="text-xs text-studio-muted line-through">
+                      {list.toLocaleString("ru-RU")} ₽
+                    </span>
+                  ) : null}
                 </span>
               </button>
             );

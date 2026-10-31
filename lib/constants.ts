@@ -8,19 +8,36 @@ export const NOTIFICATION_APP_NAME = "Unique Vocal";
 export const APP_TIER_PRICES = {
   standard: 990,
   premium: 1990,
-  vip: 3990,
+  vip: 2990,
 } as const;
 
 export const DUO_TIER_PRICES = {
   standard: 1490,
   premium: 2990,
-  vip: 5990,
+  vip: 4490,
 } as const;
 
 /** Доступные сроки оплаты подписки (без автопродления). */
 export const SUBSCRIPTION_MONTH_OPTIONS = [1, 3, 6, 12] as const;
 export type SubscriptionMonthOption =
   (typeof SUBSCRIPTION_MONTH_OPTIONS)[number];
+
+/**
+ * Prepaid period discount vs monthly × months.
+ * 10 / 15 / 20% ≈ Spotify annual (~17%) and ivi/Yandex Plus packs:
+ * enough to prefer 6–12 months, not so steep that a year prepaid
+ * wipes the margin of people who would have paid monthly anyway.
+ * Keep in sync with deploy/pay-api/server.mjs.
+ */
+export const SUBSCRIPTION_PERIOD_DISCOUNT: Record<
+  SubscriptionMonthOption,
+  number
+> = {
+  1: 0,
+  3: 10,
+  6: 15,
+  12: 20,
+};
 
 /** Visible tier name. The stored code stays `standard`. */
 export function formatAppTier(tier: string | null | undefined): string {
@@ -36,11 +53,27 @@ export const TIER_RANK = {
   vip: 3,
 } as const;
 
-export function subscriptionTotal(
+export function subscriptionDiscountPercent(
+  months: SubscriptionMonthOption
+): number {
+  return SUBSCRIPTION_PERIOD_DISCOUNT[months];
+}
+
+export function subscriptionListTotal(
   monthly: number,
   months: SubscriptionMonthOption
 ) {
   return monthly * months;
+}
+
+export function subscriptionTotal(
+  monthly: number,
+  months: SubscriptionMonthOption
+) {
+  const list = subscriptionListTotal(monthly, months);
+  const pct = SUBSCRIPTION_PERIOD_DISCOUNT[months];
+  if (!pct) return list;
+  return Math.round((list * (100 - pct)) / 100 / 10) * 10;
 }
 
 export const PLANS: SubscriptionPlan[] = [

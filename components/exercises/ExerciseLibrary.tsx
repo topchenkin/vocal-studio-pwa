@@ -25,6 +25,7 @@ import VocalExercisePractice from "@/components/exercises/VocalExercisePractice"
 import SbpPaymentSheet, {
   type PaymentPurpose,
 } from "@/components/payment/SbpPaymentSheet";
+import { APP_TIER_PRICES, subscriptionTotal } from "@/lib/constants";
 import type { AppSubscriptionTier, Exercise } from "@/types";
 
 const tierRank: Record<AppSubscriptionTier, number> = {
@@ -187,13 +188,14 @@ export default function ExerciseLibrary() {
   const upgrade = () => {
     const target =
       lockedTier === "vip" ? ("vip" as const) : ("premium" as const);
-    const monthly = target === "vip" ? 3990 : 1990;
+    const monthly =
+      target === "vip" ? APP_TIER_PRICES.vip : APP_TIER_PRICES.premium;
     setLockedTier(null);
     setPayment({
       type: "subscription",
       tier: target,
       months: 3,
-      amount: monthly * 3,
+      amount: subscriptionTotal(monthly, 3),
     });
   };
 
