@@ -24,7 +24,7 @@ export default function ProgressDetails() {
     <div className="space-y-8">
       <section>
         <h3 className="font-display text-lg font-semibold">Рекорды</h3>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <Stat
             label="Лучшая серия"
             value={`${board?.records.bestStreak ?? progress?.streak ?? 0} дн.`}
@@ -35,14 +35,6 @@ export default function ProgressDetails() {
               board
                 ? `${board.records.weekMin} / ${board.records.bestWeekMin}`
                 : "—"
-            }
-          />
-          <Stat
-            label="Дольше фраза"
-            value={
-              board && board.records.bestPhraseSec > 0
-                ? `${board.records.bestPhraseSec} сек`
-                : "ещё нет"
             }
           />
         </div>

@@ -6,7 +6,6 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StudentHomeHub from "@/components/student/StudentHomeHub";
 import { useCabinetProgress } from "@/hooks/useCabinetProgress";
 import { useStudentRetention } from "@/hooks/useStudentRetention";
-import SingTodayCard from "@/components/student/SingTodayCard";
 import OnlineLessonGuide from "@/components/student/OnlineLessonGuide";
 import MilestoneCard from "@/components/student/MilestoneCard";
 import NextLessonCard from "@/components/student/NextLessonCard";
@@ -40,7 +39,7 @@ export default function StudentDashboardClient() {
   const searchParams = useSearchParams();
   const [retrying, setRetrying] = useState(false);
   const { progress } = useCabinetProgress();
-  const { board, reload: reloadRetention } = useStudentRetention();
+  const { board } = useStudentRetention();
 
   useEffect(() => {
     if (loading) return;
@@ -139,7 +138,6 @@ export default function StudentDashboardClient() {
         <NextLessonCard progress={progress} />
         <QuizPlanCard progress={progress} />
         <OnlineLessonGuide />
-        <SingTodayCard board={board} onClosed={reloadRetention} />
         <LastLessonNote />
         <StudentHomeHub progress={progress} board={board} />
       </div>

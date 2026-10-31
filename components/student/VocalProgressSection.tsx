@@ -95,8 +95,8 @@ export default function VocalProgressSection() {
         <div className="rounded-2xl bg-studio-surface p-6 text-center ring-1 ring-studio-border">
           <TrendingUp className="mx-auto h-7 w-7 text-studio-muted" />
           <p className="mt-2 text-sm text-studio-muted">
-            Пока нет тестов. Пройдите зачёт выше — оценка останется на этой
-            странице и уйдёт преподавателю в чат, когда отправите.
+            Пока нет тестов. Пройдите проф. тест в разделе «Ещё» — оценка
+            останется здесь и уйдёт преподавателю в чат, когда отправите.
           </p>
         </div>
       ) : (
