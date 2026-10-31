@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import Header from "@/components/Header";
 import StudentStatusBar from "@/components/student/StudentStatusBar";
+import TrialPremiumBanner from "@/components/student/TrialPremiumBanner";
 import { cn } from "@/lib/utils";
 
 export default function DashboardLayout({
@@ -52,6 +53,7 @@ export default function DashboardLayout({
         )}
       >
         {student ? <StudentStatusBar /> : <Header />}
+        {student && !compact ? <TrialPremiumBanner /> : null}
 
         {!compact && !student && (
           <div className="mt-8 min-h-[7.25rem] sm:min-h-[7.75rem]">

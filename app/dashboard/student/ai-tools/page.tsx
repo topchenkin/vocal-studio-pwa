@@ -12,8 +12,10 @@ import {
   Lock,
   Mic,
   Music2,
+  PenLine,
   Repeat,
   Stars,
+  WandSparkles,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PitchAnalyzer from "@/components/ai/PitchAnalyzer";
@@ -31,7 +33,7 @@ import {
   type AiToolId,
 } from "@/lib/ai-tools-access";
 
-type ToolTab = AiToolId;
+type LabItemId = AiToolId | "lyrics";
 
 const TimbreMatcher = dynamic(() => import("@/components/ai/TimbreMatcher"), {
   ssr: false,
@@ -43,12 +45,16 @@ const ChordLoopGenerator = dynamic(
   () => import("@/components/audio/ChordLoopGenerator"),
   { ssr: false }
 );
+const VocalRemover = dynamic(() => import("@/components/ai/VocalRemover"), {
+  ssr: false,
+});
 
 const TABS: Array<{
-  id: ToolTab;
+  id: LabItemId;
   label: string;
   text: string;
   icon: typeof Mic;
+  hardLocked?: boolean;
 }> = [
   {
     id: "tuner",
@@ -86,12 +92,26 @@ const TABS: Array<{
     text: "Аккордовая основа для распевки",
     icon: Repeat,
   },
+  {
+    id: "remover",
+    label: "Удаление вокала",
+    text: "Минусовка и отдельный вокал из трека",
+    icon: WandSparkles,
+    hardLocked: true,
+  },
+  {
+    id: "lyrics",
+    label: "Автор песен",
+    text: "Тексты и структура песни с подсказками",
+    icon: PenLine,
+    hardLocked: true,
+  },
 ];
 
 export default function AiToolsPage() {
   const { isAuthenticated, isAdmin, loading, tier } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<ToolTab | null>(null);
+  const [tab, setTab] = useState<LabItemId | null>(null);
   const [access, setAccess] = useState<AiToolAccessMap>(defaultAiToolAccessMap);
 
   useEffect(() => {
@@ -126,18 +146,27 @@ export default function AiToolsPage() {
     );
   }
 
-  const locked = (tool: AiToolId) =>
-    !canAccessAiTool(tool, tier, isAdmin, access);
+  const locked = (tool: LabItemId) => {
+    if (tool === "lyrics" || tool === "remover") return true;
+    return !canAccessAiTool(tool, tier, isAdmin, access);
+  };
 
-  const visibleTabs = TABS.filter(
-    (item) => isAdmin || access[item.id]?.enabled !== false
-  );
+  const visibleTabs = TABS.filter((item) => {
+    if (item.id === "lyrics") return true;
+    return isAdmin || access[item.id]?.enabled !== false;
+  });
 
   const active = visibleTabs.find((item) => item.id === tab) ?? null;
 
   return (
     <DashboardLayout
-      title={active ? (access[active.id]?.title || active.label) : "Лаборатория"}
+      title={
+        active
+          ? active.id === "lyrics"
+            ? active.label
+            : access[active.id]?.title || active.label
+          : "Лаборатория"
+      }
       subtitle={
         active ? undefined : "Инструменты, которые помогают слышать и развивать голос"
       }
@@ -171,13 +200,37 @@ export default function AiToolsPage() {
           {active.id === "chordloop" && (
             <ChordLoopGenerator locked={locked("chordloop")} />
           )}
+          {active.id === "remover" && <VocalRemover locked />}
+          {active.id === "lyrics" && (
+            <section className="relative overflow-hidden rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border sm:p-6">
+              <div className="pointer-events-none absolute inset-0 bg-studio-bg/40 backdrop-blur-[2px]" />
+              <div className="relative z-10 flex flex-col items-center py-10 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/15 ring-1 ring-amber-400/30">
+                  <Lock className="h-7 w-7 text-amber-300" />
+                </div>
+                <h2 className="mt-4 font-display text-2xl font-semibold">
+                  Автор песен
+                </h2>
+                <p className="mt-2 max-w-sm text-sm text-studio-muted">
+                  Этот инструмент пока закрыт и не входит в пробный Premium.
+                </p>
+              </div>
+            </section>
+          )}
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {visibleTabs.map((item) => {
             const Icon = item.icon;
             const isLocked = locked(item.id);
-            const minTier = access[item.id]?.min_tier ?? "none";
+            const minTier =
+              item.id === "lyrics"
+                ? "none"
+                : access[item.id]?.min_tier ?? "none";
+            const title =
+              item.id === "lyrics"
+                ? item.label
+                : access[item.id]?.title || item.label;
             return (
               <button
                 key={item.id}
@@ -189,9 +242,7 @@ export default function AiToolsPage() {
                   <Icon className="h-5 w-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium">
-                    {access[item.id]?.title || item.label}
-                  </span>
+                  <span className="block font-medium">{title}</span>
                   <span className="block text-sm text-studio-muted">
                     {item.text}
                   </span>
@@ -199,7 +250,7 @@ export default function AiToolsPage() {
                 {isLocked ? (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-studio-gold/15 px-2.5 py-1 text-xs font-medium text-studio-gold">
                     <Lock className="h-3 w-3" />
-                    {formatAppTier(minTier)}
+                    {item.hardLocked ? "Закрыто" : formatAppTier(minTier)}
                   </span>
                 ) : (
                   <ChevronRight className="h-5 w-5 shrink-0 text-studio-muted" />

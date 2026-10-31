@@ -1334,6 +1334,16 @@ begin
   )
   on conflict (id) do nothing;
 
+  if now() < timestamptz '2026-11-11 00:00:00+05' then
+    update public.profiles
+    set
+      app_sub_tier = 'premium',
+      app_sub_expires_at = timestamptz '2026-11-11 00:00:00+05'
+    where id = new.id
+      and role = 'student'
+      and coalesce(app_sub_tier, 'none') = 'none';
+  end if;
+
   return new;
 end;
 $$;

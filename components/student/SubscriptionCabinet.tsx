@@ -21,6 +21,10 @@ import {
   type SubscriptionMonthOption,
 } from "@/lib/constants";
 import { formatPrice } from "@/lib/storage";
+import {
+  isStudioTrialPremium,
+  STUDIO_TRIAL_END_LABEL,
+} from "@/lib/studio-trial";
 import type { AppSubscriptionTier } from "@/types";
 
 const TIER_LABEL: Record<AppSubscriptionTier, string> = {
@@ -93,6 +97,7 @@ export default function SubscriptionCabinet() {
   const duoMember = profile?.app_sub_variant === "duo_member";
   const active = isSubscriptionActive(tier, profile?.app_sub_expires_at);
   const expiryLabel = formatExpiry(profile?.app_sub_expires_at);
+  const trialPremium = isStudioTrialPremium(tier, profile?.app_sub_expires_at);
 
   const visiblePlans = useMemo(() => {
     if (!active || tier === "none") return PLANS;
@@ -149,20 +154,27 @@ export default function SubscriptionCabinet() {
               </h2>
               <p className="mt-2 flex items-center gap-2 text-sm text-studio-muted">
                 <CalendarDays className="h-4 w-4 text-studio-gold" />
-                {active && expiryLabel
-                  ? `Действует до ${expiryLabel}`
-                  : active
-                    ? "Срок не указан — продлите подписку ниже"
-                    : expiryLabel
-                      ? `Истекла ${expiryLabel}`
-                      : "Подписка не оформлена"}
+                {trialPremium
+                  ? `Пробный Premium до ${STUDIO_TRIAL_END_LABEL} включительно`
+                  : active && expiryLabel
+                    ? `Действует до ${expiryLabel}`
+                    : active
+                      ? "Срок не указан — продлите подписку ниже"
+                      : expiryLabel
+                        ? `Истекла ${expiryLabel}`
+                        : "Подписка не оформлена"}
               </p>
-              {active && (
+              {trialPremium ? (
+                <p className="mt-1 text-xs text-studio-muted">
+                  С 11 ноября лаборатория закроется, если не оформить подписку.
+                  Без автопродления.
+                </p>
+              ) : active ? (
                 <p className="mt-1 text-xs text-studio-muted">
                   {formatPrice(APP_TIER_PRICES[tier as keyof typeof APP_TIER_PRICES] ?? 0)}{" "}
                   ₽ / мес · без автопродления
                 </p>
-              )}
+              ) : null}
             </div>
             <Badge
               variant={
