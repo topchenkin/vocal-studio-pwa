@@ -89,6 +89,22 @@
 			}
 		}
 	}
+	# Auth emails may land on the public site host. Forward verify/recover
+	# to Kong so confirmation and password-reset links do not hit the SPA.
+	handle /auth/v1* {
+		reverse_proxy 127.0.0.1:8000 {
+			flush_interval -1
+			header_up Host sb.uniquevocal.ru
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+			transport http {
+				versions 1.1
+				read_timeout 30s
+				write_timeout 30s
+				dial_timeout 5s
+			}
+		}
+	}
 	handle {
 		header Cache-Control "no-store, no-cache, must-revalidate"
 		header Pragma "no-cache"

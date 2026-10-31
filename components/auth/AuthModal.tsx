@@ -53,12 +53,14 @@ export default function AuthModal({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setMode(initialMode);
     setError("");
     setMessage("");
+    setAwaitingConfirm(false);
   }, [initialMode, open]);
 
   const redeemIfNeeded = async (codeRaw: string, name: string) => {
@@ -90,6 +92,7 @@ export default function AuthModal({
     event.preventDefault();
     setError("");
     setMessage("");
+    setAwaitingConfirm(false);
 
     if (!email.trim() || !password) {
       setError("Введите email и пароль");
@@ -134,6 +137,7 @@ export default function AuthModal({
 
     if (result.needsEmailConfirmation) {
       if (code.length === 12) storePendingGift(code);
+      setAwaitingConfirm(true);
       setMessage(
         "Проверьте почту и подтвердите регистрацию. После входа сертификат активируется сам, если имя совпадает."
       );
@@ -189,6 +193,34 @@ export default function AuthModal({
     setMode((current) => (current === "login" ? "register" : "login"));
     setError("");
     setMessage("");
+    setAwaitingConfirm(false);
+  };
+
+  const handleResendConfirm = async () => {
+    setError("");
+    if (!email.trim()) {
+      setError("Введите email, чтобы отправить письмо ещё раз");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: { emailRedirectTo: `${window.location.origin}/` },
+      });
+      if (resendError) {
+        console.error("[uvs:auth] resend confirm", resendError.message);
+        setError(mapBackendError(resendError));
+        return;
+      }
+      setMessage("Отправили письмо ещё раз. Проверьте почту и папку «Спам».");
+    } catch (err) {
+      console.error("[uvs:auth] resend confirm", err);
+      setError(mapBackendError(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -318,9 +350,20 @@ export default function AuthModal({
             type="button"
             disabled={submitting}
             onClick={() => void handleForgot()}
-            className="w-full text-center text-sm text-studio-muted transition hover:text-studio-text"
+            className="w-full min-h-10 text-center text-sm text-studio-muted transition hover:text-studio-text"
           >
             Забыли пароль?
+          </button>
+        ) : null}
+
+        {awaitingConfirm ? (
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void handleResendConfirm()}
+            className="w-full min-h-10 text-center text-sm text-studio-muted transition hover:text-studio-text"
+          >
+            Отправить письмо ещё раз
           </button>
         ) : null}
 
