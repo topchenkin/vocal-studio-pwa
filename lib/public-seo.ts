@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { APP_NAME } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
 import {
+  STUDIO_MAP_URL,
   STUDIO_PLACE,
   TRIAL_LESSON,
   type FaqItem,
@@ -50,8 +51,15 @@ export function organizationJsonLd() {
       streetAddress: STUDIO_PLACE.street,
       addressLocality: STUDIO_PLACE.city,
       addressRegion: STUDIO_PLACE.region,
+      postalCode: STUDIO_PLACE.postalCode,
       addressCountry: "RU",
     },
+    geo: {
+      "@type": "GeoCoordinates",
+      latitude: STUDIO_PLACE.lat,
+      longitude: STUDIO_PLACE.lng,
+    },
+    hasMap: STUDIO_MAP_URL,
     areaServed: [
       { "@type": "City", name: STUDIO_PLACE.city },
       { "@type": "Country", name: "Россия" },

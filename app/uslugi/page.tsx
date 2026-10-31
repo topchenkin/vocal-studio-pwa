@@ -11,13 +11,14 @@ import {
   duoMonthlySaving,
 } from "@/lib/constants";
 import { LEGAL } from "@/lib/legal";
+import { buildPublicMetadata } from "@/lib/public-seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPublicMetadata({
   title: `Услуги и цены — ${APP_NAME}`,
   description:
     "Описание и стоимость услуг Unique Vocal Studio: подписка на приложение, Duo, занятия вокалом, оплата и возврат.",
-  alternates: { canonical: LEGAL.uslugiPath },
-};
+  path: LEGAL.uslugiPath,
+});
 
 const INDIVIDUAL = [
   { title: "Standart", price: APP_TIER_PRICES.standard, note: "1 месяц · ИИ-анализатор, чат, часть упражнений" },

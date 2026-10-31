@@ -8,14 +8,18 @@ export const STUDIO_PLACE = {
   name: "Свердловская Киностудия",
   /** Предложный падеж: «занимаемся в …». */
   nameIn: "Свердловской Киностудии",
-  street: "ул. Ленина, 50Ж",
+  street: "проспект Ленина, 50Ж",
+  postalCode: "620075",
   area: "центр города",
   city: LEGAL.city,
   region: "Свердловская область",
+  /** Яндекс.Карты, дом пр-т Ленина, 50Ж. */
+  lat: 56.838105,
+  lng: 60.623571,
 } as const;
 
 export const STUDIO_MAP_URL = `https://yandex.ru/maps/?text=${encodeURIComponent(
-  "Свердловская киностудия, ул. Ленина 50Ж, Екатеринбург"
+  "Свердловская киностудия, проспект Ленина 50Ж, Екатеринбург"
 )}`;
 
 export const PUBLIC_PATHS = {
