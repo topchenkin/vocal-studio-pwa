@@ -164,7 +164,12 @@ export default function ContentManager() {
       await Promise.all([
         supabase.from("exercises").select("*").order("created_at", { ascending: false }),
         supabase.from("student_folders").select("*").order("sort_order"),
-        supabase.from("profiles").select("*").eq("role", "student").order("full_name"),
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("role", "student")
+          .is("deleted_at", null)
+          .order("full_name"),
         supabase.from("exercise_folder_access").select("*"),
         supabase.from("exercise_student_access").select("*"),
       ]);

@@ -73,6 +73,7 @@ export interface StudentProfile {
   gift_kind?: string | null;
   gift_note?: string | null;
   gift_buyer_name?: string | null;
+  deleted_at?: string | null;
 }
 
 export type LessonStatus = "open" | "scheduled" | "completed" | "cancelled";
@@ -1095,6 +1096,10 @@ export interface Database {
         Returns: GiftCertificateRow;
       };
       admin_delete_gift_certificate: {
+        Args: { p_id: string };
+        Returns: undefined;
+      };
+      admin_delete_student: {
         Args: { p_id: string };
         Returns: undefined;
       };

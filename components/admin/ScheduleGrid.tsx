@@ -445,7 +445,11 @@ export default function ScheduleGrid() {
 
     const [lessonsResult, studentsResult] = await Promise.all([
       supabase.from("lessons").select("*").order("datetime", { ascending: true }),
-      supabase.from("profiles").select("*").eq("role", "student"),
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("role", "student")
+        .is("deleted_at", null),
     ]);
 
     if (lessonsResult.error || studentsResult.error) {
@@ -774,7 +778,7 @@ export default function ScheduleGrid() {
     const profile = students.find((student) => student.id === studentId);
     return profile
       ? profile.full_name || profile.email || `Ученик ${profile.id.slice(0, 8)}`
-      : `Ученик ${studentId.slice(0, 8)}`;
+      : "Ученик удален";
   };
 
   if (loading) {

@@ -91,6 +91,7 @@ export default function DebtorsPanel() {
         .from("profiles")
         .select("*")
         .eq("role", "student")
+        .is("deleted_at", null)
         .gt("debt_amount", 0)
         .order("debt_amount", { ascending: false });
 

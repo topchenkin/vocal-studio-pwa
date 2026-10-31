@@ -62,7 +62,15 @@ export default function AdminChat() {
           supabase.from("student_folders").select("*").order("sort_order"),
           supabase.from("student_folder_members").select("*"),
         ]);
-      setStudents(studentsResult.data ?? []);
+      const rows = [...(studentsResult.data ?? [])].sort((a, b) => {
+        const deleted = Number(Boolean(a.deleted_at)) - Number(Boolean(b.deleted_at));
+        if (deleted !== 0) return deleted;
+        return (a.full_name || a.email || "").localeCompare(
+          b.full_name || b.email || "",
+          "ru"
+        );
+      });
+      setStudents(rows);
       setGroups(groupsResult.data ?? []);
       setFolders(foldersResult.data ?? []);
       setFolderMembers(membersResult.data ?? []);
@@ -84,7 +92,10 @@ export default function AdminChat() {
     }
   }, [searchParams]);
 
-  const allStudentsForPicker = useMemo(() => students, [students]);
+  const allStudentsForPicker = useMemo(
+    () => students.filter((student) => !student.deleted_at),
+    [students]
+  );
 
   if (!user) return null;
   const localAdmin = {
@@ -191,8 +202,14 @@ export default function AdminChat() {
                   activeStudentId === student.id && "bg-studio-accent/10"
                 )}
               >
-                <p className="truncate text-sm font-medium">
+                <p
+                  className={cn(
+                    "truncate text-sm font-medium",
+                    student.deleted_at && "text-studio-muted"
+                  )}
+                >
                   {student.full_name || student.email || "Ученик"}
+                  {student.deleted_at ? " удален" : ""}
                 </p>
               </button>
             ))}

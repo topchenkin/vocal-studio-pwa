@@ -88,7 +88,11 @@ export default function NotificationForm() {
 
     const loadStudents = async () => {
       const [studentsResult, foldersResult, membersResult] = await Promise.all([
-        supabase.from("profiles").select("*").eq("role", "student"),
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("role", "student")
+          .is("deleted_at", null),
         supabase
           .from("student_folders")
           .select("*")

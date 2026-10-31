@@ -134,6 +134,8 @@ function StudentEditor({
   onFoldersSaved,
   mockMode,
   onBulkCancel,
+  onDelete,
+  deleting,
 }: {
   student: StudentProfile | null;
   open: boolean;
@@ -144,6 +146,8 @@ function StudentEditor({
   onFoldersSaved: (studentId: string, folderIds: string[]) => void;
   mockMode: boolean;
   onBulkCancel: (student: StudentProfile) => void;
+  onDelete: (student: StudentProfile) => void;
+  deleting: boolean;
 }) {
   const [draft, setDraft] = useState<StudentProfile | null>(student);
   const [saving, setSaving] = useState(false);
@@ -604,6 +608,21 @@ function StudentEditor({
           Отменить занятия за период
         </Button>
 
+        <Button
+          fullWidth
+          size="sm"
+          variant="danger"
+          disabled={deleting || saving}
+          onClick={() => onDelete(draft)}
+        >
+          <Trash2 className="h-4 w-4" />
+          {deleting ? "Удаляем..." : "Удалить из учеников"}
+        </Button>
+        <p className="text-[11px] leading-relaxed text-studio-muted">
+          Карточка пропадёт из списка. Чат сохранится с пометкой «удален».
+          Паузу кладите в папку «Архив» — её можно создать в «Папках».
+        </p>
+
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         <div className="flex gap-3">
@@ -641,6 +660,7 @@ export default function StudentsTable() {
   const [folderSaving, setFolderSaving] = useState(false);
   const [bulkStudent, setBulkStudent] = useState<StudentProfile | null>(null);
   const [bulkSuccess, setBulkSuccess] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isMockAdmin) {
@@ -672,6 +692,7 @@ export default function StudentsTable() {
           .from("profiles")
           .select("*")
           .eq("role", "student")
+          .is("deleted_at", null)
           .order("is_active_student", { ascending: false }),
         supabase
           .from("student_folders")
@@ -786,6 +807,47 @@ export default function StudentsTable() {
       current.filter((member) => member.folder_id !== folderId)
     );
     if (folderFilter === folderId) setFolderFilter("all");
+  };
+
+  const deleteStudent = async (student: StudentProfile) => {
+    const name = student.full_name || student.email || "этого ученика";
+    const debtNote =
+      student.debt_amount > 0
+        ? `\n\nУ ученика долг ${student.debt_amount.toLocaleString("ru-RU")} ₽.`
+        : "";
+    if (
+      !window.confirm(
+        `Удалить «${name}» из учеников?${debtNote}\n\nКарточка пропадёт из списка. Чат сохранится, в нём будет пометка «удален». Это необратимо.`
+      )
+    ) {
+      return;
+    }
+
+    if (isMockAdmin) {
+      setStudents((current) => current.filter((item) => item.id !== student.id));
+      setMembers((current) =>
+        current.filter((member) => member.student_id !== student.id)
+      );
+      if (selected?.id === student.id) setSelected(null);
+      return;
+    }
+
+    setError("");
+    setDeletingId(student.id);
+    const { error: rpcError } = await supabase.rpc("admin_delete_student", {
+      p_id: student.id,
+    });
+    setDeletingId(null);
+    if (rpcError) {
+      console.error("[uvs:admin] delete student", rpcError.message);
+      setError(rpcError.message || "Не удалось удалить ученика");
+      return;
+    }
+    setStudents((current) => current.filter((item) => item.id !== student.id));
+    setMembers((current) =>
+      current.filter((member) => member.student_id !== student.id)
+    );
+    if (selected?.id === student.id) setSelected(null);
   };
 
   if (loading) {
@@ -1064,6 +1126,17 @@ export default function StudentsTable() {
                   <CalendarX2 className="h-3.5 w-3.5" />
                   Отменить занятия
                 </Button>
+                <Button
+                  fullWidth
+                  size="sm"
+                  variant="danger"
+                  className="col-span-2"
+                  disabled={deletingId === student.id}
+                  onClick={() => void deleteStudent(student)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingId === student.id ? "Удаляем..." : "Удалить из учеников"}
+                </Button>
               </div>
             </article>
           );
@@ -1116,6 +1189,8 @@ export default function StudentsTable() {
           setSelected(null);
           setBulkStudent(student);
         }}
+        onDelete={(student) => void deleteStudent(student)}
+        deleting={deletingId === selected?.id}
       />
 
       <BulkCancelLessonsModal
@@ -1139,6 +1214,10 @@ export default function StudentsTable() {
         size="sm"
       >
         <div className="space-y-4">
+          <p className="text-xs leading-relaxed text-studio-muted">
+            Пауза — создайте папку «Архив» и перенесите ученика в карточке. Полное
+            удаление убирает из списка, чат остаётся.
+          </p>
           <div className="flex gap-2">
             <input
               value={folderName}
