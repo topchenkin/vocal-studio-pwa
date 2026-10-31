@@ -1303,6 +1303,7 @@ begin
     id,
     email,
     full_name,
+    phone,
     role,
     app_sub_tier,
     cat_level,
@@ -1317,6 +1318,7 @@ begin
     new.id,
     new.email,
     new.raw_user_meta_data ->> 'full_name',
+    nullif(trim(coalesce(new.raw_user_meta_data ->> 'phone', '')), ''),
     case
       when lower(new.email) = 'iris.jar008@gmail.com' then 'admin'
       else 'student'

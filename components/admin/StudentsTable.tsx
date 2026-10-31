@@ -9,6 +9,7 @@ import {
   MapPin,
   Minus,
   Pencil,
+  Phone,
   Plus,
   Search,
   Trash2,
@@ -62,6 +63,7 @@ const mockStudents: StudentProfile[] = [
     custom_abonement_price: 20000,
     lessons_balance: 5,
     debt_amount: 0,
+    phone: "+7 900 000-00-01",
   },
   {
     id: "demo-student-max",
@@ -79,6 +81,7 @@ const mockStudents: StudentProfile[] = [
     custom_abonement_price: 0,
     lessons_balance: 0,
     debt_amount: 3500,
+    phone: "+7 900 111-22-33",
   },
 ];
 
@@ -187,6 +190,7 @@ function StudentEditor({
       draft.lesson_format === "online" ? "online" : "offline";
 
     const updates = {
+      phone: draft.phone?.trim() || null,
       lesson_format: lessonFormat,
       online_lesson_url: onlineUrl || null,
       is_active_student: draft.is_active_student,
@@ -272,6 +276,30 @@ function StudentEditor({
   return (
     <Modal open={open} onClose={onClose} title="Карточка ученика" size="lg">
       <div className="space-y-6">
+        <div className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
+          <p className="text-xs font-medium uppercase tracking-[0.16em] text-studio-muted">
+            Контакты
+          </p>
+          <p className="mt-2 truncate text-sm">{draft.email || "Почта не указана"}</p>
+          <label className="mt-3 block">
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Телефон
+            </span>
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              value={draft.phone ?? ""}
+              onChange={(event) => updateDraft("phone", event.target.value)}
+              placeholder="+7 …"
+              className="w-full rounded-xl bg-studio-bg px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            />
+            <span className="mt-1 block text-[11px] text-studio-muted">
+              Справочное поле для связи. СМС не отправляем.
+            </span>
+          </label>
+        </div>
+
         <div className="flex items-center justify-between rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
           <div>
             <p className="font-medium">Активный ученик</p>
@@ -736,10 +764,14 @@ export default function StudentsTable() {
 
   const visibleStudents = tabStudents.filter((student) => {
     const query = search.trim().toLowerCase();
+    const phoneDigits = (student.phone ?? "").replace(/\D/g, "");
+    const queryDigits = query.replace(/\D/g, "");
     const matchesSearch =
       !query ||
       student.full_name?.toLowerCase().includes(query) ||
-      student.email?.toLowerCase().includes(query);
+      student.email?.toLowerCase().includes(query) ||
+      student.phone?.toLowerCase().includes(query) ||
+      (queryDigits.length >= 4 && phoneDigits.includes(queryDigits));
     const matchesStatus =
       statusFilter === "all" ||
       (statusFilter === "active"
@@ -895,7 +927,7 @@ export default function StudentsTable() {
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Поиск по имени или email"
+              placeholder="Поиск по имени, почте или телефону"
               className="w-full rounded-xl bg-studio-surface py-3 pl-10 pr-4 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
             />
           </label>
@@ -998,6 +1030,12 @@ export default function StudentsTable() {
                       <p className="truncate text-xs text-studio-muted">
                         {student.email || student.id.slice(0, 12)}
                       </p>
+                      {student.phone ? (
+                        <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-studio-muted">
+                          <Phone className="h-3 w-3 shrink-0" />
+                          {student.phone}
+                        </p>
+                      ) : null}
                     </div>
                     <Badge
                       variant={student.is_active_student ? "success" : "muted"}

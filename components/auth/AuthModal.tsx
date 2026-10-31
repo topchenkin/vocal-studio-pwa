@@ -263,6 +263,10 @@ export default function AuthModal({
                 className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
                 placeholder="+7 …"
               />
+              <span className="mt-1 block text-[11px] text-studio-muted">
+                Попадёт в карточку ученика — чтобы преподаватель мог связаться.
+                СМС не отправляем.
+              </span>
             </label>
             <label className="block">
               <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-studio-muted">
