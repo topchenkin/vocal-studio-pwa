@@ -2488,7 +2488,7 @@ end $$;
 
 create table if not exists public.ai_tool_access (
   tool_id text primary key
-    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'vocalfx', 'chordloop')),
+    check (tool_id in ('tuner', 'remover', 'timbre', 'mixer', 'pitchshift', 'musicgen', 'vocalfx', 'chordloop', 'chat', 'exercises')),
   min_tier text not null default 'none'
     check (min_tier in ('none', 'standard', 'premium', 'vip')),
   enabled boolean not null default true,
@@ -2520,7 +2520,9 @@ values
   ('pitchshift', 'standard', true, 'Изменение тональности'),
   ('musicgen', 'premium', false, 'ИИ-композитор'),
   ('vocalfx', 'none', true, 'Обработка голоса'),
-  ('chordloop', 'none', true, 'Генератор аккордов')
+  ('chordloop', 'none', true, 'Генератор аккордов'),
+  ('chat', 'none', true, 'Чат с преподавателем'),
+  ('exercises', 'none', true, 'Распевки и упражнения')
 on conflict (tool_id) do nothing;
 
 update public.ai_tool_access
@@ -2530,6 +2532,78 @@ where tool_id = 'tuner';
 update public.ai_tool_access
 set title = 'Звёздный двойник'
 where tool_id = 'timbre';
+
+create or replace function public.feature_tier_rank(p_tier text)
+returns integer
+language sql
+immutable
+as $$
+  select case p_tier
+    when 'standard' then 1
+    when 'premium' then 2
+    when 'vip' then 3
+    else 0
+  end;
+$$;
+
+create or replace function public.current_user_can_use_feature(p_feature text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    public.current_user_is_admin()
+    or exists (
+      select 1
+      from public.profiles as p
+      left join public.ai_tool_access as a
+        on a.tool_id = p_feature
+      where p.id = auth.uid()
+        and coalesce(a.enabled, true)
+        and public.feature_tier_rank(
+          case
+            when p.app_sub_expires_at is not null
+                 and p.app_sub_expires_at <= now()
+              then 'none'
+            else coalesce(p.app_sub_tier, 'none')
+          end
+        ) >= public.feature_tier_rank(coalesce(a.min_tier, 'none'))
+    );
+$$;
+
+revoke all on function public.feature_tier_rank(text) from public;
+grant execute on function public.feature_tier_rank(text) to authenticated;
+revoke all on function public.current_user_can_use_feature(text) from public;
+revoke all on function public.current_user_can_use_feature(text) from anon;
+grant execute on function public.current_user_can_use_feature(text) to authenticated;
+
+drop policy if exists "chat_messages_send_participants" on public.chat_messages;
+create policy "chat_messages_send_participants"
+on public.chat_messages for insert
+with check (
+  sender_id = auth.uid()
+  and (
+    public.current_user_is_admin()
+    or (
+      student_id = auth.uid()
+      and public.current_user_can_use_feature('chat')
+    )
+  )
+);
+
+drop policy if exists "group_chat_messages_send" on public.group_chat_messages;
+create policy "group_chat_messages_send"
+on public.group_chat_messages for insert
+with check (
+  sender_id = auth.uid()
+  and public.user_is_group_chat_member(group_id)
+  and (
+    public.current_user_is_admin()
+    or public.current_user_can_use_feature('chat')
+  )
+);
 
 do $$
 begin

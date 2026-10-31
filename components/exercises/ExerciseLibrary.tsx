@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Lock, Play, Video } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import PaywallOverlay from "@/components/ui/PaywallOverlay";
+import {
+  cabinetFeatureDeniedMessage,
+  canAccessCabinetFeature,
+  defaultCabinetAccessMap,
+  fetchCabinetAccess,
+  type CabinetAccessMap,
+} from "@/lib/studio-access";
 import { awardCatXp } from "@/lib/cat-xp";
 import VoicePathStrip from "@/components/student/VoicePathStrip";
 import { useStudentRetention } from "@/hooks/useStudentRetention";
@@ -97,12 +105,26 @@ const demoExercises: Exercise[] = [
 ];
 
 export default function ExerciseLibrary() {
-  const { user, tier, refreshProfile } = useAuth();
+  const { user, tier, isAdmin, refreshProfile } = useAuth();
   const { board } = useStudentRetention();
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [lockedTier, setLockedTier] = useState<AppSubscriptionTier | null>(null);
   const [payment, setPayment] = useState<PaymentPurpose | null>(null);
+  const [cabinetAccess, setCabinetAccess] = useState<CabinetAccessMap>(
+    defaultCabinetAccessMap
+  );
+
+  useEffect(() => {
+    void fetchCabinetAccess(supabase).then(setCabinetAccess);
+  }, []);
+
+  const hasExercisesAccess = canAccessCabinetFeature(
+    "exercises",
+    tier,
+    isAdmin,
+    cabinetAccess
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -193,6 +215,7 @@ export default function ExerciseLibrary() {
       <div className="mb-8">
         <VoicePathStrip board={board} />
       </div>
+      <div className="relative min-h-72">
       <section>
         <div className="mb-4">
           <h2 className="font-display text-2xl font-semibold">
@@ -295,6 +318,14 @@ export default function ExerciseLibrary() {
           })}
         </div>
       </section>
+
+      {!hasExercisesAccess ? (
+        <PaywallOverlay
+          title="Распевки и упражнения"
+          description={cabinetFeatureDeniedMessage("exercises", cabinetAccess)}
+        />
+      ) : null}
+      </div>
 
       <Modal
         open={Boolean(lockedTier)}

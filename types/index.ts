@@ -483,9 +483,11 @@ export type AiToolId =
   | "vocalfx"
   | "chordloop";
 
+export type StudioAccessFeatureId = AiToolId | "chat" | "exercises";
+
 export interface AiToolAccess {
   [key: string]: unknown;
-  tool_id: AiToolId;
+  tool_id: StudioAccessFeatureId;
   min_tier: AppSubscriptionTier;
   enabled: boolean;
   title: string;
@@ -855,7 +857,7 @@ export interface Database {
       ai_tool_access: {
         Row: AiToolAccess;
         Insert: {
-          tool_id: AiToolId;
+          tool_id: StudioAccessFeatureId;
           min_tier?: AppSubscriptionTier;
           enabled?: boolean;
           title?: string;

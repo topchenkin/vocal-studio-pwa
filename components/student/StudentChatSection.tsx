@@ -9,20 +9,38 @@ import { useChatMessages } from "@/hooks/useChatMessages";
 import { useGroupChatMessages } from "@/hooks/useGroupChatMessages";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import {
+  cabinetFeatureDeniedMessage,
+  canAccessCabinetFeature,
+  defaultCabinetAccessMap,
+  fetchCabinetAccess,
+  type CabinetAccessMap,
+} from "@/lib/studio-access";
 import type { GroupChat } from "@/types";
 
 type ChatMode = "teacher" | "groups";
 
 export default function StudentChatSection() {
-  const { user, tier, profile } = useAuth();
+  const { user, tier, isAdmin } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<ChatMode>("teacher");
   const [groups, setGroups] = useState<GroupChat[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [cabinetAccess, setCabinetAccess] = useState<CabinetAccessMap>(
+    defaultCabinetAccessMap
+  );
 
-  // Students enrolled in the studio always reach their teacher; others need a subscription.
-  const hasChatAccess = tier !== "none" || Boolean(profile?.is_active_student);
+  useEffect(() => {
+    void fetchCabinetAccess(supabase).then(setCabinetAccess);
+  }, []);
+
+  const hasChatAccess = canAccessCabinetFeature(
+    "chat",
+    tier,
+    isAdmin,
+    cabinetAccess
+  );
   const activeGroupId = selectedGroupId ?? groups[0]?.id ?? null;
   const { messages: teacherMessages, error: teacherError, sending: sendingTeacher, send: sendTeacher, edit: editTeacher, remove: removeTeacher } =
     useChatMessages(user?.id ?? null);
@@ -170,7 +188,7 @@ export default function StudentChatSection() {
         {!hasChatAccess && (
           <PaywallOverlay
             title="Чат с преподавателем"
-            description="Доступно ученикам студии и с подпиской Standart и выше"
+            description={cabinetFeatureDeniedMessage("chat", cabinetAccess)}
             onUpgrade={() => router.push("/dashboard/student/subscription")}
             buttonLabel="Оформить подписку"
           />

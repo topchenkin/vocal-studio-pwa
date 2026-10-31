@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Sparkles,
   LibraryBig,
+  Shield,
   UserRound,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -29,6 +30,7 @@ import MyAudioLibrary from "@/components/student/MyAudioLibrary";
 import DebtorsPanel from "@/components/admin/DebtorsPanel";
 import GiftCertificatesPanel from "@/components/admin/GiftCertificatesPanel";
 import TeacherCardEditor from "@/components/admin/TeacherCardEditor";
+import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -50,6 +52,11 @@ const TABS = [
     id: "content",
     label: "Контент",
     icon: <LibraryBig className="h-4 w-4" />,
+  },
+  {
+    id: "access",
+    label: "Доступ",
+    icon: <Shield className="h-4 w-4" />,
   },
   {
     id: "ai-tools",
@@ -191,6 +198,7 @@ export default function AdminDashboardClient() {
             {activeTab === "schedule" && <ScheduleGrid />}
             {activeTab === "notifications" && <NotificationForm />}
             {activeTab === "content" && <ContentManager />}
+            {activeTab === "access" && <AiToolsAccessSettings />}
             {activeTab === "audio" && <MyAudioLibrary />}
             {activeTab === "debtors" && <DebtorsPanel />}
             {activeTab === "gifts" && <GiftCertificatesPanel />}
