@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import {
+  BookOpen,
   CalendarDays,
   Ellipsis,
   Home,
@@ -28,6 +29,11 @@ const items = [
     href: "/dashboard/student/exercises",
     label: "Практика",
     icon: Mic,
+  },
+  {
+    href: "/dashboard/student/courses",
+    label: "Курсы",
+    icon: BookOpen,
   },
   {
     href: "/dashboard/student/chat",
@@ -57,7 +63,7 @@ export default function StudentBottomNav() {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-studio-border bg-studio-bg/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md"
         aria-label="Разделы кабинета"
       >
-        <div className="mx-auto grid max-w-6xl grid-cols-5 px-1 pt-1">
+        <div className="mx-auto grid max-w-6xl grid-cols-6 px-0.5 pt-1 sm:px-1">
           {items.map((item) => {
             const Icon = item.icon;
             const extra = "also" in item ? item.also : [];
@@ -71,7 +77,7 @@ export default function StudentBottomNav() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-11 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium ${
+                className={`relative flex min-h-11 flex-col items-center justify-center gap-0.5 px-0.5 py-2 text-[10px] font-medium sm:text-xs ${
                   active ? "text-studio-accent-light" : "text-studio-muted"
                 }`}
               >
