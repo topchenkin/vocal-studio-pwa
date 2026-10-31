@@ -9,7 +9,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
-import { formatAppTier } from "@/lib/constants";
+import { ABONEMENT_LESSONS, formatAppTier } from "@/lib/constants";
 import {
   fetchPaymentMethods,
   startPayment,
@@ -75,7 +75,8 @@ function IntlLogo() {
 
 function purposeLabel(purpose: PaymentPurpose) {
   if (purpose.type === "debt") return "Оплата задолженности за урок";
-  if (purpose.type === "abonement") return "Оплата абонемента";
+  if (purpose.type === "abonement")
+    return `Оплата абонемента · ${purpose.lessonsCount ?? ABONEMENT_LESSONS} урока`;
   if (purpose.type === "lesson") return "Оплата занятия";
   if (purpose.type === "test_payment") return "Тестовая оплата · 1 ₽";
   return `Подписка ${formatAppTier(purpose.tier)}${

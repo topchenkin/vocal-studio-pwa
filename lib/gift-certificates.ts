@@ -23,9 +23,9 @@ export type GiftCertificate = GiftCertificateRow;
 
 export const GIFT_KIND_LABELS: Record<GiftKind, string> = {
   lesson: "Один урок",
-  abonement: "Абонемент",
+  abonement: "Абонемент (4 урока)",
   subscription: "Подписка",
-  premium: "Премиум: абонемент + подписка",
+  premium: "Премиум: абонемент (4 урока) + подписка",
 };
 
 export const GIFT_STATUS_LABELS: Record<GiftStatus, string> = {

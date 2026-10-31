@@ -20,6 +20,7 @@ TEST_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-23-test-payment.sql"
 LESSON_PAY_SQL = ROOT / "supabase-migrations" / "2026-08-26-lesson-schedule-pay.sql"
 AUDIT_SQL = ROOT / "supabase-migrations" / "2026-09-05-audit-hardening.sql"
 CAP_ABONEMENT_SQL = ROOT / "supabase-migrations" / "2026-09-07-cap-abonement-lessons.sql"
+FOUR_ABONEMENT_SQL = ROOT / "supabase-migrations" / "2026-10-31-abonement-four-lessons.sql"
 ROLLOUT_SQL = ROOT / "supabase-migrations" / "2026-09-07-rollout-hardening.sql"
 ENV_LOCAL = ROOT / ".env.local"
 
@@ -127,6 +128,7 @@ def main() -> None:
         LESSON_PAY_SQL,
         AUDIT_SQL,
         CAP_ABONEMENT_SQL,
+        FOUR_ABONEMENT_SQL,
         ROLLOUT_SQL,
     ):
         if not path.is_file():
@@ -179,6 +181,8 @@ def main() -> None:
                 fh.write(AUDIT_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/cap-abonement-lessons.sql", "wb") as fh:
                 fh.write(CAP_ABONEMENT_SQL.read_bytes().replace(b"\r\n", b"\n"))
+            with sftp.file("/opt/uvs-migrate/abonement-four-lessons.sql", "wb") as fh:
+                fh.write(FOUR_ABONEMENT_SQL.read_bytes().replace(b"\r\n", b"\n"))
             with sftp.file("/opt/uvs-migrate/rollout-hardening.sql", "wb") as fh:
                 fh.write(ROLLOUT_SQL.read_bytes().replace(b"\r\n", b"\n"))
         finally:
@@ -193,6 +197,7 @@ def main() -> None:
             "audit-hardening.sql",
             "cap-abonement-lessons.sql",
             "rollout-hardening.sql",
+            "abonement-four-lessons.sql",
         ):
             run(
                 client,

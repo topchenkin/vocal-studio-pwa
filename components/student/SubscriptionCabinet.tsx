@@ -13,6 +13,7 @@ import DuoSubscriptionCard from "@/components/student/DuoSubscriptionCard";
 import PaymentHistory from "@/components/student/PaymentHistory";
 import { useAuth } from "@/context/AuthContext";
 import {
+  ABONEMENT_LESSONS,
   APP_TIER_PRICES,
   PLANS,
   SUBSCRIPTION_MONTH_OPTIONS,
@@ -188,7 +189,9 @@ export default function SubscriptionCabinet() {
           </div>
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl bg-studio-bg/40 px-5 py-4 ring-1 ring-studio-border/80">
-              <p className="text-xs text-studio-muted">Остаток уроков</p>
+              <p className="text-xs text-studio-muted">
+                Остаток уроков · пакет {ABONEMENT_LESSONS}
+              </p>
               <p className="mt-1 font-display text-3xl font-semibold">
                 {profile.lessons_balance}
               </p>
@@ -197,7 +200,7 @@ export default function SubscriptionCabinet() {
               <p className="text-xs text-studio-muted">Оплата занятий</p>
               <p className="mt-1 text-sm font-medium">
                 {profile.lesson_pay_type === "abonement"
-                  ? "Абонемент"
+                  ? `Абонемент · ${ABONEMENT_LESSONS} урока`
                   : "Разовая"}
               </p>
               <p className="mt-1 text-xs text-studio-gold">
@@ -248,10 +251,12 @@ export default function SubscriptionCabinet() {
         {profile.lesson_pay_type === "abonement" &&
           profile.custom_abonement_price > 0 && (
             <section className="rounded-3xl bg-studio-surface p-5 ring-1 ring-studio-border">
-              <p className="font-medium">Абонемент на занятия</p>
+              <p className="font-medium">
+                Абонемент на {ABONEMENT_LESSONS} урока
+              </p>
               <p className="mt-1 text-sm text-studio-muted">
-                Оплата пакета уроков через ЮKassa (СБП). После оплаты баланс
-                уроков пополнится.
+                Оплата пакета из {ABONEMENT_LESSONS} уроков через ЮKassa (СБП).
+                После оплаты на баланс начислятся {ABONEMENT_LESSONS} урока.
               </p>
               <Button
                 className="mt-4"
@@ -261,11 +266,11 @@ export default function SubscriptionCabinet() {
                   setPayment({
                     type: "abonement",
                     amount: profile.custom_abonement_price,
-                    lessonsCount: 8,
+                    lessonsCount: ABONEMENT_LESSONS,
                   })
                 }
               >
-                Оплатить абонемент ·{" "}
+                Оплатить абонемент · {ABONEMENT_LESSONS} урока ·{" "}
                 {profile.custom_abonement_price.toLocaleString("ru-RU")} ₽
               </Button>
             </section>

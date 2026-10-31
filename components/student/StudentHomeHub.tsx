@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CalendarDays, ChevronRight, Flame, MessageCircle } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
+import { ABONEMENT_LESSONS } from "@/lib/constants";
 import { CAT_LEVEL_IMAGES, CAT_LEVEL_LABELS } from "@/lib/cat-levels";
 import {
   catNextLabel,
@@ -129,7 +130,7 @@ export default function StudentHomeHub({
   const lessonsLine = debt > 0
     ? `Долг ${debt.toLocaleString("ru-RU")} ₽`
     : profile?.lesson_pay_type === "abonement"
-      ? `Осталось уроков: ${balance}`
+      ? `Осталось уроков: ${balance} · пакет ${ABONEMENT_LESSONS}`
       : "Разовая оплата";
 
   return (

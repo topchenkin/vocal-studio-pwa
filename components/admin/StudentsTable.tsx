@@ -26,7 +26,11 @@ import BulkCancelLessonsModal from "@/components/admin/BulkCancelLessonsModal";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
-import { effectiveAppTier, formatAppTier } from "@/lib/constants";
+import {
+  ABONEMENT_LESSONS,
+  effectiveAppTier,
+  formatAppTier,
+} from "@/lib/constants";
 import {
   formatStudioExpiry,
   studioDateKey,
@@ -566,7 +570,9 @@ function StudentEditor({
               }}
               className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
             >
-              <option value="abonement">Абонемент</option>
+              <option value="abonement">
+                Абонемент · {ABONEMENT_LESSONS} урока
+              </option>
               <option value="one_time">Разово</option>
             </select>
           </label>
@@ -575,7 +581,7 @@ function StudentEditor({
         <NumberInput
           label={
             draft.lesson_pay_type === "abonement"
-              ? "Стоимость абонемента, ₽"
+              ? `Стоимость абонемента (${ABONEMENT_LESSONS} урока), ₽`
               : "Стоимость одного урока, ₽"
           }
           value={
@@ -592,11 +598,19 @@ function StudentEditor({
             )
           }
         />
+        {draft.lesson_pay_type === "abonement" ? (
+          <p className="-mt-2 text-xs text-studio-muted">
+            Пакет всегда {ABONEMENT_LESSONS} урока. Оплата начисляет{" "}
+            {ABONEMENT_LESSONS}, проведённый урок списывает 1. При нулевом
+            остатке каждый проведённый урок без отмены добавляет ¼ цены в
+            задолженность.
+          </p>
+        ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <p className="mb-1.5 text-xs font-medium text-studio-muted">
-              Остаток уроков
+              Остаток уроков (пакет {ABONEMENT_LESSONS})
             </p>
             <div className="flex items-center gap-2 rounded-xl bg-studio-surface p-2 ring-1 ring-studio-border">
               <button
@@ -1131,7 +1145,7 @@ export default function StudentsTable() {
                 <div className="rounded-xl bg-studio-bg/50 p-3">
                   <p className="text-studio-muted">
                     {student.lesson_pay_type === "abonement"
-                      ? "Абонемент"
+                      ? `Абонемент · ${ABONEMENT_LESSONS} урока`
                       : "Разовый урок"}
                   </p>
                   <p className="mt-1 font-medium">

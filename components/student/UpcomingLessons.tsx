@@ -30,6 +30,7 @@ import {
   studioDateTimeParts,
   studioWallToUtcIso,
 } from "@/lib/studio-tz";
+import { ABONEMENT_LESSONS } from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
 
@@ -509,7 +510,8 @@ export default function UpcomingLessons() {
                     {frozen ? (
                       <p className="mt-1 flex items-center gap-1 text-xs text-studio-accent-light/80">
                         <Snowflake className="h-3 w-3" />
-                        Заморожено до оплаты абонемента
+                        Заморожено до оплаты абонемента на {ABONEMENT_LESSONS}{" "}
+                        урока
                       </p>
                     ) : null}
                     {catHighlight ? (
@@ -540,11 +542,11 @@ export default function UpcomingLessons() {
                             setPayment({
                               type: "abonement",
                               amount: abonementPrice,
-                              lessonsCount: 8,
+                              lessonsCount: ABONEMENT_LESSONS,
                             })
                           }
                         >
-                          Оплатить абонемент
+                          Оплатить абонемент · {ABONEMENT_LESSONS} урока
                         </Button>
                       ) : (
                         <p className="max-w-[9.5rem] text-right text-xs text-studio-muted">

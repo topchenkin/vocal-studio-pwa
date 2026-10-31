@@ -16,7 +16,7 @@ import Button from "@/components/ui/Button";
 import NumberInput from "@/components/ui/NumberInput";
 import GiftCertificateArt from "@/components/admin/GiftCertificateArt";
 import { useAuth } from "@/context/AuthContext";
-import { APP_TIER_PRICES } from "@/lib/constants";
+import { ABONEMENT_LESSONS, APP_TIER_PRICES } from "@/lib/constants";
 import {
   formatGiftCode,
   GIFT_KIND_LABELS,
@@ -65,7 +65,6 @@ export default function GiftCertificatesPanel() {
   const [recipientName, setRecipientName] = useState("");
   const [buyerName, setBuyerName] = useState("");
   const [note, setNote] = useState("");
-  const [lessons, setLessons] = useState(8);
   const [tier, setTier] = useState<"standard" | "premium" | "vip">("premium");
   const [amount, setAmount] = useState(20000);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -141,7 +140,11 @@ export default function GiftCertificatesPanel() {
         p_note: note.trim(),
         p_amount_rub: amount,
         p_lessons_count:
-          kind === "lesson" ? 1 : kind === "subscription" ? null : lessons,
+          kind === "lesson"
+            ? 1
+            : kind === "subscription"
+              ? null
+              : ABONEMENT_LESSONS,
         p_app_sub_tier:
           kind === "subscription" || kind === "premium" ? tier : null,
         p_buyer_name: buyerName.trim() || null,
@@ -298,11 +301,9 @@ export default function GiftCertificatesPanel() {
           </div>
 
           {(kind === "abonement" || kind === "premium") && (
-            <NumberInput
-              label="Количество занятий"
-              value={lessons}
-              onChange={setLessons}
-            />
+            <p className="rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border">
+              Абонемент — всегда {ABONEMENT_LESSONS} урока.
+            </p>
           )}
           {(kind === "subscription" || kind === "premium") && (
             <label className="block">

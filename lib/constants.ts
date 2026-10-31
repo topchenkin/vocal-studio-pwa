@@ -18,6 +18,13 @@ export const DUO_TIER_PRICES = {
   vip: 4490,
 } as const;
 
+/**
+ * Studio lesson pack. Every abonement is this many lessons.
+ * Keep in sync with confirm_payment / apply_lesson_completion_charge
+ * and deploy/pay-api/server.mjs.
+ */
+export const ABONEMENT_LESSONS = 4 as const;
+
 /** Доступные сроки оплаты подписки (без автопродления). */
 export const SUBSCRIPTION_MONTH_OPTIONS = [1, 3, 6, 12] as const;
 export type SubscriptionMonthOption =
