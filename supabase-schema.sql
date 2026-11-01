@@ -16,7 +16,8 @@ create table if not exists public.profiles (
   custom_lesson_price numeric(10, 2) not null default 0,
   custom_abonement_price numeric(10, 2) not null default 0,
   lessons_balance integer not null default 0,
-  debt_amount numeric(10, 2) not null default 0
+  debt_amount numeric(10, 2) not null default 0,
+  lesson_duration_min integer not null default 60
 );
 
 alter table public.profiles add column if not exists email text;
@@ -3056,5 +3057,14 @@ alter table public.profiles
     online_lesson_url is null
     or (online_lesson_url ~ '^https://[^[:space:]]+$' and length(online_lesson_url) <= 500)
   );
+
+-- 2026-11-01: per-student lesson length for overlap and auto-complete
+alter table public.profiles
+  add column if not exists lesson_duration_min integer not null default 60;
+
+alter table public.profiles drop constraint if exists profiles_lesson_duration_min_check;
+alter table public.profiles
+  add constraint profiles_lesson_duration_min_check
+  check (lesson_duration_min between 40 and 60);
 
 notify pgrst, 'reload schema';

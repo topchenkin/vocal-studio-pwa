@@ -29,6 +29,10 @@ import {
   formatStudioDate,
   studioWallToUtcIso,
 } from "@/lib/studio-tz";
+import {
+  clampLessonDurationMin,
+  lessonsOverlap,
+} from "@/lib/lesson-duration";
 import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
@@ -38,12 +42,13 @@ function weekdayShort(date: Date) {
   return formatStudioDate(date, { weekday: "short" });
 }
 
-function rangesOverlap(a: string, b: string) {
-  const a0 = new Date(a).getTime();
-  const a1 = a0 + 60 * 60 * 1000;
-  const b0 = new Date(b).getTime();
-  const b1 = b0 + 60 * 60 * 1000;
-  return a0 < b1 && b0 < a1;
+function durationForStudent(
+  students: StudentProfile[],
+  studentId: string | null
+) {
+  if (!studentId) return clampLessonDurationMin(undefined);
+  const student = students.find((item) => item.id === studentId);
+  return clampLessonDurationMin(student?.lesson_duration_min);
 }
 
 function statusBadge(status: Lesson["status"], hasStudent: boolean) {
@@ -62,6 +67,7 @@ function ScheduleCard({
   completingId,
   highlighted,
   conflict,
+  durationMin,
   onComplete,
   onOpenReschedule,
   onRejectReschedule,
@@ -75,6 +81,7 @@ function ScheduleCard({
   completingId: string | null;
   highlighted?: boolean;
   conflict?: boolean;
+  durationMin: number;
   onComplete: (lessonId: string) => Promise<void>;
   onOpenReschedule: (lesson: Lesson) => void;
   onRejectReschedule: (lessonId: string) => Promise<void>;
@@ -118,6 +125,8 @@ function ScheduleCard({
                 hour: "2-digit",
                 minute: "2-digit",
               })}
+              <span aria-hidden>·</span>
+              {durationMin} мин
             </p>
           </div>
         </div>
@@ -291,14 +300,21 @@ export default function ScheduleGrid() {
       for (let j = i + 1; j < scheduled.length; j += 1) {
         const left = scheduled[i];
         const right = scheduled[j];
-        if (rangesOverlap(left.datetime, right.datetime)) {
+        if (
+          lessonsOverlap(
+            left.datetime,
+            durationForStudent(students, left.student_id),
+            right.datetime,
+            durationForStudent(students, right.student_id)
+          )
+        ) {
           ids.add(left.id);
           ids.add(right.id);
         }
       }
     }
     return ids;
-  }, [lessons]);
+  }, [lessons, students]);
 
   const lessonsByDate = useMemo(
     () =>
@@ -415,6 +431,7 @@ export default function ScheduleGrid() {
           lesson_pay_type: "abonement",
           custom_lesson_price: 3000,
           custom_abonement_price: 20000,
+          lesson_duration_min: 50,
           lessons_balance: 5,
           debt_amount: 0,
         },
@@ -486,10 +503,16 @@ export default function ScheduleGrid() {
       ? Math.max(1, Math.min(52, Number(weeklyCount) || 8))
       : 1;
     const seriesId = weeklyRepeat ? crypto.randomUUID() : null;
+    const newDuration = durationForStudent(students, createStudentId);
     const clash = lessons.some(
       (lesson) =>
         lesson.status === "scheduled" &&
-        rangesOverlap(lesson.datetime, start.toISOString())
+        lessonsOverlap(
+          lesson.datetime,
+          durationForStudent(students, lesson.student_id),
+          start.toISOString(),
+          newDuration
+        )
     );
     if (clash) {
       setError("В это время уже есть занятие — слот будет подсвечен как конфликт.");
@@ -920,6 +943,7 @@ export default function ScheduleGrid() {
                       completingId={completingId}
                       highlighted={focusLessonId === lesson.id}
                       conflict={overlappingIds.has(lesson.id)}
+                      durationMin={durationForStudent(students, lesson.student_id)}
                       onComplete={completeLesson}
                       onOpenReschedule={openReschedule}
                       onRejectReschedule={(lessonId) =>
@@ -957,6 +981,7 @@ export default function ScheduleGrid() {
                 completingId={completingId}
                 highlighted={focusLessonId === lesson.id}
                 conflict={overlappingIds.has(lesson.id)}
+                durationMin={durationForStudent(students, lesson.student_id)}
                 onComplete={completeLesson}
                 onOpenReschedule={openReschedule}
                 onRejectReschedule={(lessonId) =>

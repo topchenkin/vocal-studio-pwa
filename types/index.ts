@@ -66,6 +66,7 @@ export interface StudentProfile {
   online_lesson_url?: string | null;
   custom_lesson_price: number;
   custom_abonement_price: number;
+  lesson_duration_min: number;
   lessons_balance: number;
   debt_amount: number;
   phone?: string | null;

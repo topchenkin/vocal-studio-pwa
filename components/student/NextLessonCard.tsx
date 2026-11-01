@@ -6,13 +6,13 @@ import { ChevronRight, MapPin, Video } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { buttonSizes, buttonVariants } from "@/components/ui/Button";
 import { isOnlineStudent, safeOnlineLessonUrl } from "@/lib/lesson-format";
+import { lessonDurationMs, clampLessonDurationMin } from "@/lib/lesson-duration";
 import { STUDIO_PLACE } from "@/lib/public-site";
 import type { CabinetProgress } from "@/lib/student-progress";
 import { formatStudioDate, studioDateKey } from "@/lib/studio-tz";
 import { cn } from "@/lib/utils";
 
 const SOON_MS = 48 * 60 * 60 * 1000;
-const LIVE_GRACE_MS = 60 * 60 * 1000;
 
 function countdown(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / 60000));
@@ -41,7 +41,8 @@ export default function NextLessonCard({
 
   const at = new Date(lesson.datetime).getTime();
   const diff = at - now;
-  if (Number.isNaN(at) || diff > SOON_MS || diff < -LIVE_GRACE_MS) return null;
+  const liveGrace = lessonDurationMs(profile?.lesson_duration_min);
+  if (Number.isNaN(at) || diff > SOON_MS || diff < -liveGrace) return null;
 
   const online = isOnlineStudent(profile);
   const url = safeOnlineLessonUrl(profile?.online_lesson_url);
@@ -77,6 +78,10 @@ export default function NextLessonCard({
           </p>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-studio-muted">
             <span>{when}</span>
+            <span aria-hidden>·</span>
+            <span>
+              {clampLessonDurationMin(profile?.lesson_duration_min)} мин
+            </span>
             <span aria-hidden>·</span>
             <span className="inline-flex items-center gap-1">
               {online ? (

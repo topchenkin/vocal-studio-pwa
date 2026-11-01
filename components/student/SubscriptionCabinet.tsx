@@ -24,6 +24,7 @@ import {
   type SubscriptionMonthOption,
 } from "@/lib/constants";
 import { formatPrice } from "@/lib/storage";
+import { clampLessonDurationMin } from "@/lib/lesson-duration";
 import { formatStudioExpiry } from "@/lib/studio-tz";
 import {
   isStudioTrialPremium,
@@ -215,6 +216,12 @@ export default function SubscriptionCabinet() {
                         : profile.custom_lesson_price
                     ).toLocaleString("ru-RU")} ₽`
                   : "Стоимость уточняется"}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-studio-bg/40 px-5 py-4 ring-1 ring-studio-border/80">
+              <p className="text-xs text-studio-muted">Длительность урока</p>
+              <p className="mt-1 font-display text-3xl font-semibold">
+                {clampLessonDurationMin(profile.lesson_duration_min)} мин
               </p>
             </div>
           </div>

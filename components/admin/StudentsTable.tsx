@@ -32,6 +32,10 @@ import {
   formatAppTier,
 } from "@/lib/constants";
 import {
+  LESSON_DURATION_OPTIONS,
+  clampLessonDurationMin,
+} from "@/lib/lesson-duration";
+import {
   formatStudioExpiry,
   studioDateKey,
   studioEndOfDayIso,
@@ -70,6 +74,7 @@ const mockStudents: StudentProfile[] = [
     lesson_pay_type: "abonement",
     custom_lesson_price: 3000,
     custom_abonement_price: 20000,
+    lesson_duration_min: 50,
     lessons_balance: 5,
     debt_amount: 0,
     phone: "+7 900 000-00-01",
@@ -88,6 +93,7 @@ const mockStudents: StudentProfile[] = [
     online_lesson_url: "https://telemost.yandex.ru/j/00000000000000",
     custom_lesson_price: 3500,
     custom_abonement_price: 0,
+    lesson_duration_min: 60,
     lessons_balance: 0,
     debt_amount: 3500,
     phone: "+7 900 111-22-33",
@@ -217,6 +223,7 @@ function StudentEditor({
           : 0,
       lessons_balance: draft.lessons_balance,
       debt_amount: draft.debt_amount,
+      lesson_duration_min: clampLessonDurationMin(draft.lesson_duration_min),
     };
 
     if (mockMode) {
@@ -574,6 +581,28 @@ function StudentEditor({
                 Абонемент · {ABONEMENT_LESSONS} урока
               </option>
               <option value="one_time">Разово</option>
+            </select>
+          </label>
+
+          <label>
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Продолжительность урока
+            </span>
+            <select
+              value={clampLessonDurationMin(draft.lesson_duration_min)}
+              onChange={(event) =>
+                updateDraft(
+                  "lesson_duration_min",
+                  clampLessonDurationMin(Number(event.target.value))
+                )
+              }
+              className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            >
+              {LESSON_DURATION_OPTIONS.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes} мин
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -1152,6 +1181,9 @@ export default function StudentsTable() {
                     {lessonPrice > 0
                       ? `${lessonPrice.toLocaleString("ru-RU")} ₽`
                       : "Цена не задана"}
+                  </p>
+                  <p className="mt-1 text-[10px] text-studio-muted">
+                    {clampLessonDurationMin(student.lesson_duration_min)} мин
                   </p>
                 </div>
                 <div className="rounded-xl bg-studio-bg/50 p-3">

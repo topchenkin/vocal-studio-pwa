@@ -31,6 +31,7 @@ import {
   studioWallToUtcIso,
 } from "@/lib/studio-tz";
 import { ABONEMENT_LESSONS } from "@/lib/constants";
+import { clampLessonDurationMin } from "@/lib/lesson-duration";
 import { supabase } from "@/lib/supabase";
 import type { Lesson } from "@/types";
 
@@ -501,6 +502,8 @@ export default function UpcomingLessons() {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                      <span aria-hidden>·</span>
+                      {clampLessonDurationMin(profile?.lesson_duration_min)} мин
                     </p>
                     {lesson.is_recurring ? (
                       <p className="mt-1 text-xs text-studio-accent-light">

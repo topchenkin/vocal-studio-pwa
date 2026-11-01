@@ -91,6 +91,7 @@ const mockAdminProfile: StudentProfile = {
   lesson_pay_type: "one_time",
   custom_lesson_price: 0,
   custom_abonement_price: 0,
+  lesson_duration_min: 60,
   lessons_balance: 0,
   debt_amount: 0,
 };
