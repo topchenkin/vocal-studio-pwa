@@ -229,14 +229,27 @@ export function calcBreathControl(
 }
 
 /**
- * Стабильность тона: стандартное отклонение отклонения в центах от целевой
- * ноты. Лёгкое вибрато — это нормальная особенность живого голоса и не
- * должно "убивать" оценку, поэтому нижняя граница не равна нулю:
- *  - STABILITY_STDDEV_GOOD_CENTS = 10¢ → почти прямой тон / лёгкое вибрато → счёт 100
- *  - STABILITY_STDDEV_POOR_CENTS = 70¢ → голос "плавает" между нотами → счёт 0
+ * Стабильность тона: разброс высоты, пока певец *держит* ноту.
+ * Скольжение между ступенями арпеджио и октавные срывы YIN — это не
+ * «плавающий тон», их выкидываем. Лёгкое вибрато не наказывается:
+ *  - STABILITY_STDDEV_GOOD_CENTS = 10¢ → почти прямой тон / лёгкое вибрато → 100
+ *  - STABILITY_STDDEV_POOR_CENTS = 70¢ → голос плавает по держащейся ноте → 0
  */
 const STABILITY_STDDEV_GOOD_CENTS = 10;
 const STABILITY_STDDEV_POOR_CENTS = 70;
+/** Frames farther than this are a different note / glide, not wobble. */
+const STABILITY_HOLD_CENTS = 150;
+
+function scoreStabilityFromCents(cents: number[]): number {
+  if (cents.length < 3) return 0;
+  const deviation = stdDev(cents);
+  const score =
+    100 *
+    (1 -
+      (deviation - STABILITY_STDDEV_GOOD_CENTS) /
+        (STABILITY_STDDEV_POOR_CENTS - STABILITY_STDDEV_GOOD_CENTS));
+  return clampScore(score);
+}
 
 export function calcToneStability(
   samples: VocalSample[],
@@ -246,15 +259,26 @@ export function calcToneStability(
   const voiced = samples.filter((s) => s.voiced && s.centsToTarget !== null);
   const pool =
     scored.length >= 3 || options?.requireScoreable ? scored : voiced;
-  if (pool.length === 0) return 0;
+  const held = pool.filter(
+    (sample) => Math.abs(sample.centsToTarget ?? 9999) < STABILITY_HOLD_CENTS
+  );
+  const source = held.length >= 3 ? held : pool;
+  if (source.length === 0) return 0;
 
-  const deviation = stdDev(pool.map((s) => s.centsToTarget ?? 0));
-  const score =
-    100 *
-    (1 -
-      (deviation - STABILITY_STDDEV_GOOD_CENTS) /
-        (STABILITY_STDDEV_POOR_CENTS - STABILITY_STDDEV_GOOD_CENTS));
-  return clampScore(score);
+  const groups = new Map<string, number[]>();
+  for (const sample of source) {
+    const cents = sample.centsToTarget ?? 0;
+    const list = groups.get(sample.targetNote);
+    if (list) list.push(cents);
+    else groups.set(sample.targetNote, [cents]);
+  }
+  const parts = [...groups.values()]
+    .filter((cents) => cents.length >= 3)
+    .map(scoreStabilityFromCents);
+  if (parts.length === 0) {
+    return scoreStabilityFromCents(source.map((sample) => sample.centsToTarget ?? 0));
+  }
+  return clampScore(mean(parts));
 }
 
 export function buildVocalReport(
@@ -307,18 +331,43 @@ export function buildVocalReport(
 
 export function mentorFeedback(
   score: number,
-  catLevel: CatLevel | null | undefined
+  catLevel: CatLevel | null | undefined,
+  dims?: {
+    pitchAccuracy: number;
+    toneStability: number;
+    breathControl: number;
+  }
 ): string {
   const cat = CAT_LEVEL_LABELS[catLevel ?? "beginner"] ?? CAT_LEVEL_LABELS.beginner;
+  const weakest =
+    dims &&
+    (dims.toneStability <= dims.pitchAccuracy &&
+    dims.toneStability <= dims.breathControl
+      ? "stability"
+      : dims.breathControl <= dims.pitchAccuracy
+        ? "breath"
+        : "pitch");
 
   if (score >= 90) {
     return `${cat} мурчит от восторга: интонация почти студийная. Сохрани эту опору и добавь чуть больше свободы в окончаниях фраз.`;
   }
   if (score >= 75) {
-    return `${cat} доволен: ноты в целом уверенные. Подтяни стабильность тона на длинных звуках — меньше «плавания» по частоте.`;
+    if (weakest === "stability") {
+      return `${cat} доволен: ноты в целом уверенные. Подтяни стабильность тона на длинных звуках — меньше «плавания» по частоте.`;
+    }
+    if (weakest === "breath") {
+      return `${cat} доволен: строй уже есть. Держите дыхание ровнее на длинных нотах — без просадок по громкости.`;
+    }
+    return `${cat} доволен: опора уверенная. Теперь ловите центр ноты чуть точнее.`;
   }
   if (score >= 55) {
-    return `${cat} подбадривает: база есть. Следи за дыханием — провалы по громкости тянут оценку вниз. Пой на опоре, без зажима.`;
+    if (weakest === "stability") {
+      return `${cat} подбадривает: в ноты попадаете. Держите каждую ступень ровнее, без скольжения вверх-вниз.`;
+    }
+    if (weakest === "breath") {
+      return `${cat} подбадривает: база есть. Следи за дыханием — провалы по громкости тянут оценку вниз. Пой на опоре, без зажима.`;
+    }
+    return `${cat} подбадривает: опора есть. Следи за высотой — спокойнее попадайте в центр ноты.`;
   }
   return `${cat} рядом и не осуждает: сейчас важнее спокойно попадать в центр ноты. Повтори тест тише и ровнее — точность вырастет быстрее силы.`;
 }

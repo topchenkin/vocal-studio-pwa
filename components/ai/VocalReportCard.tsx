@@ -32,7 +32,7 @@ export default function VocalReportCard({
   compact?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mentor = mentorFeedback(payload.overallScore, catLevel);
+  const mentor = mentorFeedback(payload.overallScore, catLevel, payload);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -83,7 +83,7 @@ export default function VocalReportCard({
         </p>
         <p className="mt-1 text-xs text-studio-muted">
           {payload.mode === "scale"
-            ? straightDashNodes("Арпеджио C4-E4-G4")
+            ? "Арпеджио до — ми — соль"
             : `Нота ${payload.targetLabel}`}{" "}
           · {payload.durationSec}с
         </p>

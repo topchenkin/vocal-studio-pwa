@@ -22,6 +22,7 @@ import { TIER_RANK } from "@/lib/constants";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
 import { EXERCISE_ATTEMPT_MAX_SEC } from "@/lib/vocal-exercise";
+import { describeNote } from "@/lib/pitch";
 import type { Exercise } from "@/types";
 import Link from "next/link";
 import MediaAudio from "@/components/media/MediaAudio";
@@ -326,6 +327,7 @@ export default function VocalExercisePractice({
 
   const { listening, live } = analyzer;
   const note = live.note ?? "—";
+  const noteRu = note === "—" ? "—" : describeNote(note);
   const hz = live.frequencyHz ? Math.round(live.frequencyHz * 10) / 10 : 0;
 
   return (
@@ -369,7 +371,7 @@ export default function VocalExercisePractice({
           {listening && (
             <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center">
               <p className="font-display text-3xl font-semibold leading-none drop-shadow">
-                {note}
+                {noteRu}
               </p>
               <p className="mt-1 text-[11px] text-studio-muted">
                 {hz > 0 ? `${hz} Hz` : "Спойте — нота появится здесь"}

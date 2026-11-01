@@ -87,6 +87,7 @@ export default function PitchAnalyzer({
   useEffect(() => () => stopReferenceTone(), []);
 
   const note = live.note ?? "—";
+  const noteRu = note === "—" ? "—" : describeNote(note);
   const hz = live.frequencyHz ? Math.round(live.frequencyHz * 10) / 10 : 0;
 
   // Which note the singer should be hitting *right now* during a test —
@@ -301,7 +302,7 @@ export default function PitchAnalyzer({
         {listening && (
           <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center">
             <p className="font-display text-3xl font-semibold leading-none drop-shadow">
-              {note}
+              {noteRu}
             </p>
             <p className="mt-1 text-[11px] text-studio-muted">
               {hz > 0 ? `${hz} Hz` : "Спойте — нота появится здесь"}
@@ -315,9 +316,9 @@ export default function PitchAnalyzer({
           <p className="text-xs uppercase tracking-wide text-studio-muted">
             Текущая нота
           </p>
-          <p className="mt-1 font-display text-5xl font-semibold">{note}</p>
+          <p className="mt-1 font-display text-5xl font-semibold">{noteRu}</p>
           <p className="mt-1 text-sm text-studio-muted">
-            {hz > 0 ? `${hz} Hz · ${describeNote(note)}` : "Спойте в микрофон"}
+            {hz > 0 ? `${hz} Hz` : "Спойте в микрофон"}
           </p>
           <p
             className={`mt-3 text-sm font-semibold ${
@@ -493,7 +494,7 @@ export default function PitchAnalyzer({
                       : "bg-studio-bg text-studio-muted ring-studio-border hover:text-studio-text"
                   }`}
                 >
-                  {n}
+                  {describeNote(n)}
                 </button>
               ))}
             </div>
