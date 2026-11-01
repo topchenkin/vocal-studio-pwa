@@ -128,7 +128,7 @@ export async function closeVocalStep(input: {
     p_seconds: Math.round(input.seconds),
   });
   if (error) {
-    console.warn("close_vocal_step", error.message);
+    console.warn("[uvs:practice]", "close_vocal_step", error.message);
     return false;
   }
   if (typeof window !== "undefined") {

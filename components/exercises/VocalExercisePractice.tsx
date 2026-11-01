@@ -452,23 +452,17 @@ export default function VocalExercisePractice({
                 disabled={Boolean(marking) || sharing}
                 onClick={() => {
                   setMarking("ok");
+                  setStepNote("Запись принята. Можно отправить преподавателю.");
                   void closeVocalStep({
                     kind: "exercise",
                     ref: exercise.id,
                     title: exercise.title,
                     mark: "ok",
                     seconds: take.durationSec,
-                  }).then((ok) => {
-                    setMarking(null);
-                    setStepNote(
-                      ok
-                        ? "Запись принята. Шаг тропы закрыт."
-                        : "Не удалось сохранить шаг. Запись на месте — нажмите ещё раз."
-                    );
-                  });
+                  }).finally(() => setMarking(null));
                 }}
               >
-                {marking === "ok" ? "Сохраняем…" : "Принять запись"}
+                {marking === "ok" ? "Принимаем…" : "Принять запись"}
               </Button>
               <Button
                 variant="secondary"
@@ -476,26 +470,22 @@ export default function VocalExercisePractice({
                 disabled={Boolean(marking) || sharing}
                 onClick={() => {
                   setMarking("again");
+                  setStepNote("Ок, можно записать снова.");
                   void closeVocalStep({
                     kind: "exercise",
                     ref: exercise.id,
                     title: exercise.title,
                     mark: "again",
                     seconds: take.durationSec,
-                  }).then((ok) => {
-                    setMarking(null);
-                    setStepNote(
-                      ok
-                        ? "Вернём это упражнение позже."
-                        : "Не удалось сохранить шаг. Запись на месте — нажмите ещё раз."
-                    );
-                  });
+                  }).finally(() => setMarking(null));
                 }}
               >
                 {marking === "again" ? "Сохраняем…" : "Ещё раз"}
               </Button>
             </div>
-            {stepNote && <p className="text-sm text-studio-text">{stepNote}</p>}
+            {stepNote && (
+              <p className="text-sm text-emerald-400">{stepNote}</p>
+            )}
             {canSend ? (
               <Button
                 className="w-full"
