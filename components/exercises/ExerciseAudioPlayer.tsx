@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
-import { preferIosPlayback, routeHtmlMediaToSpeaker } from "@/lib/ios-audio-session";
+import {
+  forceIosSpeakerRoute,
+  preferIosPlayback,
+  pulseIosPlayback,
+  routeHtmlMediaToSpeaker,
+} from "@/lib/ios-audio-session";
 
 export default function ExerciseAudioPlayer({
   src,
@@ -16,6 +21,18 @@ export default function ExerciseAudioPlayer({
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(120);
   const [speed, setSpeed] = useState(1);
+
+  useEffect(() => {
+    const pauseOthers = () => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused) return;
+      audio.pause();
+      setPlaying(false);
+    };
+    window.addEventListener("uvs-pause-exercise-audio", pauseOthers);
+    return () =>
+      window.removeEventListener("uvs-pause-exercise-audio", pauseOthers);
+  }, []);
 
   useEffect(() => {
     if (!playing || src) return;
@@ -38,6 +55,8 @@ export default function ExerciseAudioPlayer({
     if (!audio) return;
     if (audio.paused) {
       preferIosPlayback();
+      pulseIosPlayback();
+      await forceIosSpeakerRoute();
       void routeHtmlMediaToSpeaker(audio);
       await audio.play();
       setPlaying(true);

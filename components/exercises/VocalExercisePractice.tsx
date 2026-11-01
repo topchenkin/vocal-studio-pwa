@@ -8,6 +8,11 @@ import { awardCatXp } from "@/lib/cat-xp";
 import { logPracticeSeconds } from "@/lib/practice-log";
 import { closeVocalStep } from "@/lib/student-retention";
 import { sendChatMessageDirect, uploadChatMediaFile } from "@/lib/chat-media";
+import {
+  createChatRecorder,
+  startChatRecorder,
+} from "@/lib/chat-capture";
+import { voiceFileFromChunks } from "@/lib/media-mime";
 import { renderPracticeSharePng } from "@/lib/exercise-result-card";
 import {
   exercisePracticeChatText,
@@ -16,15 +21,15 @@ import {
 import { TIER_RANK } from "@/lib/constants";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
-import {
-  audioBufferToWavBlob,
-  startContextPcmCapture,
-  type PcmCaptureSession,
-} from "@/lib/pcm-capture";
 import { EXERCISE_ATTEMPT_MAX_SEC } from "@/lib/vocal-exercise";
 import type { Exercise } from "@/types";
 import Link from "next/link";
-import { preferIosPlayback } from "@/lib/ios-audio-session";
+import MediaAudio from "@/components/media/MediaAudio";
+import {
+  preferIosPlayback,
+  pulseIosPlayback,
+  routeHtmlMediaToSpeaker,
+} from "@/lib/ios-audio-session";
 
 type PracticeStage = "idle" | "live" | "recording" | "ready" | "sending";
 
@@ -39,14 +44,18 @@ export default function VocalExercisePractice({
   const { user, profile, refreshProfile, tier, isAdmin } = useAuth();
   const analyzer = useVocalAnalyzer();
   const audioRef = useRef<HTMLAudioElement>(null);
-  const captureRef = useRef<PcmCaptureSession | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const stopRecordingRef = useRef<(() => void) | null>(null);
   const stageRef = useRef<PracticeStage>("idle");
+  const takeUrlRef = useRef<string | null>(null);
   const [stage, setStage] = useState<PracticeStage>("idle");
   const [error, setError] = useState("");
-  const [take, setTake] = useState<{ blob: Blob; durationSec: number } | null>(
-    null
-  );
+  const [take, setTake] = useState<{
+    file: File;
+    durationSec: number;
+    url: string;
+  } | null>(null);
   const [sharing, setSharing] = useState(false);
   const [stepNote, setStepNote] = useState("");
   const [marking, setMarking] = useState<"ok" | "again" | null>(null);
@@ -62,11 +71,38 @@ export default function VocalExercisePractice({
 
   const stopListening = analyzer.stopListening;
 
+  const revokeTakeUrl = () => {
+    if (takeUrlRef.current) {
+      URL.revokeObjectURL(takeUrlRef.current);
+      takeUrlRef.current = null;
+    }
+  };
+
+  const replaceTake = (
+    next: { file: File; durationSec: number } | null
+  ) => {
+    revokeTakeUrl();
+    if (!next) {
+      setTake(null);
+      return;
+    }
+    const url = URL.createObjectURL(next.file);
+    takeUrlRef.current = url;
+    setTake({ file: next.file, durationSec: next.durationSec, url });
+  };
+
   useEffect(
     () => () => {
-      captureRef.current?.abort();
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
       audioRef.current?.pause();
       stopListening();
+      revokeTakeUrl();
     },
     [stopListening]
   );
@@ -85,7 +121,10 @@ export default function VocalExercisePractice({
   const playBacking = async () => {
     const audio = audioRef.current;
     if (!audio) return;
+    window.dispatchEvent(new Event("uvs-pause-exercise-audio"));
     preferIosPlayback();
+    pulseIosPlayback();
+    void routeHtmlMediaToSpeaker(audio);
     audio.currentTime = 0;
     try {
       await audio.play();
@@ -96,7 +135,7 @@ export default function VocalExercisePractice({
 
   const startLive = async () => {
     setError("");
-    setTake(null);
+    replaceTake(null);
     try {
       await analyzer.startListening();
       preferIosPlayback();
@@ -112,8 +151,6 @@ export default function VocalExercisePractice({
   };
 
   const stopLive = () => {
-    captureRef.current?.abort();
-    captureRef.current = null;
     stopRecordingRef.current?.();
     stopRecordingRef.current = null;
     stopBacking();
@@ -121,10 +158,24 @@ export default function VocalExercisePractice({
     setPracticeStage(take ? "ready" : "idle");
   };
 
+  const stopMediaRecorder = () =>
+    new Promise<void>((resolve) => {
+      const recorder = recorderRef.current;
+      if (!recorder || recorder.state === "inactive") {
+        resolve();
+        return;
+      }
+      recorder.onstop = () => resolve();
+      try {
+        recorder.stop();
+      } catch {
+        resolve();
+      }
+    });
+
   const record = async () => {
     if (!user || !exercise.media_url) return;
     setError("");
-    setTake(null);
     try {
       if (!analyzer.listening) {
         await analyzer.startListening();
@@ -133,13 +184,19 @@ export default function VocalExercisePractice({
       if (!graph) {
         throw new Error("Микрофон ещё не готов. Нажмите ещё раз.");
       }
+      const { recorder, mime } = createChatRecorder(graph.stream, "voice");
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+      recorderRef.current = recorder;
       setPracticeStage("recording");
-      const capture = startContextPcmCapture(
-        graph.context,
-        graph.stream,
-        graph.context.currentTime
-      );
-      captureRef.current = capture;
+      preferIosPlayback();
+      pulseIosPlayback();
+      startChatRecorder(recorder, "voice");
+      const startedAt = performance.now();
       await playBacking();
       const seconds = Math.min(EXERCISE_ATTEMPT_MAX_SEC, 180);
       await Promise.race([
@@ -150,25 +207,37 @@ export default function VocalExercisePractice({
       ]);
       stopRecordingRef.current = null;
       stopBacking();
-      const buffer = await capture.stop();
-      captureRef.current = null;
+      await stopMediaRecorder();
+      recorderRef.current = null;
       analyzer.stopListening();
-      if (buffer.duration < 1) {
+      const elapsedSec = (performance.now() - startedAt) / 1000;
+      if (elapsedSec < 1) {
         throw new Error("Запись слишком короткая. Попробуйте ещё раз.");
       }
-      const blob = audioBufferToWavBlob(buffer);
-      setTake({
-        blob,
-        durationSec: Math.max(1, Math.round(buffer.duration)),
+      const file = voiceFileFromChunks(chunksRef.current, mime);
+      chunksRef.current = [];
+      if (file.size < 32) {
+        throw new Error("Запись не сохранилась. Нажмите «Записать» ещё раз.");
+      }
+      replaceTake({
+        file,
+        durationSec: Math.max(1, Math.round(elapsedSec)),
       });
       setPracticeStage("ready");
-      void logPracticeSeconds("exercise", Math.round(buffer.duration));
+      void logPracticeSeconds("exercise", Math.round(elapsedSec));
       void awardCatXp("exercise").then((result) => {
         if (result?.awarded) void refreshProfile();
       });
     } catch (caught) {
-      captureRef.current?.abort();
-      captureRef.current = null;
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      recorderRef.current = null;
+      chunksRef.current = [];
       stopBacking();
       analyzer.stopListening();
       setError(
@@ -202,9 +271,7 @@ export default function VocalExercisePractice({
       const imageFile = new File([card], "exercise-practice.png", {
         type: "image/png",
       });
-      const voiceFile = new File([take.blob], "exercise-practice.wav", {
-        type: "audio/wav",
-      });
+      const voiceFile = take.file;
       const uploadedCard = await uploadChatMediaFile(user.id, "image", imageFile);
       await sendChatMessageDirect({
         studentId: user.id,
@@ -239,13 +306,17 @@ export default function VocalExercisePractice({
           if (result?.awarded) void refreshProfile();
         }
       );
-      setTake(null);
+      replaceTake(null);
       setPracticeStage("idle");
     } catch (caught) {
       setError(
         caught instanceof Error
-          ? caught.message
-          : "Не удалось отправить в чат"
+          ? caught.message.includes("mime") ||
+            caught.message.includes("SQL") ||
+            caught.message.includes("chat-media")
+            ? "Не удалось отправить запись. Нажмите ещё раз — файл на месте."
+            : caught.message
+          : "Не удалось отправить в чат. Запись сохранена, попробуйте ещё раз."
       );
       setPracticeStage("ready");
     } finally {
@@ -313,6 +384,7 @@ export default function VocalExercisePractice({
           </p>
         )}
 
+        {stage !== "ready" && stage !== "sending" && (
         <div className="mt-4 flex w-full flex-wrap justify-center gap-2 px-2">
           {stage === "recording" ? (
             <Button
@@ -360,17 +432,24 @@ export default function VocalExercisePractice({
             </>
           )}
         </div>
+        )}
 
-        {stage === "ready" && take && (
+        {(stage === "ready" || stage === "sending") && take && (
           <div className="mt-4 space-y-3 rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
             <p className="text-sm text-studio-muted">
-              Запись {take.durationSec} сек готова. Оценки нет — отметьте, как
-              прошла фраза.
+              Запись {take.durationSec} сек готова. Сначала прослушайте, потом
+              примите или отправьте преподавателю.
             </p>
+            <MediaAudio
+              controls
+              src={take.url}
+              className="w-full max-w-full"
+              onPlay={() => preferIosPlayback()}
+            />
             <div className="flex flex-wrap gap-2">
               <Button
                 className="w-full sm:w-auto"
-                disabled={Boolean(marking)}
+                disabled={Boolean(marking) || sharing}
                 onClick={() => {
                   setMarking("ok");
                   void closeVocalStep({
@@ -383,18 +462,18 @@ export default function VocalExercisePractice({
                     setMarking(null);
                     setStepNote(
                       ok
-                        ? "Шаг тропы закрыт."
-                        : "Не удалось сохранить шаг. Нажмите ещё раз."
+                        ? "Запись принята. Шаг тропы закрыт."
+                        : "Не удалось сохранить шаг. Запись на месте — нажмите ещё раз."
                     );
                   });
                 }}
               >
-                {marking === "ok" ? "Сохраняем…" : "Получилось"}
+                {marking === "ok" ? "Сохраняем…" : "Принять запись"}
               </Button>
               <Button
                 variant="secondary"
                 className="w-full sm:w-auto"
-                disabled={Boolean(marking)}
+                disabled={Boolean(marking) || sharing}
                 onClick={() => {
                   setMarking("again");
                   void closeVocalStep({
@@ -408,7 +487,7 @@ export default function VocalExercisePractice({
                     setStepNote(
                       ok
                         ? "Вернём это упражнение позже."
-                        : "Не удалось сохранить шаг. Нажмите ещё раз."
+                        : "Не удалось сохранить шаг. Запись на месте — нажмите ещё раз."
                     );
                   });
                 }}
@@ -437,7 +516,8 @@ export default function VocalExercisePractice({
             <button
               type="button"
               onClick={() => {
-                setTake(null);
+                replaceTake(null);
+                setStepNote("");
                 setPracticeStage("idle");
               }}
               className="mx-auto flex items-center gap-1 text-xs text-studio-muted"

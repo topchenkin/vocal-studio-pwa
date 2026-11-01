@@ -1,6 +1,7 @@
 /** Metrics for the professional vocal test (client-safe). */
 
 import {
+  STUDENT_IN_TUNE_CENTS,
   centsBetween,
   midiFromNoteLabel,
   type PitchFrame,
@@ -36,10 +37,11 @@ export type VocalReport = {
 };
 
 /**
- * Pro-test "green" band: samples within ±20¢ of the target note count as
- * accurate. This is the literal definition used by `calcPitchAccuracy`.
+ * Pro-test "green" band — same window as the live tuner, so a student who
+ * is "В ноту" on screen is also in-tune for the scored report.
  */
-export const TEST_IN_TUNE_CENTS = 20;
+export const TEST_IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
+export const VOCAL_TEST_MS = 10_000;
 
 /** Ignore attack / pitch lock-in at the start of each voiced burst. */
 const ONSET_TRIM_MS = 180;
@@ -165,20 +167,28 @@ function stdDev(values: number[]): number {
   return Math.sqrt(variance);
 }
 
-function scoreablePool(samples: VocalSample[]): VocalSample[] {
+function scoreablePool(
+  samples: VocalSample[],
+  options?: { requireScoreable?: boolean }
+): VocalSample[] {
   const scored = samples.filter((s) => s.scoreable && s.centsToTarget !== null);
   if (scored.length >= MIN_SCOREABLE) return scored;
+  // Scale glides / wrong-window attacks must not pad the score.
+  if (options?.requireScoreable) return scored;
   return samples.filter((s) => s.voiced && s.centsToTarget !== null);
 }
 
 /**
  * Точность (accuracy): доля замеров, попавших в зелёную зону
- * |centsToTarget| < TEST_IN_TUNE_CENTS (20¢) относительно ноты/ступени
+ * |centsToTarget| < TEST_IN_TUNE_CENTS относительно ноты/ступени
  * гаммы, актуальной в этот момент времени. Прямой процент — без сглаживающих
  * кривых, чтобы результат было легко объяснить ученику.
  */
-export function calcPitchAccuracy(samples: VocalSample[]): number {
-  const pool = scoreablePool(samples);
+export function calcPitchAccuracy(
+  samples: VocalSample[],
+  options?: { requireScoreable?: boolean }
+): number {
+  const pool = scoreablePool(samples, options);
   if (pool.length === 0) return 0;
   const inTune = pool.filter(
     (s) => Math.abs(s.centsToTarget ?? 9999) < TEST_IN_TUNE_CENTS
@@ -198,9 +208,15 @@ export function calcPitchAccuracy(samples: VocalSample[]): number {
 const BREATH_STDDEV_GOOD_DB = 2.5;
 const BREATH_STDDEV_POOR_DB = 14;
 
-export function calcBreathControl(samples: VocalSample[]): number {
+export function calcBreathControl(
+  samples: VocalSample[],
+  options?: { requireScoreable?: boolean }
+): number {
   const scored = samples.filter((s) => s.scoreable);
-  const pool = scored.length >= MIN_SCOREABLE ? scored : samples.filter((s) => s.voiced);
+  const pool =
+    scored.length >= MIN_SCOREABLE || options?.requireScoreable
+      ? scored
+      : samples.filter((s) => s.voiced);
   if (pool.length < 3) return 0;
 
   const deviation = stdDev(pool.map((s) => s.volumeDb));
@@ -222,10 +238,14 @@ export function calcBreathControl(samples: VocalSample[]): number {
 const STABILITY_STDDEV_GOOD_CENTS = 10;
 const STABILITY_STDDEV_POOR_CENTS = 70;
 
-export function calcToneStability(samples: VocalSample[]): number {
+export function calcToneStability(
+  samples: VocalSample[],
+  options?: { requireScoreable?: boolean }
+): number {
   const scored = samples.filter((s) => s.scoreable && s.centsToTarget !== null);
   const voiced = samples.filter((s) => s.voiced && s.centsToTarget !== null);
-  const pool = scored.length >= 3 ? scored : voiced;
+  const pool =
+    scored.length >= 3 || options?.requireScoreable ? scored : voiced;
   if (pool.length === 0) return 0;
 
   const deviation = stdDev(pool.map((s) => s.centsToTarget ?? 0));
@@ -263,9 +283,10 @@ export function buildVocalReport(
     };
   }
 
-  const pitchAccuracy = calcPitchAccuracy(marked);
-  const toneStability = calcToneStability(marked);
-  const breathControl = calcBreathControl(marked);
+  const scaleOpts = mode === "scale" ? { requireScoreable: true } : undefined;
+  const pitchAccuracy = calcPitchAccuracy(marked, scaleOpts);
+  const toneStability = calcToneStability(marked, scaleOpts);
+  const breathControl = calcBreathControl(marked, scaleOpts);
   // Weights: pitch accuracy matters most for an intonation test; tone
   // stability and breath control split the remaining half evenly.
   const overallScore = clampScore(

@@ -20,6 +20,7 @@ const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || "mailto:iris.jar008@gmail.com";
 const POLL_MS = Number(process.env.PUSH_POLL_MS) || 4000;
 const REMIND_MS = Number(process.env.PUSH_REMIND_MS) || 15 * 60 * 1000;
+const AUTO_COMPLETE_MS = Number(process.env.PUSH_AUTO_COMPLETE_MS) || 20 * 1000;
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
 ).replace(/\/$/, "");
@@ -283,6 +284,7 @@ async function pollOnce() {
 
 let ticking = false;
 let lastRemindAt = 0;
+let lastAutoCompleteAt = 0;
 
 async function remindPendingReschedules() {
   const response = await sb("/rest/v1/rpc/remind_pending_reschedules", {
@@ -475,11 +477,14 @@ async function tick() {
   try {
     await skipBacklog();
     await pollOnce();
-    if (Date.now() - lastRemindAt >= REMIND_MS) {
-      lastRemindAt = Date.now();
+    if (Date.now() - lastAutoCompleteAt >= AUTO_COMPLETE_MS) {
+      lastAutoCompleteAt = Date.now();
       await autoCompleteStartedLessons().catch((error) => {
         console.error("auto-complete lessons threw", error?.message || error);
       });
+    }
+    if (Date.now() - lastRemindAt >= REMIND_MS) {
+      lastRemindAt = Date.now();
       await remindPendingReschedules();
       await remindSubscriptionExpiring();
       await grantDueLessonXp();

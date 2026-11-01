@@ -59,7 +59,14 @@ export function stopReferenceTone() {
 }
 
 /** Play one or more concert-pitch notes (A4 = 440). Call only from a user tap. */
-export async function playReferenceNotes(notes: readonly string[]): Promise<void> {
+export async function playReferenceNotes(
+  notes: readonly string[],
+  options?: {
+    noteSec?: number;
+    gapSec?: number;
+    onNote?: (index: number) => void;
+  }
+): Promise<void> {
   if (typeof window === "undefined" || notes.length === 0) return;
   stopReferenceTone();
 
@@ -69,22 +76,32 @@ export async function playReferenceNotes(notes: readonly string[]): Promise<void
   }
   preferIosPlayback();
 
-  const noteDur = notes.length > 1 ? SCALE_NOTE_SEC : NOTE_SEC;
+  const noteDur =
+    options?.noteSec ?? (notes.length > 1 ? SCALE_NOTE_SEC : NOTE_SEC);
+  const gap = options?.gapSec ?? GAP_SEC;
   const startAt = ctx.currentTime + 0.04;
+  const noteTimers: number[] = [];
   notes.forEach((label, index) => {
     const hz = frequencyFromMidi(midiFromNoteLabel(label));
-    const when = startAt + index * (noteDur + GAP_SEC);
+    const when = startAt + index * (noteDur + gap);
     scheduleTone(ctx, hz, when, noteDur);
+    const delayMs = Math.max(0, (when - ctx.currentTime) * 1000);
+    noteTimers.push(
+      window.setTimeout(() => {
+        options?.onNote?.(index);
+      }, delayMs)
+    );
   });
 
   const total =
-    notes.length * noteDur + Math.max(0, notes.length - 1) * GAP_SEC + 0.08;
+    notes.length * noteDur + Math.max(0, notes.length - 1) * gap + 0.08;
 
   await new Promise<void>((resolve) => {
     let closed = false;
     const finish = () => {
       if (closed) return;
       closed = true;
+      noteTimers.forEach((id) => window.clearTimeout(id));
       if (active?.stop === finish) active = null;
       window.clearTimeout(timer);
       if (ctx.state !== "closed") {

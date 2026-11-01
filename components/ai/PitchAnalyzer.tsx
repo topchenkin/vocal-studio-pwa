@@ -21,6 +21,7 @@ import Link from "next/link";
 import VocalReportCard from "@/components/ai/VocalReportCard";
 import { useAuth } from "@/context/AuthContext";
 import {
+  centsBetween,
   describeNote,
   frequencyFromMidi,
   midiFromNoteLabel,
@@ -30,7 +31,9 @@ import {
 } from "@/lib/pitch";
 import {
   buildVocalReport,
+  foldCents,
   targetNoteAtTime,
+  VOCAL_TEST_MS,
   type VocalReport,
   type VocalTestMode,
 } from "@/lib/vocal-metrics";
@@ -46,9 +49,12 @@ import { playReferenceNotes, stopReferenceTone } from "@/lib/reference-tone";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
-const TEST_MS = 10_000;
+const TEST_MS = VOCAL_TEST_MS;
 const IN_TUNE_CENTS = STUDENT_IN_TUNE_CENTS;
 const SCALE_STEPS = ["C4", "E4", "G4"] as const;
+const SCALE_PREVIEW_GAP_SEC = 0.15;
+const SCALE_PREVIEW_NOTE_SEC =
+  TEST_MS / 1000 / SCALE_STEPS.length - SCALE_PREVIEW_GAP_SEC;
 
 export default function PitchAnalyzer({
   locked = false,
@@ -71,6 +77,7 @@ export default function PitchAnalyzer({
   const [savedResultId, setSavedResultId] = useState<string | null>(null);
   const [micSilent, setMicSilent] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [previewNoteIndex, setPreviewNoteIndex] = useState(0);
   const [previewError, setPreviewError] = useState("");
   const previewGen = useRef(0);
   const previewingRef = useRef(false);
@@ -79,16 +86,8 @@ export default function PitchAnalyzer({
 
   useEffect(() => () => stopReferenceTone(), []);
 
-  const zone: TuneZone = !live.voiced
-    ? "silent"
-    : (live.cents ?? 0) < -IN_TUNE_CENTS
-      ? "flat"
-      : (live.cents ?? 0) > IN_TUNE_CENTS
-        ? "sharp"
-        : "in-tune";
   const note = live.note ?? "—";
   const hz = live.frequencyHz ? Math.round(live.frequencyHz * 10) / 10 : 0;
-  const cents = live.cents ?? 0;
 
   // Which note the singer should be hitting *right now* during a test —
   // derived purely from progress, no extra timers needed.
@@ -98,11 +97,26 @@ export default function PitchAnalyzer({
     return targetNoteAtTime(testMode, tMs, TEST_MS, targetNote);
   }, [testing, testProgress, testMode, targetNote]);
 
+  const centsVsTarget =
+    live.frequencyHz && live.voiced
+      ? foldCents(centsBetween(live.frequencyHz, midiFromNoteLabel(liveTargetNote)))
+      : null;
+  const cents =
+    testing && centsVsTarget !== null ? centsVsTarget : (live.cents ?? 0);
+  const zone: TuneZone = !live.voiced
+    ? "silent"
+    : cents < -IN_TUNE_CENTS
+      ? "flat"
+      : cents > IN_TUNE_CENTS
+        ? "sharp"
+        : "in-tune";
+
   const haltPreview = () => {
     previewGen.current += 1;
     previewingRef.current = false;
     stopReferenceTone();
     setPreviewing(false);
+    setPreviewNoteIndex(0);
   };
 
   const playPreview = async () => {
@@ -115,10 +129,17 @@ export default function PitchAnalyzer({
     const gen = previewGen.current + 1;
     previewGen.current = gen;
     previewingRef.current = true;
+    setPreviewNoteIndex(0);
     setPreviewing(true);
     try {
       const notes = testMode === "scale" ? [...SCALE_STEPS] : [targetNote];
-      await playReferenceNotes(notes);
+      await playReferenceNotes(notes, {
+        noteSec: testMode === "scale" ? SCALE_PREVIEW_NOTE_SEC : undefined,
+        gapSec: testMode === "scale" ? SCALE_PREVIEW_GAP_SEC : undefined,
+        onNote: (index) => {
+          if (previewGen.current === gen) setPreviewNoteIndex(index);
+        },
+      });
     } catch (err) {
       if (previewGen.current === gen) {
         setPreviewError(
@@ -512,10 +533,9 @@ export default function PitchAnalyzer({
             </p>
             <div className="mt-3 flex items-center justify-center gap-2 sm:gap-3">
               {SCALE_STEPS.map((step, index) => {
-                const active =
-                  testing && liveTargetNote === step
-                    ? true
-                    : !testing && index === 0;
+                const active = testing
+                  ? liveTargetNote === step
+                  : previewing && index === previewNoteIndex;
                 return (
                   <div key={step} className="flex items-center gap-2 sm:gap-3">
                     {index > 0 && (
@@ -540,7 +560,8 @@ export default function PitchAnalyzer({
               })}
             </div>
             <p className="mt-3 text-center text-xs text-studio-muted">
-              Спойте по очереди: до → ми → соль
+              Прослушайте в том же темпе, затем спойте: до → ми → соль,
+              каждую ступень около трёх секунд.
             </p>
             <Button
               className="mt-3"

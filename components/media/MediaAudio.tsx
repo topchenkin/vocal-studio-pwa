@@ -3,6 +3,7 @@
 import { forwardRef, type AudioHTMLAttributes } from "react";
 import {
   preferIosPlayback,
+  pulseIosPlayback,
   routeHtmlMediaToSpeaker,
 } from "@/lib/ios-audio-session";
 
@@ -25,6 +26,7 @@ const MediaAudio = forwardRef<HTMLAudioElement, Props>(function MediaAudio(
       }}
       onPlay={(event) => {
         preferIosPlayback();
+        pulseIosPlayback();
         void routeHtmlMediaToSpeaker(event.currentTarget);
         onPlay?.(event);
       }}
