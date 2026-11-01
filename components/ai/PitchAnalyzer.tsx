@@ -65,7 +65,11 @@ export default function PitchAnalyzer({
 }) {
   const { user, profile, isAdmin, refreshProfile } = useAuth();
   const analyzer = useVocalAnalyzer();
-  usePracticeHeartbeat("analyzer", analyzer.listening && !isAdmin && !locked);
+  const isExam = variant === "exam";
+  usePracticeHeartbeat(
+    "analyzer",
+    (isExam ? analyzer.testing : analyzer.listening) && !isAdmin && !locked
+  );
 
   const [testMode, setTestMode] = useState<VocalTestMode>("note");
   const [targetNote, setTargetNote] = useState("G4");
@@ -181,6 +185,8 @@ export default function PitchAnalyzer({
       }
     } catch {
       // analyzer surfaces a user-facing error via `analyzer.error`
+    } finally {
+      analyzer.stopListening();
     }
   };
 
@@ -281,11 +287,13 @@ export default function PitchAnalyzer({
         </div>
         <div>
           <h2 className="font-display text-2xl font-semibold">
-            {variant === "exam" ? "Профессиональный тест" : "Нейроанализатор нот"}
+            {isExam ? "Профессиональный тест" : "Нейроанализатор нот"}
           </h2>
         </div>
       </div>
 
+      {!isExam && (
+      <>
       <div className="relative mt-5 overflow-hidden rounded-2xl bg-studio-bg p-3 ring-1 ring-studio-border">
         <canvas
           ref={analyzer.attachWaveformCanvas}
@@ -386,6 +394,8 @@ export default function PitchAnalyzer({
           </Button>
         )}
       </div>
+      </>
+      )}
 
       {variant === "live" && (
         <p className="mt-4 text-center text-sm text-studio-muted">
@@ -399,8 +409,8 @@ export default function PitchAnalyzer({
         </p>
       )}
 
-      {variant === "exam" && (
-      <div className="mt-6 rounded-2xl bg-studio-bg/70 p-4 ring-1 ring-studio-border">
+      {isExam && (
+      <div className="mt-5 rounded-2xl bg-studio-bg/70 p-4 ring-1 ring-studio-border">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10">
             <ClipboardList className="h-5 w-5 text-amber-300" />
@@ -586,7 +596,7 @@ export default function PitchAnalyzer({
           </div>
         )}
 
-        {listening && !testing && (
+        {!testing && (
           <p className="mt-3 text-center text-xs text-studio-muted">
             Слушайте эталон в наушниках — иначе микрофон услышит колонку.
           </p>
@@ -604,7 +614,16 @@ export default function PitchAnalyzer({
               <p className="mt-1 font-display text-3xl font-semibold text-amber-100">
                 {describeNote(liveTargetNote)}
               </p>
-              <p className="mt-0.5 text-xs text-studio-muted">{liveTargetNote}</p>
+              <p className="mt-2 text-sm text-studio-muted">
+                Слышу: {noteRu}
+                {zone === "in-tune"
+                  ? " · в ноту"
+                  : zone === "sharp"
+                    ? " · выше"
+                    : zone === "flat"
+                      ? " · ниже"
+                      : ""}
+              </p>
             </div>
             <div>
               <div className="mb-1 flex justify-between text-xs text-studio-muted">
@@ -624,7 +643,6 @@ export default function PitchAnalyzer({
         <Button
           className="mt-4"
           fullWidth
-          variant="secondary"
           disabled={testing}
           onClick={() => void startProfessionalTest()}
         >
