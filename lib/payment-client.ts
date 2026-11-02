@@ -66,12 +66,9 @@ function rememberCheckout(invoiceNo?: number) {
 }
 
 function openCheckout(paymentUrl: string) {
-  const popup = window.open(paymentUrl, "_blank", "noopener,noreferrer");
-  if (!popup) {
-    window.location.assign(paymentUrl);
-    return false;
-  }
-  return true;
+  // Same window: Android PWA `window.open(_blank)` jumps into Chrome
+  // and Robokassa never returns to the installed app.
+  window.location.assign(paymentUrl);
 }
 
 export function readPayInvoice() {

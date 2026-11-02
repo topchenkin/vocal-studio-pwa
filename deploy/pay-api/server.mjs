@@ -11,7 +11,7 @@ import { yookassa } from "./providers.mjs";
 import {
   goToken,
   paymentFields,
-  renderPayForm,
+  paymentUrlFromFields,
   ROBOKASSA_FLOW,
   robokassa,
 } from "./robokassa.mjs";
@@ -1110,8 +1110,13 @@ async function handleRobokassaGo(req, res) {
     description: tx.metadata?.description || "Unique Vocal Studio",
     email: null,
   });
+  const dest = paymentUrlFromFields(built.fields);
   console.log("[uvs:robokassa] go", invoiceNo);
-  return html(res, 200, renderPayForm(built.fields));
+  res.writeHead(302, {
+    Location: dest,
+    "cache-control": "no-store",
+  });
+  res.end();
 }
 
 async function handleRfKassa(req, res) {

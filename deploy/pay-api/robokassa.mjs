@@ -11,7 +11,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-export const ROBOKASSA_FLOW = "post_form_v2";
+export const ROBOKASSA_FLOW = "get_v3";
 
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
@@ -56,16 +56,6 @@ function sanitizeText(value, max) {
     .slice(0, max);
 }
 
-/** PHP urlencode: spaces as +. Robokassa verifies Receipt this way. */
-export function phpUrlEncode(value) {
-  return encodeURIComponent(String(value))
-    .replace(/%20/g, "+")
-    .replace(
-      /[!'()*]/g,
-      (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
-    );
-}
-
 export function goToken() {
   return randomBytes(12).toString("hex");
 }
@@ -104,10 +94,9 @@ export function paymentFields({ outSum, invId, description, email }) {
     name: description,
     sum,
   });
-  // Signature uses PHP urlencode (spaces as +). The POST field is raw JSON:
-  // putting already-encoded "+" into an HTML form makes the browser treat +
-  // as a space and Robokassa returns error 29. Confirmed against Index.aspx.
-  const receiptEnc = phpUrlEncode(receiptJson);
+  // Signature Receipt must match GET query encoding (encodeURIComponent, %20).
+  // PHP urlencode (+) plus an HTML POST form produced error 29 in Chrome.
+  const receiptEnc = encodeURIComponent(receiptJson);
   const signature = digest(
     `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
   );
@@ -124,45 +113,16 @@ export function paymentFields({ outSum, invId, description, email }) {
   return { fields, receiptEnc };
 }
 
+export function paymentUrlFromFields(fields) {
+  return `${PAY_URL}?${queryString(fields)}`;
+}
+
 export function robokassaGoUrl(invId, token) {
   const params = new URLSearchParams({
     invoice: String(invId),
     t: String(token || ""),
   });
   return `${APP_ORIGIN}/api/payments/robokassa-go?${params.toString()}`;
-}
-
-function htmlEscape(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-export function renderPayForm(fields) {
-  const inputs = Object.entries(fields)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(
-      ([key, value]) =>
-        `<input type="hidden" name="${htmlEscape(key)}" value="${htmlEscape(value)}" />`
-    )
-    .join("");
-  return `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Оплата</title>
-</head>
-<body>
-  <p>Переходим к оплате…</p>
-  <form id="rk" action="${htmlEscape(PAY_URL)}" method="post" accept-charset="UTF-8">
-    ${inputs}
-  </form>
-  <script>document.getElementById("rk").submit();</script>
-</body>
-</html>`;
 }
 
 export const robokassa = {
@@ -189,7 +149,7 @@ export const robokassa = {
     }
     const built = paymentFields({ outSum, invId, description, email });
     return {
-      paymentUrl: robokassaGoUrl(invId, token),
+      paymentUrl: paymentUrlFromFields(built.fields),
       externalId: String(invId),
       fields: built.fields,
     };
