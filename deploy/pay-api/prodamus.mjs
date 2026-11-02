@@ -23,30 +23,25 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
 /** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
-export const PRODAMUS_FLOW = "intl_rest_v5";
+export const PRODAMUS_FLOW = "intl_link_v6";
 /**
- * Official REST `payment_method` codes
- * (help.prodamus.ru → самостоятельная интеграция).
+ * Official REST codes for foreign cards
+ * (help.prodamus.ru → самостоятельная интеграция + «Карты зарубежных банков»).
  *
- * `monetaworld` = «Карты банков мира, кроме РФ» (REST lowercase; Bitrix
- * writes the same method as MONETAWORLD). CIS / BY / world-currency codes
- * are listed so they appear if support enabled them. `AC` is the card field
- * that is definitely on this payform — foreign BINs go through it at the
- * «Зарубежные карты» tariff. Unknown extra codes make Prodamus ignore the
- * whole filter (SBP comes back). Do not send `installments_disabled`:
- * installments drop on their own because they are not in this list.
+ * Foreign cards are a separate method in USD/KZT, not the RF `AC` field.
+ * Including `AC` opens the Russian checkout (SBP + SberPay + «Номер карты»).
+ * `monetaworld` = world except RF; `ACUSDKB` = USD world except RF (US cards).
  */
 const INTERNATIONAL_METHOD = "monetaworld";
 const INTERNATIONAL_METHODS = [
   "monetaworld",
-  "ACf",
-  "ACkz",
-  "ACBYNGTL",
   "ACUSDKB",
   "ACEURKB",
   "ACUSDGTL",
   "ACEURGTL",
-  "AC",
+  "ACf",
+  "ACkz",
+  "ACBYNGTL",
 ].join("|");
 
 function stringifyDeep(value) {
@@ -192,6 +187,68 @@ function listify(node) {
   return out;
 }
 
+function isStoredPayformLink(url) {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    if (!/(^|\.)payform\.ru$/i.test(parsed.hostname)) return false;
+    if (parsed.searchParams.has("do") || parsed.searchParams.has("signature")) return false;
+    return parsed.pathname.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+function parsePayformLink(text, location) {
+  const candidates = [location];
+  const raw = String(text || "").trim();
+  if (raw.startsWith("{")) {
+    try {
+      const json = JSON.parse(raw);
+      const nested = json && typeof json.data === "object" ? json.data : null;
+      candidates.push(json.link, json.url, json.payment_link, nested?.link, nested?.url);
+    } catch {
+      /* fall through */
+    }
+  }
+  if (/^https?:\/\//i.test(raw)) candidates.push(raw);
+  const match = raw.match(/https?:\/\/[a-z0-9.-]*payform\.ru\/[^\s"'<>]+/i);
+  if (match) candidates.push(match[0].replace(/[),.;]+$/, ""));
+  return candidates.map((value) => String(value || "").trim()).find(isStoredPayformLink) || "";
+}
+
+async function requestPayformLink(encoded) {
+  const headers = { Accept: "application/json, text/plain, */*" };
+  const attempts = [
+    {
+      via: "GET",
+      url: `${FORM_URL}/?${encoded}`,
+      init: { method: "GET", headers, redirect: "follow" },
+    },
+    {
+      via: "POST",
+      url: `${FORM_URL}/`,
+      init: {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        body: encoded,
+        redirect: "follow",
+      },
+    },
+  ];
+  for (const attempt of attempts) {
+    const resp = await fetch(attempt.url, attempt.init);
+    const text = await resp.text();
+    const paymentUrl =
+      parsePayformLink(text, resp.headers.get("location")) ||
+      (isStoredPayformLink(resp.url) ? resp.url : "");
+    if (paymentUrl) return { paymentUrl, via: attempt.via };
+  }
+  throw new Error("prodamus do=link did not return a payment URL");
+}
+
 export const prodamus = {
   id: "prodamus",
   isReady() {
@@ -209,14 +266,15 @@ export const prodamus = {
     };
   },
   /**
-   * Return a signed payform URL (`do=pay`) that the student opens directly.
-   * `do=link` short URLs (tiny.payform.ru) render the page default methods
-   * and drop `available_payment_methods` — that is why SBP kept showing.
+   * Official «формирование ссылки»: signed `do=link` so Prodamus stores
+   * `payment_method` on the order. Browser `do=pay` opens the SPA checkout
+   * and keeps the RF methods (SBP / SberPay / AC) even when the query
+   * listed monetaworld.
    */
   async createPayment({ outSum, invId, description, email, phone }) {
     const successUrl = `${APP_ORIGIN}/pay/success?invoice=${encodeURIComponent(String(invId))}`;
     const data = {
-      do: "pay",
+      do: "link",
       order_id: String(invId),
       products: [
         {
@@ -238,12 +296,19 @@ export const prodamus = {
 
     const signed = { ...data, signature: hmac(data, false) };
     const encoded = toQuery(signed);
-    const paymentUrl = `${FORM_URL}/?${encoded}`;
+    const { paymentUrl, via } = await requestPayformLink(encoded);
+    let payHost = "";
+    try {
+      payHost = new URL(paymentUrl).host;
+    } catch {
+      payHost = "invalid";
+    }
     console.log("[uvs:prodamus] create", {
       invoice: invId,
       amount: outSum,
       flow: PRODAMUS_FLOW,
       do: data.do,
+      via,
       paymentMethod: INTERNATIONAL_METHOD,
       methods: INTERNATIONAL_METHODS,
       queryBytes: encoded.length,
@@ -251,7 +316,7 @@ export const prodamus = {
       hasMethods: encoded.includes("available_payment_methods"),
       hasPaymentMethod: encoded.includes("payment_method="),
       hasPhone: Boolean(data.customer_phone),
-      host: FORM_URL.replace(/^https?:\/\//, ""),
+      host: payHost,
     });
     return { paymentUrl, externalId: null };
   },
