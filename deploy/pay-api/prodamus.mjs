@@ -23,32 +23,30 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
 /** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
-export const PRODAMUS_FLOW = "intl_direct_v3";
+export const PRODAMUS_FLOW = "intl_rest_v5";
 /**
- * Prodamus "Зарубежные карты" is a tariff on the card field, not a separate
- * SBP-style button. The form method is still `AC`. Extra world/CIS codes are
- * included when support enabled them as their own methods.
+ * Official REST `payment_method` codes
+ * (help.prodamus.ru → самостоятельная интеграция).
  *
- * A filter with zero hits is ignored → full list (SBP, SberPay, installments).
- * `AC` must stay in the list so the filter actually matches.
+ * `monetaworld` = «Карты банков мира, кроме РФ» (REST lowercase; Bitrix
+ * writes the same method as MONETAWORLD). CIS / BY / world-currency codes
+ * are listed so they appear if support enabled them. `AC` is the card field
+ * that is definitely on this payform — foreign BINs go through it at the
+ * «Зарубежные карты» tariff. Unknown extra codes make Prodamus ignore the
+ * whole filter (SBP comes back). Do not send `installments_disabled`:
+ * installments drop on their own because they are not in this list.
  */
+const INTERNATIONAL_METHOD = "monetaworld";
 const INTERNATIONAL_METHODS = [
-  "AC",
-  "MONETAWORLD",
   "monetaworld",
-  "overpayeur",
+  "ACf",
+  "ACkz",
+  "ACBYNGTL",
   "ACUSDKB",
   "ACEURKB",
   "ACUSDGTL",
   "ACEURGTL",
-  "ACUSDGV",
-  "ACEURGV",
-  "ACusdxp",
-  "ACeurxp",
-  "ACGBPGV",
-  "ACBYNGTL",
-  "ACf",
-  "ACkz",
+  "AC",
 ].join("|");
 
 function stringifyDeep(value) {
@@ -230,8 +228,8 @@ export const prodamus = {
       urlSuccess: successUrl,
       urlReturn: `${APP_ORIGIN}/pay/fail?invoice=${encodeURIComponent(String(invId))}`,
       callbackType: "json",
+      payment_method: INTERNATIONAL_METHOD,
       available_payment_methods: INTERNATIONAL_METHODS,
-      installments_disabled: "1",
       _param_invoice_no: String(invId),
     };
     if (email) data.customer_email = email;
@@ -246,11 +244,12 @@ export const prodamus = {
       amount: outSum,
       flow: PRODAMUS_FLOW,
       do: data.do,
+      paymentMethod: INTERNATIONAL_METHOD,
       methods: INTERNATIONAL_METHODS,
       queryBytes: encoded.length,
       urlBytes: paymentUrl.length,
       hasMethods: encoded.includes("available_payment_methods"),
-      hasInstallmentsOff: encoded.includes("installments_disabled"),
+      hasPaymentMethod: encoded.includes("payment_method="),
       hasPhone: Boolean(data.customer_phone),
       host: FORM_URL.replace(/^https?:\/\//, ""),
     });
