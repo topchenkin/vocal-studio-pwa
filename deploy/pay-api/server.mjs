@@ -1,9 +1,14 @@
 /**
- * pay-api for the static PWA: YooKassa (SBP / RU cards) + Prodamus
- * (international cards only, selected by the client with provider=prodamus).
+ * pay-api for the static PWA:
+ *   Robokassa  — RF SBP / MIR / RU cards (default)
+ *   YooKassa   — RF fallback, switched from admin or RF_PAYMENT_PROVIDER
+ *   Prodamus   — international cards (client provider=prodamus)
  */
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 import { yookassa } from "./providers.mjs";
+import { robokassa } from "./robokassa.mjs";
 import {
   parseFormBody,
   PRODAMUS_FLOW,
@@ -11,6 +16,8 @@ import {
   verifySignature,
   webhookPayloads,
 } from "./prodamus.mjs";
+
+const RF_KASSA_FILE = fileURLToPath(new URL("./rf-kassa.json", import.meta.url));
 
 const PORT = Number(process.env.PORT) || 8791;
 const BIND = process.env.BIND || "127.0.0.1";
@@ -99,7 +106,50 @@ function subscriptionAmount(monthly, months) {
   return Math.round((list * (100 - pct)) / 100 / 10) * 10;
 }
 
-async function confirmPayment(invoiceNo, outSum, externalId, provider = "yookassa") {
+function envRfProvider() {
+  const raw = String(process.env.RF_PAYMENT_PROVIDER || "robokassa")
+    .trim()
+    .toLowerCase();
+  return raw === "yookassa" ? "yookassa" : "robokassa";
+}
+
+function readRfOverride() {
+  try {
+    if (!existsSync(RF_KASSA_FILE)) return null;
+    const parsed = JSON.parse(readFileSync(RF_KASSA_FILE, "utf8"));
+    const value = String(parsed?.provider || "")
+      .trim()
+      .toLowerCase();
+    if (value === "yookassa" || value === "robokassa") return value;
+  } catch (error) {
+    console.error("[uvs:pay] rf-kassa file unreadable", error?.message || error);
+  }
+  return null;
+}
+
+function getRfProvider() {
+  return readRfOverride() || envRfProvider();
+}
+
+function setRfProvider(next) {
+  const provider = next === "yookassa" ? "yookassa" : "robokassa";
+  writeFileSync(
+    RF_KASSA_FILE,
+    `${JSON.stringify({ provider, updated_at: new Date().toISOString() }, null, 2)}\n`,
+    "utf8"
+  );
+  return provider;
+}
+
+function rfAdapter(provider = getRfProvider()) {
+  return provider === "yookassa" ? yookassa : robokassa;
+}
+
+function rfReady(provider = getRfProvider()) {
+  return rfAdapter(provider).isReady();
+}
+
+async function confirmPayment(invoiceNo, outSum, externalId, provider = "robokassa") {
   return sb("/rest/v1/rpc/confirm_payment", {
     method: "POST",
     body: JSON.stringify({
@@ -138,7 +188,7 @@ async function syncYookassaPayment(tx) {
     if (!invoiceNo || !(outSum > 0)) {
       throw new Error("missing invoice metadata");
     }
-    const confirm = await confirmPayment(invoiceNo, outSum, payment.id);
+    const confirm = await confirmPayment(invoiceNo, outSum, payment.id, "yookassa");
     if (!confirm.ok) {
       const text = await confirm.text();
       console.error("yookassa confirm failed", confirm.status, text);
@@ -155,6 +205,49 @@ async function syncYookassaPayment(tx) {
   return { status: "pending", paid: false };
 }
 
+async function syncRobokassaPayment(tx) {
+  const invoiceNo = Number(tx.invoice_no);
+  if (!invoiceNo) return { status: tx.status || "pending", paid: false };
+
+  let payment;
+  try {
+    payment = await robokassa.fetchPayment(invoiceNo);
+  } catch (error) {
+    console.error("[uvs:robokassa] fetch failed", invoiceNo, error);
+    throw error;
+  }
+
+  if (payment.status === "succeeded") {
+    const outSum = Number(tx.amount_rub || 0);
+    if (!(outSum > 0)) throw new Error("missing invoice amount");
+    const confirm = await confirmPayment(
+      invoiceNo,
+      outSum,
+      String(tx.external_id || invoiceNo),
+      "robokassa"
+    );
+    if (!confirm.ok) {
+      const text = await confirm.text();
+      console.error("[uvs:robokassa] confirm failed", confirm.status, text);
+      throw new Error("confirm failed");
+    }
+    return { status: "confirmed", paid: true };
+  }
+
+  if (payment.status === "canceled") {
+    if (tx.id && tx.status === "pending") await markInvoiceFailed(tx.id);
+    return { status: "failed", paid: false };
+  }
+
+  return { status: "pending", paid: false };
+}
+
+async function syncRfPayment(tx) {
+  if (tx.provider === "robokassa") return syncRobokassaPayment(tx);
+  if (tx.provider === "yookassa") return syncYookassaPayment(tx);
+  return { status: tx.status || "pending", paid: false };
+}
+
 let pendingSyncRunning = false;
 
 async function syncPendingPayments() {
@@ -163,7 +256,7 @@ async function syncPendingPayments() {
   try {
     const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const response = await sb(
-      `/rest/v1/payment_transactions?status=eq.pending&external_id=not.is.null&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,status&order=created_at.desc&limit=30`
+      `/rest/v1/payment_transactions?status=eq.pending&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,status,provider&order=created_at.desc&limit=40`
     );
     if (!response.ok) {
       console.error("pending payments query failed", response.status);
@@ -172,10 +265,12 @@ async function syncPendingPayments() {
     const rows = await response.json();
     if (!Array.isArray(rows) || rows.length === 0) return;
     for (const tx of rows) {
+      if (tx.provider === "prodamus") continue;
+      if (tx.provider === "yookassa" && !tx.external_id) continue;
       try {
-        const result = await syncYookassaPayment(tx);
+        const result = await syncRfPayment(tx);
         if (result.paid) {
-          console.log("pending payment confirmed", tx.invoice_no);
+          console.log("pending payment confirmed", tx.provider, tx.invoice_no);
         }
       } catch (error) {
         console.error(
@@ -237,7 +332,7 @@ async function handleStatus(req, res) {
   }
 
   try {
-    const result = await syncYookassaPayment(tx);
+    const result = await syncRfPayment(tx);
     return json(res, 200, { ...result, invoiceNo });
   } catch (error) {
     return json(res, 502, {
@@ -297,6 +392,17 @@ async function handleInitGift(req, res) {
     return json(res, 400, { error: "Сертификат уже оплачен" });
   }
 
+  const rfProvider = getRfProvider();
+  const kassa = rfAdapter(rfProvider);
+  if (!kassa.isReady()) {
+    return json(res, 503, {
+      error:
+        rfProvider === "robokassa"
+          ? "Robokassa ещё не настроена. Задайте ключи магазина."
+          : "ЮKassa ещё не настроена.",
+    });
+  }
+
   const outSum = money(cert.amount_rub);
   const description = `Unique Vocal Studio — подарок: ${cert.recipient_name}`.slice(
     0,
@@ -311,10 +417,10 @@ async function handleInitGift(req, res) {
       product_code: null,
       purpose: "gift_certificate",
       amount_rub: Number(outSum),
-      provider: "yookassa",
+      provider: rfProvider,
       status: "pending",
       metadata: {
-        is_test: yookassa.isTest,
+        is_test: kassa.isTest,
         gift_id: cert.id,
         gift_code: cert.code,
         recipient_name: cert.recipient_name,
@@ -350,7 +456,7 @@ async function handleInitGift(req, res) {
   let paymentUrl;
   let externalId = null;
   try {
-    const payment = await yookassa.createPayment({
+    const payment = await kassa.createPayment({
       outSum,
       invId,
       description,
@@ -359,7 +465,7 @@ async function handleInitGift(req, res) {
     paymentUrl = payment.paymentUrl;
     externalId = payment.externalId;
   } catch (error) {
-    console.error("gift payment init failed", error);
+    console.error("gift payment init failed", rfProvider, error);
     return json(res, 502, {
       error:
         error instanceof Error ? error.message : "Не удалось создать платёж",
@@ -367,12 +473,28 @@ async function handleInitGift(req, res) {
   }
 
   await patchExternalId(tx.id, externalId);
+  if (rfProvider === "robokassa") {
+    await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        metadata: {
+          is_test: kassa.isTest,
+          gift_id: cert.id,
+          gift_code: cert.code,
+          recipient_name: cert.recipient_name,
+          gift_kind: cert.kind,
+          description,
+          robokassa_url: paymentUrl,
+        },
+      }),
+    });
+  }
   return json(res, 200, {
     paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: yookassa.isTest,
-    provider: "yookassa",
+    isTest: kassa.isTest,
+    provider: rfProvider,
     code: cert.code,
   });
 }
@@ -439,6 +561,24 @@ async function findReusableProdamus(studentId, purpose, metadata, amount) {
   };
 }
 
+async function findReusableRobokassa(studentId, purpose, metadata, amount) {
+  const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const res = await sb(
+    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(studentId)}&purpose=eq.${encodeURIComponent(purpose)}&provider=eq.robokassa&status=eq.pending&amount_rub=eq.${encodeURIComponent(String(amount))}&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,metadata&order=created_at.desc&limit=20`
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  const list = Array.isArray(rows) ? rows : [];
+  const tx = list.find(
+    (row) => row.metadata?.robokassa_url && samePaymentIntent(row, purpose, metadata)
+  );
+  if (!tx) return null;
+  return {
+    paymentUrl: String(tx.metadata.robokassa_url),
+    invoiceNo: Number(tx.invoice_no),
+  };
+}
+
 async function handleInit(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const auth = String(req.headers.authorization || "");
@@ -463,10 +603,19 @@ async function handleInit(req, res) {
   }
 
   const useProdamus = body.provider === "prodamus";
-  const providerId = useProdamus ? "prodamus" : "yookassa";
+  const rfProvider = getRfProvider();
+  const providerId = useProdamus ? "prodamus" : rfProvider;
   if (useProdamus && !prodamus.isInternational()) {
     return json(res, 503, {
       error: "Оплата международной картой временно недоступна",
+    });
+  }
+  if (!useProdamus && !rfReady(rfProvider)) {
+    return json(res, 503, {
+      error:
+        rfProvider === "robokassa"
+          ? "Robokassa ещё не настроена. Задайте ключи магазина."
+          : "ЮKassa ещё не настроена.",
     });
   }
 
@@ -480,7 +629,9 @@ async function handleInit(req, res) {
   let months = null;
   let lessonsCount = null;
   const metadata = {
-    is_test: useProdamus ? prodamus.isTest : yookassa.isTest,
+    is_test: useProdamus
+      ? prodamus.isTest
+      : rfAdapter(rfProvider).isTest,
   };
 
   if (kind === "debt") {
@@ -568,13 +719,17 @@ async function handleInit(req, res) {
   const outSum = money(amount);
   const reusable = useProdamus
     ? await findReusableProdamus(user.id, purpose, metadata, Number(outSum))
-    : await findReusableInvoice(user.id, purpose, metadata, Number(outSum));
+    : rfProvider === "robokassa"
+      ? await findReusableRobokassa(user.id, purpose, metadata, Number(outSum))
+      : await findReusableInvoice(user.id, purpose, metadata, Number(outSum));
   if (reusable) {
     return json(res, 200, {
       paymentUrl: reusable.paymentUrl,
       invoiceNo: reusable.invoiceNo,
       amount: Number(outSum),
-      isTest: useProdamus ? prodamus.isTest : yookassa.isTest,
+      isTest: useProdamus
+        ? prodamus.isTest
+        : rfAdapter(rfProvider).isTest,
       provider: providerId,
       months,
       reused: true,
@@ -615,7 +770,7 @@ async function handleInit(req, res) {
           email: email || null,
           phone: String(profile.phone || "").trim() || null,
         })
-      : await yookassa.createPayment({
+      : await rfAdapter(rfProvider).createPayment({
           outSum,
           invId,
           description,
@@ -637,16 +792,22 @@ async function handleInit(req, res) {
     });
   }
 
-  if (useProdamus) {
+  if (useProdamus || rfProvider === "robokassa") {
     // Keep the link so a repeated tap reuses the same invoice.
     await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
-        metadata: {
-          ...metadata,
-          prodamus_url: paymentUrl,
-          prodamus_flow: PRODAMUS_FLOW,
-        },
+        metadata: useProdamus
+          ? {
+              ...metadata,
+              prodamus_url: paymentUrl,
+              prodamus_flow: PRODAMUS_FLOW,
+            }
+          : {
+              ...metadata,
+              robokassa_url: paymentUrl,
+            },
+        ...(externalId ? { external_id: externalId } : {}),
       }),
     });
     let payHost = "";
@@ -655,14 +816,12 @@ async function handleInit(req, res) {
     } catch {
       payHost = "invalid";
     }
-    console.log("[uvs:prodamus] init", {
+    console.log(useProdamus ? "[uvs:prodamus] init" : "[uvs:robokassa] init", {
       invoice: invId,
       purpose,
       amount: outSum,
-      flow: PRODAMUS_FLOW,
       host: payHost,
       urlBytes: String(paymentUrl || "").length,
-      shortLink: /tiny\.payform\.ru|link\.payform\.ru/i.test(String(paymentUrl)),
     });
   } else {
     await patchExternalId(tx.id, externalId);
@@ -671,7 +830,9 @@ async function handleInit(req, res) {
     paymentUrl,
     invoiceNo: invId,
     amount: Number(outSum),
-    isTest: useProdamus ? prodamus.isTest : yookassa.isTest,
+    isTest: useProdamus
+      ? prodamus.isTest
+      : rfAdapter(rfProvider).isTest,
     provider: providerId,
     months,
   });
@@ -808,7 +969,137 @@ async function handleYookassaWebhook(req, res) {
 }
 
 function ready() {
-  return Boolean(SUPABASE_URL && SERVICE_KEY && yookassa.isReady());
+  return Boolean(SUPABASE_URL && SERVICE_KEY && rfReady());
+}
+
+function plain(res, status, body) {
+  const payload = String(body);
+  res.writeHead(status, {
+    "content-type": "text/plain; charset=utf-8",
+    "content-length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+function pickParam(params, names) {
+  for (const name of names) {
+    if (params[name] != null && String(params[name]).length) {
+      return String(params[name]);
+    }
+  }
+  return "";
+}
+
+async function handleRobokassaResult(req, res) {
+  if (req.method !== "POST" && req.method !== "GET") {
+    return json(res, 405, { error: "method" });
+  }
+  const url = new URL(req.url || "/", "http://127.0.0.1");
+  let params = Object.fromEntries(url.searchParams.entries());
+  if (req.method === "POST") {
+    const raw = await readBody(req);
+    const contentType = String(req.headers["content-type"] || "");
+    try {
+      const parsed =
+        contentType.includes("json") || raw.trim().startsWith("{")
+          ? JSON.parse(raw || "{}")
+          : parseFormBody(raw);
+      params = { ...params, ...parsed };
+    } catch {
+      return json(res, 400, { error: "invalid body" });
+    }
+  }
+
+  const outSum = pickParam(params, ["OutSum", "out_sum", "outsum"]);
+  const invRaw = pickParam(params, ["InvId", "InvID", "inv_id", "invid"]);
+  const signature = pickParam(params, [
+    "SignatureValue",
+    "signaturevalue",
+    "crc",
+  ]);
+  const invoiceNo = Number(invRaw);
+  console.log("[uvs:robokassa] result", invoiceNo || "no-invoice");
+  if (!invoiceNo || !outSum) {
+    return json(res, 400, { error: "missing invoice" });
+  }
+  if (!robokassa.verifyResult({ outSum, invId: invRaw, signature })) {
+    console.error("[uvs:robokassa] bad signature", invoiceNo);
+    return json(res, 400, { error: "bad signature" });
+  }
+
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider&limit=1`
+  );
+  const rows = txRes.ok ? await txRes.json() : [];
+  const tx = Array.isArray(rows) ? rows[0] : rows;
+  if (!tx) return json(res, 404, { error: "invoice not found" });
+  if (tx.provider !== "robokassa") {
+    console.error("[uvs:robokassa] invoice belongs to", tx.provider, invoiceNo);
+    return json(res, 400, { error: "wrong provider" });
+  }
+  if (tx.status === "confirmed") return plain(res, 200, `OK${invoiceNo}`);
+
+  const confirm = await confirmPayment(
+    invoiceNo,
+    tx.amount_rub,
+    invRaw,
+    "robokassa"
+  );
+  if (!confirm.ok) {
+    console.error("[uvs:robokassa] confirm failed", confirm.status, await confirm.text());
+    return json(res, 500, { error: "confirm failed" });
+  }
+  return plain(res, 200, `OK${invoiceNo}`);
+}
+
+async function handleRfKassa(req, res) {
+  const auth = String(req.headers.authorization || "");
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (!token) return json(res, 401, { error: "Нужно войти" });
+  const user = await authUser(token);
+  if (!user?.id) return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  const profile = await loadProfile(user.id);
+  if (!profile || profile.role !== "admin") {
+    return json(res, 403, { error: "Кассу переключает преподаватель" });
+  }
+
+  if (req.method === "GET") {
+    const provider = getRfProvider();
+    return json(res, 200, {
+      provider,
+      envDefault: envRfProvider(),
+      robokassaReady: robokassa.isReady(),
+      yookassaReady: yookassa.isReady(),
+      resultUrl: "https://www.uniquevocal.ru/api/robokassa/result",
+    });
+  }
+
+  if (req.method !== "POST") return json(res, 405, { error: "method" });
+  let body = {};
+  try {
+    body = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return json(res, 400, { error: "Некорректный запрос" });
+  }
+  const next = String(body.provider || "").trim().toLowerCase();
+  if (next !== "robokassa" && next !== "yookassa") {
+    return json(res, 400, { error: "Выберите Robokassa или ЮKassa" });
+  }
+  if (!rfAdapter(next).isReady()) {
+    return json(res, 400, {
+      error:
+        next === "robokassa"
+          ? "Robokassa не настроена: нет логина или паролей магазина."
+          : "ЮKassa не настроена: нет shopId или секрета.",
+    });
+  }
+  const provider = setRfProvider(next);
+  console.log("[uvs:pay] rf kassa switched", provider);
+  return json(res, 200, {
+    provider,
+    robokassaReady: robokassa.isReady(),
+    yookassaReady: yookassa.isReady(),
+  });
 }
 
 const server = createServer(async (req, res) => {
@@ -817,7 +1108,18 @@ const server = createServer(async (req, res) => {
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     if (path === "/api/payments/methods") {
-      return json(res, 200, { international: prodamus.isInternational() });
+      return json(res, 200, {
+        international: prodamus.isInternational(),
+        rfProvider: getRfProvider(),
+      });
+    }
+
+    if (path === "/api/payments/rf-kassa") {
+      return handleRfKassa(req, res);
+    }
+
+    if (path === "/api/robokassa/result") {
+      return handleRobokassaResult(req, res);
     }
 
     if (
@@ -825,18 +1127,21 @@ const server = createServer(async (req, res) => {
       path === "/api/payments/health" ||
       path === "/api/payments"
     ) {
+      const rfProvider = getRfProvider();
       const [auth, payouts] = await Promise.all([
         yookassa.isReady()
           ? yookassa.diagnoseAuth()
           : Promise.resolve({ authOk: false, accountKind: "missing" }),
         yookassa.diagnosePayouts(),
       ]);
+      const kassa = rfAdapter(rfProvider);
       return json(res, 200, {
-        ok: ready() && auth.canAcceptPayments === true,
-        provider: "yookassa",
-        isTest: yookassa.isTest,
+        ok: ready(),
+        provider: rfProvider,
+        isTest: kassa.isTest,
         yookassaReady: yookassa.isReady(),
         ...yookassa.healthExtra(),
+        ...robokassa.healthExtra(),
         ...prodamus.healthExtra(),
         auth,
         payouts,
@@ -845,9 +1150,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (!ready()) {
+      const rfProvider = getRfProvider();
       return json(res, 503, {
         error:
-          "pay-api: нужны YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY магазина",
+          rfProvider === "robokassa"
+            ? "pay-api: нужны ROBOKASSA_MERCHANT_LOGIN, ROBOKASSA_PASSWORD1 и ROBOKASSA_PASSWORD2"
+            : "pay-api: нужны YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY магазина",
       });
     }
 
@@ -865,8 +1173,9 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, BIND, () => {
+  const rfProvider = getRfProvider();
   console.log(
-    `pay-api listening on ${BIND}:${PORT} provider=yookassa test=${yookassa.isTest}`
+    `pay-api listening on ${BIND}:${PORT} rf=${rfProvider} robokassa=${robokassa.isReady()} yookassa=${yookassa.isReady()} test=${rfAdapter(rfProvider).isTest}`
   );
   void syncPendingPayments();
   setInterval(() => void syncPendingPayments(), 4000);

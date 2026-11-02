@@ -49,8 +49,9 @@ def local_env() -> dict[str, str]:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
     for key, value in os.environ.items():
-        if key.startswith(("YOOKASSA_", "PRODAMUS_")) or key in {
+        if key.startswith(("YOOKASSA_", "PRODAMUS_", "ROBOKASSA_")) or key in {
             "PAYMENT_PROVIDER",
+            "RF_PAYMENT_PROVIDER",
             "UVS_SSH_PASS",
             "SUPABASE_SERVICE_ROLE_KEY",
             "SELFHOST_SUPABASE_URL",
@@ -62,8 +63,23 @@ def local_env() -> dict[str, str]:
     return values
 
 
-def env_file_bytes() -> bytes:
+def parse_env_text(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def env_file_bytes(overlay: dict[str, str] | None = None) -> bytes:
     local = local_env()
+    if overlay:
+        for key, value in overlay.items():
+            if key not in local or not local[key]:
+                local[key] = value
     url = (
         local.get("SELFHOST_SUPABASE_URL")
         or local.get("SUPABASE_URL")
@@ -76,27 +92,57 @@ def env_file_bytes() -> bytes:
     if not local.get("SUPABASE_SERVICE_ROLE_KEY"):
         missing.append("SUPABASE_SERVICE_ROLE_KEY")
     shop_id = local.get("YOOKASSA_SHOP_ID", "")
-    if not shop_id:
-        missing.append("YOOKASSA_SHOP_ID")
     secret = local.get("YOOKASSA_SECRET_KEY", "")
-    if not secret:
-        missing.append("YOOKASSA_SECRET_KEY")
     agent_id = local.get("YOOKASSA_AGENT_ID", "")
     payout_secret = local.get("YOOKASSA_PAYOUT_SECRET_KEY", "") or secret
+    rk_login = local.get("ROBOKASSA_MERCHANT_LOGIN", "")
+    rk_pass1 = local.get("ROBOKASSA_PASSWORD1", "")
+    rk_pass2 = local.get("ROBOKASSA_PASSWORD2", "")
+    rk_ready = bool(rk_login and rk_pass1 and rk_pass2)
+    yk_ready = bool(shop_id and secret)
+    if not rk_ready and not yk_ready:
+        missing.extend(
+            [
+                "ROBOKASSA_MERCHANT_LOGIN",
+                "ROBOKASSA_PASSWORD1",
+                "ROBOKASSA_PASSWORD2",
+            ]
+        )
     if missing:
         raise SystemExit(f"missing env: {', '.join(missing)}")
+    rf_provider = "robokassa" if rk_ready else "yookassa"
+    if not rk_ready:
+        print(
+            "WARN: Robokassa keys missing; RF checkout stays on YooKassa until "
+            "ROBOKASSA_MERCHANT_LOGIN/PASSWORD1/PASSWORD2 are set",
+            flush=True,
+        )
 
     lines = [
         "BIND=127.0.0.1",
         "PORT=8791",
-        "PAYMENT_PROVIDER=yookassa",
+        f"RF_PAYMENT_PROVIDER={rf_provider}",
+        f"PAYMENT_PROVIDER={rf_provider}",
         f"SUPABASE_URL={url}",
         f"SUPABASE_SERVICE_ROLE_KEY={local['SUPABASE_SERVICE_ROLE_KEY']}",
-        f"YOOKASSA_SHOP_ID={shop_id}",
-        f"YOOKASSA_SECRET_KEY={secret}",
-        f"YOOKASSA_IS_TEST={local.get('YOOKASSA_IS_TEST', '1')}",
         "NEXT_PUBLIC_APP_URL=https://www.uniquevocal.ru",
     ]
+    if rk_ready:
+        lines.extend(
+            [
+                f"ROBOKASSA_MERCHANT_LOGIN={rk_login}",
+                f"ROBOKASSA_PASSWORD1={rk_pass1}",
+                f"ROBOKASSA_PASSWORD2={rk_pass2}",
+                f"ROBOKASSA_HASH={local.get('ROBOKASSA_HASH', 'md5')}",
+                f"ROBOKASSA_IS_TEST={local.get('ROBOKASSA_IS_TEST', '0')}",
+                f"ROBOKASSA_TAX={local.get('ROBOKASSA_TAX', 'none')}",
+            ]
+        )
+    if shop_id:
+        lines.append(f"YOOKASSA_SHOP_ID={shop_id}")
+    if secret:
+        lines.append(f"YOOKASSA_SECRET_KEY={secret}")
+        lines.append(f"YOOKASSA_IS_TEST={local.get('YOOKASSA_IS_TEST', '0')}")
     # Prodamus (international cards). Optional: without it provider=prodamus returns 503.
     if local.get("PRODAMUS_URL") and local.get("PRODAMUS_SECRET_KEY"):
         lines.append(f"PRODAMUS_URL={local['PRODAMUS_URL']}")
@@ -133,7 +179,6 @@ def main() -> None:
     ):
         if not path.is_file():
             raise SystemExit(f"missing {path}")
-    env = env_file_bytes()
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -149,7 +194,22 @@ def main() -> None:
         run(client, "mkdir -p /opt/pay-api /etc/uniquevocal /opt/uvs-migrate")
         sftp = client.open_sftp()
         try:
-            for name in ("server.mjs", "providers.mjs", "prodamus.mjs", "package.json"):
+            remote_env: dict[str, str] = {}
+            try:
+                with sftp.file("/etc/uniquevocal/pay-api.env", "rb") as fh:
+                    remote_env = parse_env_text(
+                        fh.read().decode("utf-8", "replace")
+                    )
+            except OSError:
+                remote_env = {}
+            env = env_file_bytes(remote_env)
+            for name in (
+                "server.mjs",
+                "providers.mjs",
+                "prodamus.mjs",
+                "robokassa.mjs",
+                "package.json",
+            ):
                 src = PAY / name
                 if not src.is_file():
                     continue

@@ -31,6 +31,7 @@ import DebtorsPanel from "@/components/admin/DebtorsPanel";
 import GiftCertificatesPanel from "@/components/admin/GiftCertificatesPanel";
 import TeacherCardEditor from "@/components/admin/TeacherCardEditor";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
+import RfKassaSettings from "@/components/admin/RfKassaSettings";
 import {
   CABINET_TAB_EVENT,
   consumeRequestedCabinetTab,
@@ -198,7 +199,12 @@ export default function AdminDashboardClient() {
             {activeTab === "schedule" && <ScheduleGrid />}
             {activeTab === "notifications" && <NotificationForm />}
             {activeTab === "content" && <ContentManager />}
-            {activeTab === "access" && <AiToolsAccessSettings />}
+            {activeTab === "access" && (
+              <div className="space-y-6">
+                <RfKassaSettings />
+                <AiToolsAccessSettings />
+              </div>
+            )}
             {activeTab === "audio" && <MyAudioLibrary />}
             {activeTab === "debtors" && <DebtorsPanel />}
             {activeTab === "gifts" && <GiftCertificatesPanel />}

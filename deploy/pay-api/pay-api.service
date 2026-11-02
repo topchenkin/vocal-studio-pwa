@@ -1,5 +1,5 @@
 [Unit]
-Description=UniqueVocal Robokassa payment API
+Description=UniqueVocal payment API (Robokassa + YooKassa + Prodamus)
 After=network-online.target
 Wants=network-online.target
 
@@ -16,6 +16,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+ReadWritePaths=/opt/pay-api
 
 [Install]
 WantedBy=multi-user.target

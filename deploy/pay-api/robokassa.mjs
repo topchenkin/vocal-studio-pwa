@@ -1,0 +1,168 @@
+/**
+ * Robokassa adapter for RF checkout (SBP / MIR / RU cards).
+ *
+ * Payment URL: https://auth.robokassa.ru/Merchant/Index.aspx
+ * ResultURL must answer `OK{InvId}` as text/plain.
+ * Receipt JSON is required for Robocheki SMZ / 54-FZ.
+ *
+ * Docs: https://docs.robokassa.ru/ru/pay-interface
+ *       https://docs.robokassa.ru/ru/fiscalization
+ *       https://docs.robokassa.ru/ru/notifications-and-redirects
+ */
+import { createHash, timingSafeEqual } from "node:crypto";
+
+const APP_ORIGIN = (
+  process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
+).replace(/\/$/, "");
+const MERCHANT_LOGIN = process.env.ROBOKASSA_MERCHANT_LOGIN || "";
+const PASSWORD1 = process.env.ROBOKASSA_PASSWORD1 || "";
+const PASSWORD2 = process.env.ROBOKASSA_PASSWORD2 || "";
+const HASH_ALG = String(process.env.ROBOKASSA_HASH || "md5")
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, "");
+const IS_TEST = ["1", "true", "yes"].includes(
+  String(process.env.ROBOKASSA_IS_TEST || "").toLowerCase()
+);
+const TAX = String(process.env.ROBOKASSA_TAX || "none").trim() || "none";
+const PAY_URL = "https://auth.robokassa.ru/Merchant/Index.aspx";
+const OPSTATE_URL =
+  "https://auth.robokassa.ru/Merchant/WebService/Service.asmx/OpStateExt";
+
+const HASH_ALGS = new Set(["md5", "sha1", "sha256", "sha384", "sha512"]);
+
+function hashAlg() {
+  return HASH_ALGS.has(HASH_ALG) ? HASH_ALG : "md5";
+}
+
+function digest(value) {
+  return createHash(hashAlg()).update(String(value), "utf8").digest("hex");
+}
+
+function sameHash(left, right) {
+  const a = Buffer.from(String(left || "").trim().toLowerCase(), "utf8");
+  const b = Buffer.from(String(right || "").trim().toLowerCase(), "utf8");
+  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+}
+
+function sanitizeText(value, max) {
+  return String(value || "")
+    .replace(/[<>&"'`]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+export function buildReceipt({ name, sum }) {
+  const itemName = sanitizeText(name, 128) || "Unique Vocal Studio";
+  const amount = Number(sum);
+  return JSON.stringify({
+    items: [
+      {
+        name: itemName,
+        quantity: 1,
+        sum: amount,
+        payment_method: "full_payment",
+        payment_object: "service",
+        tax: TAX,
+      },
+    ],
+  });
+}
+
+function queryString(fields) {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(
+      ([key, value]) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
+    )
+    .join("&");
+}
+
+export const robokassa = {
+  id: "robokassa",
+  isReady() {
+    return Boolean(MERCHANT_LOGIN && PASSWORD1 && PASSWORD2);
+  },
+  isTest: IS_TEST,
+  healthExtra() {
+    return {
+      robokassaReady: this.isReady(),
+      robokassaLogin: MERCHANT_LOGIN || null,
+      robokassaHash: hashAlg(),
+      robokassaIsTest: IS_TEST,
+      robokassaPassword1Set: Boolean(PASSWORD1),
+      robokassaPassword2Set: Boolean(PASSWORD2),
+      robokassaResultUrl: `${APP_ORIGIN}/api/robokassa/result`,
+    };
+  },
+  createPayment({ outSum, invId, description, email }) {
+    if (!this.isReady()) {
+      throw new Error("Robokassa: задайте ROBOKASSA_MERCHANT_LOGIN, PASSWORD1 и PASSWORD2");
+    }
+    const sum = String(outSum);
+    const invoice = String(invId);
+    const receiptJson = buildReceipt({
+      name: description,
+      sum,
+    });
+    const receiptEnc = encodeURIComponent(receiptJson);
+    const signature = digest(
+      `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
+    );
+    const fields = {
+      MerchantLogin: MERCHANT_LOGIN,
+      OutSum: sum,
+      InvId: invoice,
+      Description: sanitizeText(description, 100),
+      SignatureValue: signature,
+      Culture: "ru",
+      Encoding: "utf-8",
+      Receipt: receiptJson,
+    };
+    if (email) fields.Email = String(email).slice(0, 128);
+    if (IS_TEST) fields.IsTest = "1";
+    return {
+      paymentUrl: `${PAY_URL}?${queryString(fields)}`,
+      externalId: invoice,
+    };
+  },
+  verifyResult({ outSum, invId, signature }) {
+    if (!PASSWORD2) return false;
+    const expected = digest(`${outSum}:${invId}:${PASSWORD2}`);
+    return sameHash(expected, signature);
+  },
+  async fetchPayment(invoiceNo) {
+    if (!this.isReady()) {
+      throw new Error("Robokassa is not configured");
+    }
+    const invoice = String(invoiceNo);
+    const signature = digest(`${MERCHANT_LOGIN}:${invoice}:${PASSWORD2}`);
+    const url = `${OPSTATE_URL}?${queryString({
+      MerchantLogin: MERCHANT_LOGIN,
+      InvoiceID: invoice,
+      Signature: signature,
+    })}`;
+    const response = await fetch(url);
+    const xml = await response.text();
+    if (!response.ok) {
+      const error = new Error(`Robokassa OpState HTTP ${response.status}`);
+      error.body = xml;
+      throw error;
+    }
+    const resultCode = Number(
+      (xml.match(/<Result>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
+    );
+    const stateCode = Number(
+      (xml.match(/<State>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
+    );
+    // 100 = paid; 10 cancelled; 60 refunded; 5/50 in progress.
+    let status = "pending";
+    if (stateCode === 100) status = "succeeded";
+    else if (stateCode === 10 || stateCode === 60) status = "canceled";
+    else if (resultCode && resultCode !== 0 && resultCode !== 1) {
+      status = "pending";
+    }
+    return { status, stateCode, resultCode, invoiceNo: invoice };
+  },
+};

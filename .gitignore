@@ -41,6 +41,9 @@ scripts/_vps_exec.out
 *.tsbuildinfo
 next-env.d.ts
 
+# pay-api runtime override (RF kassa switch)
+deploy/pay-api/rf-kassa.json
+
 # PWA
 public/sw.js
 public/sw.js.map

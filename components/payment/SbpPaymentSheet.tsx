@@ -1,21 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CheckCircle2,
-  CreditCard,
-  Globe2,
-  Loader2,
-  Smartphone,
-} from "lucide-react";
+import { CheckCircle2, CreditCard, Loader2 } from "lucide-react";
 import BottomSheet from "@/components/ui/BottomSheet";
+import PaymentMarks, { SbpMark } from "@/components/payment/PaymentMarks";
 import { ABONEMENT_LESSONS, formatAppTier } from "@/lib/constants";
 import {
   fetchPaymentMethods,
   startPayment,
   waitForPayment,
 } from "@/lib/payment-client";
-import { paymentProviderLabel, type PaymentGateway } from "@/lib/payment-config";
+import {
+  paymentProviderLabel,
+  type PaymentGateway,
+  type RfKassa,
+} from "@/lib/payment-config";
 import type { AppSubscriptionTier } from "@/types";
 
 export type SubscriptionMonths = 1 | 3 | 6 | 12;
@@ -48,31 +47,6 @@ type PaymentPurpose =
 
 type Phase = "choose" | "init" | "waiting" | "paid" | "error";
 
-function SbpLogo() {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="grid h-10 w-10 rotate-45 grid-cols-2 gap-0.5">
-        <i className="rounded-sm bg-cyan-400" />
-        <i className="rounded-sm bg-fuchsia-500" />
-        <i className="rounded-sm bg-emerald-400" />
-        <i className="rounded-sm bg-purple-500" />
-      </span>
-      <span className="text-lg font-bold">СБП</span>
-    </div>
-  );
-}
-
-function IntlLogo() {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="grid h-10 w-10 place-items-center rounded-xl bg-studio-accent/20 text-studio-accent-light">
-        <Globe2 className="h-6 w-6" />
-      </span>
-      <span className="text-lg font-bold">Visa · Mastercard</span>
-    </div>
-  );
-}
-
 function purposeLabel(purpose: PaymentPurpose) {
   if (purpose.type === "debt") return "Оплата задолженности за урок";
   if (purpose.type === "abonement")
@@ -101,7 +75,8 @@ export default function SbpPaymentSheet({
   onSuccessRef.current = onSuccess;
   const [error, setError] = useState("");
   const [phase, setPhase] = useState<Phase>("choose");
-  const [gateway, setGateway] = useState<PaymentGateway>("yookassa");
+  const [gateway, setGateway] = useState<PaymentGateway>("rf");
+  const [rfProvider, setRfProvider] = useState<RfKassa>("robokassa");
   const pollRef = useRef<AbortController | null>(null);
 
   const beginRef = useRef<(next: PaymentGateway) => void>(() => {});
@@ -111,20 +86,21 @@ export default function SbpPaymentSheet({
       pollRef.current?.abort();
       pollRef.current = null;
       setPhase("choose");
-      setGateway("yookassa");
+      setGateway("rf");
       setError("");
       return;
     }
     // Offer the choice only when international cards are switched on;
     // otherwise go straight to SBP / RU cards as before.
     let cancelled = false;
-    setGateway("yookassa");
+    setGateway("rf");
     setError("");
     setPhase("init");
     void fetchPaymentMethods().then((methods) => {
       if (cancelled) return;
+      setRfProvider(methods.rfProvider);
       if (methods.international) setPhase("choose");
-      else beginRef.current("yookassa");
+      else beginRef.current("rf");
     });
     return () => {
       cancelled = true;
@@ -175,14 +151,18 @@ export default function SbpPaymentSheet({
   beginRef.current = begin;
 
   const intl = gateway === "prodamus";
-  const label = paymentProviderLabel(gateway);
+  const label = paymentProviderLabel(intl ? "prodamus" : rfProvider);
   const title =
-    phase === "choose" ? "Способ оплаты" : intl ? "Международная карта" : "Оплата по СБП";
+    phase === "choose"
+      ? "Способ оплаты"
+      : intl
+        ? "Международная карта"
+        : "Оплата из РФ";
 
   return (
     <BottomSheet open={open} onClose={phase === "init" ? () => {} : onClose}>
       <div className="pr-10">
-        {phase === "choose" || !intl ? <SbpLogo /> : <IntlLogo />}
+        <PaymentMarks />
         <h2 className="mt-5 font-display text-3xl font-semibold">{title}</h2>
         <p className="mt-1 text-sm text-studio-muted">{purposeLabel(purpose)}</p>
       </div>
@@ -195,14 +175,14 @@ export default function SbpPaymentSheet({
         <div className="mt-6 flex flex-col gap-3">
           <button
             type="button"
-            onClick={() => begin("yookassa")}
+            onClick={() => begin("rf")}
             className="flex min-h-[3.5rem] w-full items-center gap-3 rounded-xl bg-studio-accent px-5 py-3 text-left text-sm font-semibold text-white"
           >
-            <Smartphone className="h-5 w-5 shrink-0" />
+            <SbpMark className="h-8 w-8 shrink-0" />
             <span>
               Оплатить по СБП или картой РФ
               <span className="block text-xs font-normal text-white/70">
-                Быстро, через приложение банка
+                СБП, МИР, Visa и Mastercard российских банков
               </span>
             </span>
           </button>
@@ -261,7 +241,6 @@ export default function SbpPaymentSheet({
             onClick={() => begin(gateway)}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-studio-accent px-6 py-3 text-sm font-semibold text-white"
           >
-            <Smartphone className="h-4 w-4" />
             Перейти к оплате
           </button>
           <button

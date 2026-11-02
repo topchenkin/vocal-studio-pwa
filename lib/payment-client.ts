@@ -1,5 +1,9 @@
 import { supabase } from "@/lib/supabase";
-import { PAYMENT_API_BASE, type PaymentGateway } from "@/lib/payment-config";
+import {
+  PAYMENT_API_BASE,
+  type PaymentGateway,
+  type RfKassa,
+} from "@/lib/payment-config";
 import type { PaymentPurpose } from "@/components/payment/SbpPaymentSheet";
 
 type InitResponse = {
@@ -72,8 +76,9 @@ function openCheckout(paymentUrl: string) {
 
 export function readPayInvoice() {
   if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
   const fromQuery = Number(
-    new URLSearchParams(window.location.search).get("invoice") || ""
+    params.get("invoice") || params.get("InvId") || params.get("InvID") || ""
   );
   if (fromQuery > 0) return fromQuery;
   const stored = Number(sessionStorage.getItem(INVOICE_KEY) || "");
@@ -128,7 +133,7 @@ export async function waitForPayment(
 
 export async function startPayment(
   purpose: PaymentPurpose,
-  gateway: PaymentGateway = "yookassa"
+  gateway: PaymentGateway = "rf"
 ) {
   const base =
     purpose.type === "debt"
@@ -144,7 +149,8 @@ export async function startPayment(
                 tier: purpose.tier,
                 months: purpose.months,
               };
-  const body = gateway === "prodamus" ? { ...base, provider: "prodamus" } : base;
+  const body =
+    gateway === "prodamus" ? { ...base, provider: "prodamus" } : { ...base };
 
   const payload = await postPayment("/init", body);
   rememberCheckout(payload.invoiceNo);
@@ -153,17 +159,73 @@ export async function startPayment(
 }
 
 /** Which optional gateways are switched on (the button is hidden otherwise). */
-export async function fetchPaymentMethods(): Promise<{ international: boolean }> {
+export async function fetchPaymentMethods(): Promise<{
+  international: boolean;
+  rfProvider: RfKassa;
+}> {
   try {
     const response = await fetch(`${PAYMENT_API_BASE}/methods`, {
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) return { international: false };
-    const payload = (await response.json()) as { international?: boolean };
-    return { international: payload.international === true };
+    if (!response.ok) {
+      return { international: false, rfProvider: "robokassa" };
+    }
+    const payload = (await response.json()) as {
+      international?: boolean;
+      rfProvider?: string;
+    };
+    return {
+      international: payload.international === true,
+      rfProvider: payload.rfProvider === "yookassa" ? "yookassa" : "robokassa",
+    };
   } catch {
-    return { international: false };
+    return { international: false, rfProvider: "robokassa" };
   }
+}
+
+export async function fetchRfKassa() {
+  const response = await fetch(`${PAYMENT_API_BASE}/rf-kassa`, {
+    headers: await authHeaders(),
+    signal: AbortSignal.timeout(8000),
+  });
+  const payload = (await response.json()) as {
+    error?: string;
+    provider?: string;
+    robokassaReady?: boolean;
+    yookassaReady?: boolean;
+    resultUrl?: string;
+  };
+  if (!response.ok) {
+    throw new Error(payload.error || "Не удалось прочитать кассу");
+  }
+  return {
+    provider: (payload.provider === "yookassa" ? "yookassa" : "robokassa") as RfKassa,
+    robokassaReady: payload.robokassaReady === true,
+    yookassaReady: payload.yookassaReady === true,
+    resultUrl: payload.resultUrl || "",
+  };
+}
+
+export async function setRfKassa(provider: RfKassa) {
+  const response = await fetch(`${PAYMENT_API_BASE}/rf-kassa`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ provider }),
+  });
+  const payload = (await response.json()) as {
+    error?: string;
+    provider?: string;
+    robokassaReady?: boolean;
+    yookassaReady?: boolean;
+  };
+  if (!response.ok) {
+    throw new Error(payload.error || "Не удалось переключить кассу");
+  }
+  return {
+    provider: (payload.provider === "yookassa" ? "yookassa" : "robokassa") as RfKassa,
+    robokassaReady: payload.robokassaReady === true,
+    yookassaReady: payload.yookassaReady === true,
+  };
 }
 
 export async function createGiftPaymentLink(certificateId: string) {
