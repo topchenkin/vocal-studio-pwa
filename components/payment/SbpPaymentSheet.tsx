@@ -215,8 +215,8 @@ export default function SbpPaymentSheet({
             <span>
               Оплатить международной картой
               <span className="block text-xs font-normal text-studio-muted">
-                Visa и Mastercard Беларуси, СНГ и других стран · сумма в ₽
-                пересчитается в валюту карты
+                На следующей странице введите Visa/Mastercard в поле «Номер
+                карты». СБП и SberPay не нажимайте — это оплата из РФ
               </span>
             </span>
           </button>
@@ -239,8 +239,9 @@ export default function SbpPaymentSheet({
         <div className="flex flex-col items-center py-10 text-center">
           <Loader2 className="h-10 w-10 animate-spin text-studio-accent" />
           <p className="mt-4 text-sm text-studio-muted">
-            Страница {label} открыта. Как только оплата пройдёт, статус обновится
-            сам.
+            {intl
+              ? "Введите зарубежную карту в поле «Номер карты» и нажмите «Оплатить». СБП и SberPay на этой странице не используйте."
+              : `Страница ${label} открыта. Как только оплата пройдёт, статус обновится сам.`}
           </p>
         </div>
       ) : phase === "init" && !error ? (

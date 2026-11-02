@@ -25,12 +25,13 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
 /** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
 export const PRODAMUS_FLOW = "intl_link_v6";
 /**
- * Official REST codes for foreign cards
- * (help.prodamus.ru → самостоятельная интеграция + «Карты зарубежных банков»).
- *
- * Foreign cards are a separate method in USD/KZT, not the RF `AC` field.
- * Including `AC` opens the Russian checkout (SBP + SberPay + «Номер карты»).
- * `monetaworld` = world except RF; `ACUSDKB` = USD world except RF (US cards).
+ * The new payform SPA (link.payform.ru, salesChannelType=Api) loads methods
+ * from GET /payment-methods?currency=rub: SberPay, SBP, Cards, Installment.
+ * `payment_method` / `available_payment_methods` are NOT stored on the order
+ * and do not hide SBP. Foreign cards are the same `Cards` field («Или картой»):
+ * RF BIN → 3.8%, foreign BIN → 10%. USD currency would hide SBP but would
+ * treat the price as dollars — do not send it. To drop SBP, Prodamus support
+ * must disable those methods on uniquevocal.payform.ru.
  */
 const INTERNATIONAL_METHOD = "monetaworld";
 const INTERNATIONAL_METHODS = [
