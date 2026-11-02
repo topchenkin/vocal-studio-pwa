@@ -8,7 +8,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { yookassa } from "./providers.mjs";
-import { robokassa } from "./robokassa.mjs";
+import {
+  goToken,
+  paymentFields,
+  renderPayForm,
+  ROBOKASSA_FLOW,
+  robokassa,
+} from "./robokassa.mjs";
 import {
   parseFormBody,
   PRODAMUS_FLOW,
@@ -34,6 +40,16 @@ const ALLOWED_MONTHS = new Set([1, 3, 6, 12]);
 /** Keep in sync with lib/constants.ts SUBSCRIPTION_PERIOD_DISCOUNT. */
 const PERIOD_DISCOUNT = { 1: 0, 3: 10, 6: 15, 12: 20 };
 const TEST_PAYMENT_AMOUNT = 1;
+
+function html(res, status, body) {
+  const payload = String(body);
+  res.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -455,12 +471,14 @@ async function handleInitGift(req, res) {
 
   let paymentUrl;
   let externalId = null;
+  const rkToken = rfProvider === "robokassa" ? goToken() : "";
   try {
     const payment = await kassa.createPayment({
       outSum,
       invId,
       description,
       email: null,
+      token: rkToken,
     });
     paymentUrl = payment.paymentUrl;
     externalId = payment.externalId;
@@ -485,6 +503,8 @@ async function handleInitGift(req, res) {
           gift_kind: cert.kind,
           description,
           robokassa_url: paymentUrl,
+          robokassa_flow: ROBOKASSA_FLOW,
+          robokassa_go: rkToken,
         },
       }),
     });
@@ -570,7 +590,10 @@ async function findReusableRobokassa(studentId, purpose, metadata, amount) {
   const rows = await res.json();
   const list = Array.isArray(rows) ? rows : [];
   const tx = list.find(
-    (row) => row.metadata?.robokassa_url && samePaymentIntent(row, purpose, metadata)
+    (row) =>
+      row.metadata?.robokassa_url &&
+      row.metadata?.robokassa_flow === ROBOKASSA_FLOW &&
+      samePaymentIntent(row, purpose, metadata)
   );
   if (!tx) return null;
   return {
@@ -761,6 +784,7 @@ async function handleInit(req, res) {
   const email = String(user.email || profile.email || "").trim();
   let paymentUrl;
   let externalId = null;
+  const rkToken = !useProdamus && rfProvider === "robokassa" ? goToken() : "";
   try {
     const payment = useProdamus
       ? await prodamus.createPayment({
@@ -775,6 +799,7 @@ async function handleInit(req, res) {
           invId,
           description,
           email: email || null,
+          token: rkToken,
         });
     paymentUrl = payment.paymentUrl;
     externalId = payment.externalId;
@@ -806,6 +831,8 @@ async function handleInit(req, res) {
           : {
               ...metadata,
               robokassa_url: paymentUrl,
+              robokassa_flow: ROBOKASSA_FLOW,
+              robokassa_go: rkToken,
             },
         ...(externalId ? { external_id: externalId } : {}),
       }),
@@ -1052,6 +1079,41 @@ async function handleRobokassaResult(req, res) {
   return plain(res, 200, `OK${invoiceNo}`);
 }
 
+async function handleRobokassaGo(req, res) {
+  if (req.method !== "GET") return json(res, 405, { error: "method" });
+  const url = new URL(req.url || "/", "http://127.0.0.1");
+  const invoiceNo = Number(url.searchParams.get("invoice") || "");
+  const token = String(url.searchParams.get("t") || "");
+  if (!invoiceNo || !token) {
+    return json(res, 400, { error: "Нет счёта" });
+  }
+  if (!robokassa.isReady()) {
+    return json(res, 503, { error: "Robokassa ещё не настроена" });
+  }
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider,metadata&limit=1`
+  );
+  const rows = txRes.ok ? await txRes.json() : [];
+  const tx = Array.isArray(rows) ? rows[0] : rows;
+  if (!tx || tx.provider !== "robokassa") {
+    return json(res, 404, { error: "Счёт не найден" });
+  }
+  if (String(tx.metadata?.robokassa_go || "") !== token) {
+    return json(res, 403, { error: "Ссылка недействительна" });
+  }
+  if (tx.status === "confirmed") {
+    return json(res, 400, { error: "Счёт уже оплачен" });
+  }
+  const built = paymentFields({
+    outSum: money(tx.amount_rub),
+    invId: invoiceNo,
+    description: tx.metadata?.description || "Unique Vocal Studio",
+    email: null,
+  });
+  console.log("[uvs:robokassa] go", invoiceNo);
+  return html(res, 200, renderPayForm(built.fields));
+}
+
 async function handleRfKassa(req, res) {
   const auth = String(req.headers.authorization || "");
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -1120,6 +1182,10 @@ const server = createServer(async (req, res) => {
 
     if (path === "/api/robokassa/result") {
       return handleRobokassaResult(req, res);
+    }
+
+    if (path === "/api/payments/robokassa-go") {
+      return handleRobokassaGo(req, res);
     }
 
     if (

@@ -9,7 +9,9 @@
  *       https://docs.robokassa.ru/ru/fiscalization
  *       https://docs.robokassa.ru/ru/notifications-and-redirects
  */
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
+export const ROBOKASSA_FLOW = "post_form_v1";
 
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
@@ -48,10 +50,24 @@ function sameHash(left, right) {
 
 function sanitizeText(value, max) {
   return String(value || "")
-    .replace(/[<>&"'`]/g, " ")
+    .replace(/[<>&"'`—–·•]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max);
+}
+
+/** PHP urlencode: spaces as +, same as Robokassa signature examples. */
+export function phpUrlEncode(value) {
+  return encodeURIComponent(String(value))
+    .replace(/%20/g, "+")
+    .replace(
+      /[!'()*]/g,
+      (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+    );
+}
+
+export function goToken() {
+  return randomBytes(12).toString("hex");
 }
 
 export function buildReceipt({ name, sum }) {
@@ -81,6 +97,73 @@ function queryString(fields) {
     .join("&");
 }
 
+export function paymentFields({ outSum, invId, description, email }) {
+  const sum = String(outSum);
+  const invoice = String(invId);
+  const receiptJson = buildReceipt({
+    name: description,
+    sum,
+  });
+  const receiptEnc = phpUrlEncode(receiptJson);
+  const signature = digest(
+    `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
+  );
+  const fields = {
+    MerchantLogin: MERCHANT_LOGIN,
+    OutSum: sum,
+    InvId: invoice,
+    Description: sanitizeText(description, 100),
+    SignatureValue: signature,
+    Culture: "ru",
+    Encoding: "utf-8",
+    Receipt: receiptEnc,
+  };
+  if (email) fields.Email = String(email).slice(0, 128);
+  if (IS_TEST) fields.IsTest = "1";
+  return { fields, receiptEnc };
+}
+
+export function robokassaGoUrl(invId, token) {
+  const params = new URLSearchParams({
+    invoice: String(invId),
+    t: String(token || ""),
+  });
+  return `${APP_ORIGIN}/api/payments/robokassa-go?${params.toString()}`;
+}
+
+function htmlEscape(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function renderPayForm(fields) {
+  const inputs = Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(
+      ([key, value]) =>
+        `<input type="hidden" name="${htmlEscape(key)}" value="${htmlEscape(value)}" />`
+    )
+    .join("");
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Оплата</title>
+</head>
+<body>
+  <p>Переходим к оплате…</p>
+  <form id="rk" action="${htmlEscape(PAY_URL)}" method="post" accept-charset="UTF-8">
+    ${inputs}
+  </form>
+  <script>document.getElementById("rk").submit();</script>
+</body>
+</html>`;
+}
+
 export const robokassa = {
   id: "robokassa",
   isReady() {
@@ -99,35 +182,15 @@ export const robokassa = {
       robokassaResultUrl: `${APP_ORIGIN}/api/robokassa/result`,
     };
   },
-  createPayment({ outSum, invId, description, email }) {
+  createPayment({ outSum, invId, description, email, token }) {
     if (!this.isReady()) {
       throw new Error("Robokassa: задайте ROBOKASSA_MERCHANT_LOGIN, PASSWORD1 и PASSWORD2");
     }
-    const sum = String(outSum);
-    const invoice = String(invId);
-    const receiptJson = buildReceipt({
-      name: description,
-      sum,
-    });
-    const receiptEnc = encodeURIComponent(receiptJson);
-    const signature = digest(
-      `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
-    );
-    const fields = {
-      MerchantLogin: MERCHANT_LOGIN,
-      OutSum: sum,
-      InvId: invoice,
-      Description: sanitizeText(description, 100),
-      SignatureValue: signature,
-      Culture: "ru",
-      Encoding: "utf-8",
-      Receipt: receiptJson,
-    };
-    if (email) fields.Email = String(email).slice(0, 128);
-    if (IS_TEST) fields.IsTest = "1";
+    const built = paymentFields({ outSum, invId, description, email });
     return {
-      paymentUrl: `${PAY_URL}?${queryString(fields)}`,
-      externalId: invoice,
+      paymentUrl: robokassaGoUrl(invId, token),
+      externalId: String(invId),
+      fields: built.fields,
     };
   },
   verifyResult({ outSum, invId, signature }) {
