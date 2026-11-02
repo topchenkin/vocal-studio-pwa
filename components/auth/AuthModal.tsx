@@ -7,7 +7,10 @@ import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { formatGiftCode, normalizeGiftCode } from "@/lib/gift-certificates";
 import { supabase } from "@/lib/supabase";
-import { mapBackendError } from "@/lib/supabase-errors";
+import {
+  isEmailConfirmPendingError,
+  mapBackendError,
+} from "@/lib/supabase-errors";
 
 type AuthMode = "login" | "register";
 
@@ -131,6 +134,12 @@ export default function AuthModal({
     setSubmitting(false);
 
     if (result.error) {
+      if (mode === "register" && isEmailConfirmPendingError(result.error)) {
+        setAwaitingConfirm(true);
+        setMessage(
+          "Аккаунт уже создан. Откройте письмо со ссылкой — повторно отправить его можно через минуту."
+        );
+      }
       setError(result.error);
       return;
     }
@@ -296,7 +305,10 @@ export default function AuthModal({
           <input
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              if (awaitingConfirm) setAwaitingConfirm(false);
+            }}
             autoComplete="email"
             className="w-full rounded-xl bg-studio-surface px-4 py-3 text-sm ring-1 ring-studio-border transition focus:outline-none focus:ring-studio-accent"
             placeholder="you@example.com"
@@ -339,7 +351,12 @@ export default function AuthModal({
         )}
         {message && <p className="text-sm text-emerald-400">{message}</p>}
 
-        <Button type="submit" size="lg" fullWidth disabled={submitting}>
+        <Button
+          type="submit"
+          size="lg"
+          fullWidth
+          disabled={submitting || (mode === "register" && awaitingConfirm)}
+        >
           {mode === "login" ? (
             <LogIn className="h-5 w-5" />
           ) : (
@@ -347,9 +364,11 @@ export default function AuthModal({
           )}
           {submitting
             ? "Подождите..."
-            : mode === "login"
-              ? "Войти"
-              : "Создать аккаунт"}
+            : awaitingConfirm && mode === "register"
+              ? "Письмо отправлено"
+              : mode === "login"
+                ? "Войти"
+                : "Создать аккаунт"}
         </Button>
 
         {mode === "login" ? (

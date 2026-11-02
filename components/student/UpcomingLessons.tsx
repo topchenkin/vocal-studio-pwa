@@ -89,7 +89,6 @@ export default function UpcomingLessons() {
     void loadLessons();
     const refresh = () => {
       void loadLessons();
-      void refreshProfile();
     };
     window.addEventListener("uvs-lesson-booked", refresh);
     window.addEventListener("uvs-profile-updated", refresh);
@@ -124,7 +123,6 @@ export default function UpcomingLessons() {
           filter: `id=eq.${user.id}`,
         },
         () => {
-          void refreshProfile();
           void loadLessons();
         }
       )
@@ -136,7 +134,7 @@ export default function UpcomingLessons() {
       window.removeEventListener("focus", refresh);
       void supabase.removeChannel(channel);
     };
-  }, [loadLessons, refreshProfile, user]);
+  }, [loadLessons, user]);
 
   const upcomingLessons = useMemo(() => {
     const now = Date.now();

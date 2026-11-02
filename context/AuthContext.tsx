@@ -142,6 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isMockAdmin, setIsMockAdmin] = useState(false);
   const profileRef = useRef<StudentProfile | null>(null);
   profileRef.current = profile;
+  const lastQuietLoadAt = useRef(0);
 
   const loadProfile = useCallback(
     async (authUser: User | null, quiet = false) => {
@@ -151,6 +152,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         writeCachedProfile(null);
         setProfileError(null);
         return;
+      }
+      if (quiet) {
+        const now = Date.now();
+        if (now - lastQuietLoadAt.current < 4_000) return;
+        lastQuietLoadAt.current = now;
+      } else {
+        lastQuietLoadAt.current = Date.now();
       }
 
       try {
@@ -288,9 +296,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .subscribe();
 
     const onRecovered = () => {
-      void loadProfile(user, true).then(() => {
-        window.dispatchEvent(new Event("uvs-profile-updated"));
-      });
+      lastQuietLoadAt.current = 0;
+      void loadProfile(user, true);
     };
     const onReconnecting = () => setReconnecting(true);
 
@@ -470,7 +477,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     try {
-      await recoverSupabaseRoute();
+      await recoverSupabaseRoute(true);
       const authUser = user ?? readCachedUser();
       if (!authUser) {
         const {

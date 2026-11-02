@@ -185,8 +185,11 @@ function isBadGateway(response: Response): boolean {
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastReconnectAt = 0;
 let netTimer: ReturnType<typeof setTimeout> | null = null;
+let recoverInFlight: Promise<void> | null = null;
+let lastRecoverAt = 0;
 let guardsInstalled = false;
 let choosePromise: Promise<"direct" | "proxy"> | null = null;
+const RECOVER_THROTTLE_MS = 8_000;
 
 function reconnectRealtime() {
   const now = Date.now();
@@ -298,20 +301,29 @@ function notifyRouteRecovered() {
   window.dispatchEvent(new Event("uvs-route-recovered"));
 }
 
-export async function recoverSupabaseRoute() {
-  clearChosenRoute();
-  notifyReconnecting();
-  try {
-    await chooseRoute();
-    notifyRouteRecovered();
-  } catch {
-    /* keep reconnecting; the next request races again */
-  }
-  reconnectRealtime();
+export async function recoverSupabaseRoute(force = false) {
+  if (recoverInFlight) return recoverInFlight;
+  const now = Date.now();
+  if (!force && now - lastRecoverAt < RECOVER_THROTTLE_MS) return;
+  lastRecoverAt = now;
+  recoverInFlight = (async () => {
+    clearChosenRoute();
+    notifyReconnecting();
+    try {
+      await chooseRoute();
+      notifyRouteRecovered();
+    } catch {
+      /* keep reconnecting; the next request races again */
+    }
+    reconnectRealtime();
+  })().finally(() => {
+    recoverInFlight = null;
+  });
+  return recoverInFlight;
 }
 
 export function resyncSupabaseTransport() {
-  void recoverSupabaseRoute();
+  void recoverSupabaseRoute(true);
 }
 
 export function installNetworkGuards() {
@@ -325,8 +337,9 @@ export function installNetworkGuards() {
       clearTimeout(netTimer);
       netTimer = null;
     }
-    clearChosenRoute();
-    notifyReconnecting();
+    // Do not clear the live route or flash "reconnecting" until recover
+    // actually runs. navigator.connection.change (Samsung) and rtt jitter
+    // used to call this every few seconds and freeze the bottom nav.
     netTimer = setTimeout(() => {
       netTimer = null;
       void recoverSupabaseRoute();
@@ -357,12 +370,6 @@ export function installNetworkGuards() {
       if (!ok) onPathChange();
     });
   });
-  const connection = (
-    navigator as Navigator & {
-      connection?: EventTarget & { addEventListener: typeof window.addEventListener };
-    }
-  ).connection;
-  connection?.addEventListener("change", onPathChange);
 }
 
 function bindCallerAbort(local: AbortController, caller?: AbortSignal) {

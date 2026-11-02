@@ -30,7 +30,13 @@ export function useCabinetProgress() {
   }, [loading, reload]);
 
   useEffect(() => {
-    const onFocus = () => void reload();
+    let last = 0;
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - last < 4_000) return;
+      last = now;
+      void reload();
+    };
     window.addEventListener("focus", onFocus);
     window.addEventListener("uvs-profile-updated", onFocus);
     window.addEventListener("uvs-cabinet-progress", onFocus);

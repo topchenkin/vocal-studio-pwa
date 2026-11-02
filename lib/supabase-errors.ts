@@ -35,8 +35,11 @@ function translateAuthMessage(text: string): string {
     return "Почта ещё не подтверждена. Откройте письмо со ссылкой подтверждения.";
   if (/error sending .*email|sending .*email/i.test(text))
     return "Не удалось отправить письмо. Попробуйте позже или напишите преподавателю.";
-  if (/rate limit|too many requests|for security purposes/i.test(text))
-    return "Слишком много попыток. Подождите минуту и повторите.";
+  const waitSec = text.match(/after\s+(\d+)\s+seconds/i);
+  if (waitSec)
+    return `Письмо уже отправлено. Подождите ${waitSec[1]} сек. и проверьте почту.`;
+  if (/over_email_send_rate_limit|rate limit|too many requests|for security purposes/i.test(text))
+    return "Письмо уже отправлено. Подождите минуту и проверьте почту — в том числе папку «Спам».";
   if (/new password should be different|same password/i.test(text))
     return "Новый пароль должен отличаться от старого.";
   if (/password should be|weak password|at least \d+ char/i.test(text))
@@ -46,6 +49,12 @@ function translateAuthMessage(text: string): string {
   if (/otp.*expired|token.*(expired|invalid)|link.*expired/i.test(text))
     return "Ссылка устарела. Запросите новую на экране входа.";
   return text;
+}
+
+export function isEmailConfirmPendingError(text: string): boolean {
+  return /письмо уже отправлено|подождите \d+ сек|подождите минуту и проверьте почту/i.test(
+    text
+  );
 }
 
 /** Human-readable auth/backend error; never returns `{}` / empty object stringification. */
