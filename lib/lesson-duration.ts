@@ -1,17 +1,11 @@
-export const LESSON_DURATION_OPTIONS = [40, 45, 50, 55, 60] as const;
+export const LESSON_DURATION_OPTIONS = [40, 45, 50, 55, 60, 90] as const;
 export type LessonDurationMin = (typeof LESSON_DURATION_OPTIONS)[number];
 export const DEFAULT_LESSON_DURATION_MIN = 60 as const;
 
 export function clampLessonDurationMin(value: unknown): LessonDurationMin {
   const n = Number(value);
-  if (
-    n === 40 ||
-    n === 45 ||
-    n === 50 ||
-    n === 55 ||
-    n === 60
-  ) {
-    return n;
+  if ((LESSON_DURATION_OPTIONS as readonly number[]).includes(n)) {
+    return n as LessonDurationMin;
   }
   return DEFAULT_LESSON_DURATION_MIN;
 }
