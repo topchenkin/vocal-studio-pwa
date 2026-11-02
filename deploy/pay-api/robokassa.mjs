@@ -11,7 +11,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-export const ROBOKASSA_FLOW = "get_v3";
+export const ROBOKASSA_FLOW = "get_v5";
 
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
@@ -60,6 +60,16 @@ export function goToken() {
   return randomBytes(12).toString("hex");
 }
 
+/** PHP urlencode: spaces as +. Robokassa signs Receipt this way. */
+export function phpUrlEncode(value) {
+  return encodeURIComponent(String(value))
+    .replace(/%20/g, "+")
+    .replace(
+      /[!'()*]/g,
+      (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+    );
+}
+
 export function buildReceipt({ name, sum }) {
   const itemName = sanitizeText(name, 128) || "Unique Vocal Studio";
   const amount = Number(sum);
@@ -94,9 +104,9 @@ export function paymentFields({ outSum, invId, description, email }) {
     name: description,
     sum,
   });
-  // Signature Receipt must match GET query encoding (encodeURIComponent, %20).
-  // PHP urlencode (+) plus an HTML POST form produced error 29 in Chrome.
-  const receiptEnc = encodeURIComponent(receiptJson);
+  // Official sample puts already-urlencoded Receipt in the field and signs
+  // that same string (PHP urlencode, spaces as +). GET then encodes again.
+  const receiptEnc = phpUrlEncode(receiptJson);
   const signature = digest(
     `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
   );
@@ -106,7 +116,7 @@ export function paymentFields({ outSum, invId, description, email }) {
     InvId: invoice,
     Description: sanitizeText(description, 100),
     SignatureValue: signature,
-    Receipt: receiptJson,
+    Receipt: receiptEnc,
   };
   if (email) fields.Email = String(email).slice(0, 128);
   if (IS_TEST) fields.IsTest = "1";
