@@ -11,7 +11,7 @@
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-export const ROBOKASSA_FLOW = "post_form_v1";
+export const ROBOKASSA_FLOW = "post_form_v2";
 
 const APP_ORIGIN = (
   process.env.NEXT_PUBLIC_APP_URL || "https://www.uniquevocal.ru"
@@ -56,7 +56,7 @@ function sanitizeText(value, max) {
     .slice(0, max);
 }
 
-/** PHP urlencode: spaces as +, same as Robokassa signature examples. */
+/** PHP urlencode: spaces as +. Robokassa verifies Receipt this way. */
 export function phpUrlEncode(value) {
   return encodeURIComponent(String(value))
     .replace(/%20/g, "+")
@@ -104,6 +104,9 @@ export function paymentFields({ outSum, invId, description, email }) {
     name: description,
     sum,
   });
+  // Signature uses PHP urlencode (spaces as +). The POST field is raw JSON:
+  // putting already-encoded "+" into an HTML form makes the browser treat +
+  // as a space and Robokassa returns error 29. Confirmed against Index.aspx.
   const receiptEnc = phpUrlEncode(receiptJson);
   const signature = digest(
     `${MERCHANT_LOGIN}:${sum}:${invoice}:${receiptEnc}:${PASSWORD1}`
@@ -114,9 +117,7 @@ export function paymentFields({ outSum, invId, description, email }) {
     InvId: invoice,
     Description: sanitizeText(description, 100),
     SignatureValue: signature,
-    Culture: "ru",
-    Encoding: "utf-8",
-    Receipt: receiptEnc,
+    Receipt: receiptJson,
   };
   if (email) fields.Email = String(email).slice(0, 128);
   if (IS_TEST) fields.IsTest = "1";
