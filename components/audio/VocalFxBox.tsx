@@ -224,7 +224,8 @@ export default function VocalFxBox({ locked = false }: Props) {
         input,
         output,
         presetRef.current,
-        wetRef.current
+        wetRef.current,
+        { realtime: true }
       );
       startedAtRef.current = ctx.currentTime;
       offsetRef.current = offset;

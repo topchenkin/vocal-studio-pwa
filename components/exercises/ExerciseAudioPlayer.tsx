@@ -9,18 +9,40 @@ import {
   routeHtmlMediaToSpeaker,
 } from "@/lib/ios-audio-session";
 
+function safeDuration(value: number, fallback: number) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 export default function ExerciseAudioPlayer({
   src,
   title,
+  durationSec,
 }: {
   src: string;
   title: string;
+  durationSec?: number;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(120);
+  const fallbackDuration = durationSec && durationSec > 0 ? durationSec : 120;
+  const [duration, setDuration] = useState(fallbackDuration);
   const [speed, setSpeed] = useState(1);
+
+  useEffect(() => {
+    setPlaying(false);
+    setProgress(0);
+    setDuration(fallbackDuration);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        /* some MediaRecorder blobs reject seek until decoded */
+      }
+    }
+  }, [src, fallbackDuration]);
 
   useEffect(() => {
     const pauseOthers = () => {
@@ -54,10 +76,18 @@ export default function ExerciseAudioPlayer({
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
+      window.dispatchEvent(new Event("uvs-pause-exercise-audio"));
       preferIosPlayback();
       pulseIosPlayback();
       await forceIosSpeakerRoute();
       void routeHtmlMediaToSpeaker(audio);
+      if (progress < 0.05 && audio.currentTime > 0.25) {
+        try {
+          audio.currentTime = 0;
+        } catch {
+          /* blob without a duration index */
+        }
+      }
       await audio.play();
       setPlaying(true);
     } else {
@@ -67,8 +97,15 @@ export default function ExerciseAudioPlayer({
   };
 
   const seek = (value: number) => {
-    setProgress(value);
-    if (audioRef.current && src) audioRef.current.currentTime = value;
+    const next = Math.max(0, Math.min(value, duration));
+    setProgress(next);
+    const audio = audioRef.current;
+    if (!audio || !src) return;
+    try {
+      audio.currentTime = next;
+    } catch {
+      /* Safari rejects seek on blobs without duration */
+    }
   };
 
   const changeSpeed = (value: number) => {
@@ -91,9 +128,16 @@ export default function ExerciseAudioPlayer({
           playsInline
           {...{ "webkit-playsinline": "true" }}
           onPlay={() => preferIosPlayback()}
-          onTimeUpdate={(event) => setProgress(event.currentTarget.currentTime)}
-          onLoadedMetadata={(event) =>
-            setDuration(event.currentTarget.duration || 120)
+          onTimeUpdate={(event) => {
+            const time = event.currentTarget.currentTime;
+            if (Number.isFinite(time) && time >= 0) setProgress(time);
+          }}
+          onLoadedMetadata={(event) => {
+            setDuration(safeDuration(event.currentTarget.duration, fallbackDuration));
+            void routeHtmlMediaToSpeaker(event.currentTarget);
+          }}
+          onDurationChange={(event) =>
+            setDuration(safeDuration(event.currentTarget.duration, fallbackDuration))
           }
           onEnded={() => setPlaying(false)}
         />
@@ -118,7 +162,7 @@ export default function ExerciseAudioPlayer({
           <input
             type="range"
             min={0}
-            max={duration}
+            max={Math.max(0.1, duration)}
             step={0.1}
             value={Math.min(progress, duration)}
             onChange={(event) => seek(Number(event.target.value))}

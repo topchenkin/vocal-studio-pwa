@@ -103,7 +103,7 @@ export type UseVocalAnalyzerApi = {
   error: string | null;
   live: LiveTunerState;
   startListening: () => Promise<void>;
-  stopListening: () => void;
+  stopListening: () => void | Promise<void>;
   startTest: (durationMs: number) => Promise<VocalTestResult>;
   /** Callback ref — attach to the `<canvas>` used for the oscilloscope. */
   attachWaveformCanvas: (canvas: HTMLCanvasElement | null) => void;
@@ -198,11 +198,12 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     testRejectRef.current = null;
 
     endAudioKeepAlive();
-    void restoreIosPlaybackAfterCapture({ stream, context });
+    const restored = restoreIosPlaybackAfterCapture({ stream, context });
     setListening(false);
     setTesting(false);
     setTestProgress(0);
     setLive(IDLE_LIVE_STATE);
+    return restored;
   }, []);
 
   // Guarantee mic + AudioContext are released on unmount — no lingering

@@ -30,6 +30,7 @@ assert.ok(!access.includes('"musicgen"'));
 const fx = readFileSync(path.join(root, "lib", "vocal-fx.ts"), "utf8");
 assert.ok(fx.includes("makeReverbImpulse"));
 assert.ok(fx.includes("renderVocalFxWav"));
+assert.ok(fx.includes("LIVE_REVERB_SEC_CAP"));
 assert.ok(fx.includes('"church"'));
 assert.ok(fx.includes('"street"'));
 assert.ok(fx.includes('"megaphone"'));
@@ -43,6 +44,7 @@ assert.ok(fxUi.includes("Из «Мои аудио»"));
 assert.ok(fxUi.includes("Wet/Dry"));
 assert.ok(fxUi.includes("LibraryTrackPicker"));
 assert.ok(fxUi.includes('source: "vocalfx"'));
+assert.ok(fxUi.includes("realtime: true"));
 
 const chords = readFileSync(path.join(root, "lib", "chord-loop.ts"), "utf8");
 assert.ok(chords.includes("rock-guitar"));

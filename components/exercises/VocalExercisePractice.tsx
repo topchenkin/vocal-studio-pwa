@@ -25,12 +25,14 @@ import { EXERCISE_ATTEMPT_MAX_SEC } from "@/lib/vocal-exercise";
 import { describeNote } from "@/lib/pitch";
 import type { Exercise } from "@/types";
 import Link from "next/link";
-import MediaAudio from "@/components/media/MediaAudio";
+import ExerciseAudioPlayer from "@/components/exercises/ExerciseAudioPlayer";
 import {
+  forceIosSpeakerRoute,
   preferIosPlayback,
   pulseIosPlayback,
   routeHtmlMediaToSpeaker,
 } from "@/lib/ios-audio-session";
+import { audioBufferToWavBlob, decodeBlobToAudioBuffer } from "@/lib/wav-client";
 
 type PracticeStage = "idle" | "live" | "recording" | "ready" | "sending";
 
@@ -80,14 +82,14 @@ export default function VocalExercisePractice({
   };
 
   const replaceTake = (
-    next: { file: File; durationSec: number } | null
+    next: { file: File; durationSec: number; preview?: Blob } | null
   ) => {
     revokeTakeUrl();
     if (!next) {
       setTake(null);
       return;
     }
-    const url = URL.createObjectURL(next.file);
+    const url = URL.createObjectURL(next.preview ?? next.file);
     takeUrlRef.current = url;
     setTake({ file: next.file, durationSec: next.durationSec, url });
   };
@@ -210,7 +212,8 @@ export default function VocalExercisePractice({
       stopBacking();
       await stopMediaRecorder();
       recorderRef.current = null;
-      analyzer.stopListening();
+      await Promise.resolve(analyzer.stopListening());
+      await forceIosSpeakerRoute();
       const elapsedSec = (performance.now() - startedAt) / 1000;
       if (elapsedSec < 1) {
         throw new Error("Запись слишком короткая. Попробуйте ещё раз.");
@@ -220,9 +223,19 @@ export default function VocalExercisePractice({
       if (file.size < 32) {
         throw new Error("Запись не сохранилась. Нажмите «Записать» ещё раз.");
       }
+      let preview: Blob | undefined;
+      let durationSec = Math.max(1, Math.round(elapsedSec));
+      try {
+        const decoded = await decodeBlobToAudioBuffer(file);
+        preview = audioBufferToWavBlob(decoded);
+        durationSec = Math.max(1, Math.round(decoded.duration));
+      } catch {
+        /* keep the recorder blob; seek may be rough until WAV decode works */
+      }
       replaceTake({
         file,
-        durationSec: Math.max(1, Math.round(elapsedSec)),
+        durationSec,
+        preview,
       });
       setPracticeStage("ready");
       void logPracticeSeconds("exercise", Math.round(elapsedSec));
@@ -442,11 +455,10 @@ export default function VocalExercisePractice({
               Запись {take.durationSec} сек готова. Сначала прослушайте, потом
               примите или отправьте преподавателю.
             </p>
-            <MediaAudio
-              controls
+            <ExerciseAudioPlayer
               src={take.url}
-              className="w-full max-w-full"
-              onPlay={() => preferIosPlayback()}
+              title={`Ваша запись · ${take.durationSec} сек`}
+              durationSec={take.durationSec}
             />
             <div className="flex flex-wrap gap-2">
               <Button

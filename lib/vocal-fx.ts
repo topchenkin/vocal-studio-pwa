@@ -285,9 +285,9 @@ const RECIPES: Record<Exclude<VocalFxPreset, "original">, FxRecipe> = {
   },
   cave: {
     hpf: 90,
-    delayMs: 285,
-    delayFb: 0.3,
-    delayLp: 780,
+    delayMs: 220,
+    delayFb: 0.22,
+    delayLp: 900,
     reverbSec: 4.9,
     reverbDecay: 2.0,
     reverbBright: 0.12,
@@ -422,11 +422,15 @@ function setCurve(shaper: WaveShaperNode, curve: Float32Array): void {
   (shaper as unknown as { curve: Float32Array }).curve = curve;
 }
 
+/** Long ConvolverNode IRs glitch on iPhone once they pass ~1.5s. */
+const LIVE_REVERB_SEC_CAP = 1.25;
+
 function connectRecipe(
   ctx: BaseAudioContext,
   input: AudioNode,
   output: AudioNode,
-  recipe: FxRecipe
+  recipe: FxRecipe,
+  maxReverbSec?: number
 ): StopHandle {
   const graph = new FxGraph();
   let head: AudioNode = input;
@@ -546,9 +550,13 @@ function connectRecipe(
     const pre = graph.add(ctx.createDelay(0.2));
     pre.delayTime.value = (recipe.preDelayMs ?? 0) / 1000;
     const convolver = graph.add(ctx.createConvolver());
+    const irSec =
+      typeof maxReverbSec === "number"
+        ? Math.min(recipe.reverbSec, maxReverbSec)
+        : recipe.reverbSec;
     convolver.buffer = makeReverbImpulse(
       ctx,
-      recipe.reverbSec,
+      irSec,
       recipe.reverbDecay ?? 2.6,
       recipe.reverbBright ?? 0.55
     );
@@ -668,7 +676,8 @@ export function connectVocalFx(
   input: AudioNode,
   output: AudioNode,
   preset: VocalFxPreset,
-  wet: number
+  wet: number,
+  options?: { realtime?: boolean }
 ): StopHandle {
   const mixWet = ctx.createGain();
   const mixDry = ctx.createGain();
@@ -695,7 +704,13 @@ export function connectVocalFx(
   const fxIn = ctx.createGain();
   fxIn.gain.value = 1;
   input.connect(fxIn);
-  const fx = connectRecipe(ctx, fxIn, mixWet, RECIPES[preset]);
+  const fx = connectRecipe(
+    ctx,
+    fxIn,
+    mixWet,
+    RECIPES[preset],
+    options?.realtime ? LIVE_REVERB_SEC_CAP : undefined
+  );
   mixWet.connect(output);
   return {
     stop: () => {
