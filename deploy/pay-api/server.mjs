@@ -649,7 +649,21 @@ async function handleInit(req, res) {
         },
       }),
     });
-    console.log("[uvs:prodamus] init", invId, purpose, outSum);
+    let payHost = "";
+    try {
+      payHost = new URL(paymentUrl).host;
+    } catch {
+      payHost = "invalid";
+    }
+    console.log("[uvs:prodamus] init", {
+      invoice: invId,
+      purpose,
+      amount: outSum,
+      flow: PRODAMUS_FLOW,
+      host: payHost,
+      urlBytes: String(paymentUrl || "").length,
+      shortLink: /tiny\.payform\.ru|link\.payform\.ru/i.test(String(paymentUrl)),
+    });
   } else {
     await patchExternalId(tx.id, externalId);
   }

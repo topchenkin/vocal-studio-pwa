@@ -23,13 +23,17 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
 /** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
-export const PRODAMUS_FLOW = "intl_cards_v2";
+export const PRODAMUS_FLOW = "intl_direct_v3";
 /**
- * Foreign-card codes from Prodamus Bitrix/docs. Case matters: the cabinet
- * method "Оплата картой, кроме РФ" is `MONETAWORLD`. A list with zero hits
- * is ignored and the form falls back to SBP / RF cards / installments.
+ * Prodamus "Зарубежные карты" is a tariff on the card field, not a separate
+ * SBP-style button. The form method is still `AC`. Extra world/CIS codes are
+ * included when support enabled them as their own methods.
+ *
+ * A filter with zero hits is ignored → full list (SBP, SberPay, installments).
+ * `AC` must stay in the list so the filter actually matches.
  */
 const INTERNATIONAL_METHODS = [
+  "AC",
   "MONETAWORLD",
   "monetaworld",
   "overpayeur",
@@ -207,13 +211,14 @@ export const prodamus = {
     };
   },
   /**
-   * Build a signed link and ask Prodamus for its short form (do=link).
-   * `invId` is our payment_transactions.invoice_no.
+   * Return a signed payform URL (`do=pay`) that the student opens directly.
+   * `do=link` short URLs (tiny.payform.ru) render the page default methods
+   * and drop `available_payment_methods` — that is why SBP kept showing.
    */
   async createPayment({ outSum, invId, description, email, phone }) {
     const successUrl = `${APP_ORIGIN}/pay/success?invoice=${encodeURIComponent(String(invId))}`;
     const data = {
-      do: "link",
+      do: "pay",
       order_id: String(invId),
       products: [
         {
@@ -233,38 +238,22 @@ export const prodamus = {
     const phoneDigits = String(phone || "").replace(/[^\d+]/g, "");
     if (phoneDigits.length >= 10) data.customer_phone = phoneDigits;
 
-    // POST first so a long method list is not dropped from the query string.
-    // Raw unicode first; Prodamus verifies like PHP, so retry escaped on reject.
-    let lastError;
-    for (const escapeUnicode of [false, true]) {
-      const signed = { ...data, signature: hmac(data, escapeUnicode) };
-      const encoded = toQuery(signed);
-      const attempts = [
-        {
-          url: FORM_URL,
-          init: {
-            method: "POST",
-            headers: { "content-type": "application/x-www-form-urlencoded" },
-            body: encoded,
-          },
-        },
-        { url: `${FORM_URL}/?${encoded}`, init: { method: "GET" } },
-      ];
-      for (const attempt of attempts) {
-        const response = await fetch(attempt.url, {
-          ...attempt.init,
-          redirect: "manual",
-          signal: AbortSignal.timeout(15_000),
-        });
-        const text = (await response.text()).trim();
-        if (response.ok && /^https?:\/\/\S+$/.test(text)) {
-          return { paymentUrl: text, externalId: null };
-        }
-        lastError = new Error(
-          `Prodamus HTTP ${response.status}: ${text.slice(0, 200)}`
-        );
-      }
-    }
-    throw lastError;
+    const signed = { ...data, signature: hmac(data, false) };
+    const encoded = toQuery(signed);
+    const paymentUrl = `${FORM_URL}/?${encoded}`;
+    console.log("[uvs:prodamus] create", {
+      invoice: invId,
+      amount: outSum,
+      flow: PRODAMUS_FLOW,
+      do: data.do,
+      methods: INTERNATIONAL_METHODS,
+      queryBytes: encoded.length,
+      urlBytes: paymentUrl.length,
+      hasMethods: encoded.includes("available_payment_methods"),
+      hasInstallmentsOff: encoded.includes("installments_disabled"),
+      hasPhone: Boolean(data.customer_phone),
+      host: FORM_URL.replace(/^https?:\/\//, ""),
+    });
+    return { paymentUrl, externalId: null };
   },
 };
