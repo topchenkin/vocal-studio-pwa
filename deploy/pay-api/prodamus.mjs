@@ -23,20 +23,28 @@ const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
 /** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
-export const PRODAMUS_FLOW = "intl_cis_v1";
+export const PRODAMUS_FLOW = "intl_cards_v2";
 /**
- * Non-RU cards: world (USD/EUR), Belarus, CIS except RF, Kazakhstan.
- * If none of these are enabled on the payform, Prodamus ignores the filter.
+ * Foreign-card codes from Prodamus Bitrix/docs. Case matters: the cabinet
+ * method "Оплата картой, кроме РФ" is `MONETAWORLD`. A list with zero hits
+ * is ignored and the form falls back to SBP / RF cards / installments.
  */
 const INTERNATIONAL_METHODS = [
+  "MONETAWORLD",
+  "monetaworld",
+  "overpayeur",
   "ACUSDKB",
   "ACEURKB",
   "ACUSDGTL",
   "ACEURGTL",
+  "ACUSDGV",
+  "ACEURGV",
+  "ACusdxp",
+  "ACeurxp",
+  "ACGBPGV",
   "ACBYNGTL",
   "ACf",
   "ACkz",
-  "monetaworld",
 ].join("|");
 
 function stringifyDeep(value) {
@@ -225,21 +233,37 @@ export const prodamus = {
     const phoneDigits = String(phone || "").replace(/[^\d+]/g, "");
     if (phoneDigits.length >= 10) data.customer_phone = phoneDigits;
 
+    // POST first so a long method list is not dropped from the query string.
     // Raw unicode first; Prodamus verifies like PHP, so retry escaped on reject.
     let lastError;
     for (const escapeUnicode of [false, true]) {
       const signed = { ...data, signature: hmac(data, escapeUnicode) };
-      const response = await fetch(`${FORM_URL}/?${toQuery(signed)}`, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
-      });
-      const text = (await response.text()).trim();
-      if (response.ok && /^https?:\/\/\S+$/.test(text)) {
-        return { paymentUrl: text, externalId: null };
+      const encoded = toQuery(signed);
+      const attempts = [
+        {
+          url: FORM_URL,
+          init: {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: encoded,
+          },
+        },
+        { url: `${FORM_URL}/?${encoded}`, init: { method: "GET" } },
+      ];
+      for (const attempt of attempts) {
+        const response = await fetch(attempt.url, {
+          ...attempt.init,
+          redirect: "manual",
+          signal: AbortSignal.timeout(15_000),
+        });
+        const text = (await response.text()).trim();
+        if (response.ok && /^https?:\/\/\S+$/.test(text)) {
+          return { paymentUrl: text, externalId: null };
+        }
+        lastError = new Error(
+          `Prodamus HTTP ${response.status}: ${text.slice(0, 200)}`
+        );
       }
-      lastError = new Error(
-        `Prodamus HTTP ${response.status}: ${text.slice(0, 200)}`
-      );
     }
     throw lastError;
   },
