@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarX2,
   Folder,
@@ -60,6 +60,42 @@ const tierOptions: Array<{ value: AppSubscriptionTier; label: string }> = [
 ];
 
 const catOptions = CAT_LEVEL_OPTIONS;
+
+const EDITOR_CACHE_KEY = "uvs_admin_student_editor";
+
+type StudentEditorCache = {
+  id: string;
+  draft: StudentProfile;
+  folderIds: string[];
+  resume: boolean;
+};
+
+function readEditorCache(): StudentEditorCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(EDITOR_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StudentEditorCache;
+    if (!parsed?.id || !parsed.draft) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeEditorCache(cache: StudentEditorCache) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(EDITOR_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearEditorCache() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(EDITOR_CACHE_KEY);
+}
 
 const mockStudents: StudentProfile[] = [
   {
@@ -176,10 +212,29 @@ function StudentEditor({
   const [changingDuo, setChangingDuo] = useState(false);
 
   useEffect(() => {
-    setDraft(student);
-    setSelectedFolderIds(memberFolderIds);
+    if (!open || !student) return;
+    const cached = readEditorCache();
+    if (cached && cached.id === student.id) {
+      setDraft(cached.draft);
+      setSelectedFolderIds(cached.folderIds);
+    } else {
+      setDraft(student);
+      setSelectedFolderIds(memberFolderIds);
+    }
     setError("");
-  }, [memberFolderIds, student]);
+    // Seed only when this card is opened — not when the parent list re-renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- memberFolderIds / student object identity was wiping the form
+  }, [open, student?.id]);
+
+  useEffect(() => {
+    if (!open || !draft) return;
+    writeEditorCache({
+      id: draft.id,
+      draft,
+      folderIds: selectedFolderIds,
+      resume: true,
+    });
+  }, [open, draft, selectedFolderIds]);
 
   if (!draft) return null;
 
@@ -228,6 +283,7 @@ function StudentEditor({
 
     if (mockMode) {
       setSaving(false);
+      clearEditorCache();
       onSaved({ ...draft, ...updates });
       onFoldersSaved(draft.id, selectedFolderIds);
       onClose();
@@ -268,8 +324,26 @@ function StudentEditor({
       return;
     }
 
+    clearEditorCache();
     onSaved(data);
     onFoldersSaved(draft.id, selectedFolderIds);
+    onClose();
+  };
+
+  const closeKeepingDraft = () => {
+    if (draft) {
+      writeEditorCache({
+        id: draft.id,
+        draft,
+        folderIds: selectedFolderIds,
+        resume: false,
+      });
+    }
+    onClose();
+  };
+
+  const discardDraft = () => {
+    clearEditorCache();
     onClose();
   };
 
@@ -290,7 +364,7 @@ function StudentEditor({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Карточка ученика" size="lg">
+    <Modal open={open} onClose={closeKeepingDraft} title="Карточка ученика" size="lg">
       <div className="space-y-6">
         <div className="rounded-2xl bg-studio-surface p-4 ring-1 ring-studio-border">
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-studio-muted">
@@ -685,7 +759,10 @@ function StudentEditor({
           fullWidth
           size="sm"
           variant="danger"
-          onClick={() => onBulkCancel(draft)}
+          onClick={() => {
+            closeKeepingDraft();
+            onBulkCancel(draft);
+          }}
         >
           <CalendarX2 className="h-4 w-4" />
           Отменить занятия за период
@@ -709,7 +786,7 @@ function StudentEditor({
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         <div className="flex gap-3">
-          <Button variant="secondary" fullWidth onClick={onClose}>
+          <Button variant="secondary" fullWidth onClick={discardDraft}>
             Отмена
           </Button>
           <Button fullWidth onClick={() => void save()} disabled={saving}>
@@ -744,6 +821,7 @@ export default function StudentsTable() {
   const [bulkStudent, setBulkStudent] = useState<StudentProfile | null>(null);
   const [bulkSuccess, setBulkSuccess] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const resumedEditorRef = useRef(false);
 
   useEffect(() => {
     if (isMockAdmin) {
@@ -815,6 +893,15 @@ export default function StudentsTable() {
 
     void loadStudents();
   }, [isMockAdmin]);
+
+  useEffect(() => {
+    if (loading || resumedEditorRef.current) return;
+    const cached = readEditorCache();
+    if (!cached?.resume) return;
+    resumedEditorRef.current = true;
+    const fromList = students.find((item) => item.id === cached.id);
+    setSelected(fromList ?? cached.draft);
+  }, [loading, students]);
 
   const studentFormat = (student: StudentProfile): LessonFormat =>
     student.lesson_format === "online" ? "online" : "offline";

@@ -64,8 +64,14 @@ export default function NumberInput({
       max={max}
       step={step}
       value={text}
-      onFocus={() => {
+      onFocus={(event) => {
         focusedRef.current = true;
+        // Empty 0 so the admin can type 20000 without deleting a leading zero.
+        if (value === 0 || text === "0" || text === "0.0") {
+          setText("");
+          return;
+        }
+        event.currentTarget.select();
       }}
       onBlur={() => {
         focusedRef.current = false;
