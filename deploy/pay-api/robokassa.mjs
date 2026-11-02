@@ -17,6 +17,8 @@ const APP_ORIGIN = (
 const MERCHANT_LOGIN = process.env.ROBOKASSA_MERCHANT_LOGIN || "";
 const PASSWORD1 = process.env.ROBOKASSA_PASSWORD1 || "";
 const PASSWORD2 = process.env.ROBOKASSA_PASSWORD2 || "";
+/** XML OpState uses Password #3 when the shop has one; fall back to #2. */
+const PASSWORD3 = process.env.ROBOKASSA_PASSWORD3 || "";
 const HASH_ALG = String(process.env.ROBOKASSA_HASH || "md5")
   .toLowerCase()
   .replace(/[^a-z0-9]/g, "");
@@ -93,6 +95,7 @@ export const robokassa = {
       robokassaIsTest: IS_TEST,
       robokassaPassword1Set: Boolean(PASSWORD1),
       robokassaPassword2Set: Boolean(PASSWORD2),
+      robokassaPassword3Set: Boolean(PASSWORD3),
       robokassaResultUrl: `${APP_ORIGIN}/api/robokassa/result`,
     };
   },
@@ -137,32 +140,32 @@ export const robokassa = {
       throw new Error("Robokassa is not configured");
     }
     const invoice = String(invoiceNo);
-    const signature = digest(`${MERCHANT_LOGIN}:${invoice}:${PASSWORD2}`);
-    const url = `${OPSTATE_URL}?${queryString({
-      MerchantLogin: MERCHANT_LOGIN,
-      InvoiceID: invoice,
-      Signature: signature,
-    })}`;
-    const response = await fetch(url);
-    const xml = await response.text();
-    if (!response.ok) {
-      const error = new Error(`Robokassa OpState HTTP ${response.status}`);
-      error.body = xml;
-      throw error;
+    const secrets = [PASSWORD3, PASSWORD2].filter(Boolean);
+    let last = { status: "pending", stateCode: 0, resultCode: 0, invoiceNo: invoice };
+    for (const secret of secrets) {
+      const signature = digest(`${MERCHANT_LOGIN}:${invoice}:${secret}`);
+      const url = `${OPSTATE_URL}?${queryString({
+        MerchantLogin: MERCHANT_LOGIN,
+        InvoiceID: invoice,
+        Signature: signature,
+      })}`;
+      const response = await fetch(url);
+      const xml = await response.text();
+      if (!response.ok) continue;
+      const resultCode = Number(
+        (xml.match(/<Result>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
+      );
+      const stateCode = Number(
+        (xml.match(/<State>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
+      );
+      last = { status: "pending", stateCode, resultCode, invoiceNo: invoice };
+      // 1 = bad signature for this password; try the other.
+      if (resultCode === 1) continue;
+      // 100 = paid; 10 cancelled; 60 refunded.
+      if (stateCode === 100) last.status = "succeeded";
+      else if (stateCode === 10 || stateCode === 60) last.status = "canceled";
+      return last;
     }
-    const resultCode = Number(
-      (xml.match(/<Result>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
-    );
-    const stateCode = Number(
-      (xml.match(/<State>[\s\S]*?<Code>(\d+)<\/Code>/i) || [])[1] || ""
-    );
-    // 100 = paid; 10 cancelled; 60 refunded; 5/50 in progress.
-    let status = "pending";
-    if (stateCode === 100) status = "succeeded";
-    else if (stateCode === 10 || stateCode === 60) status = "canceled";
-    else if (resultCode && resultCode !== 0 && resultCode !== 1) {
-      status = "pending";
-    }
-    return { status, stateCode, resultCode, invoiceNo: invoice };
+    return last;
   },
 };

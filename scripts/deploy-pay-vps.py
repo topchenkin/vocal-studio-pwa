@@ -138,6 +138,8 @@ def env_file_bytes(overlay: dict[str, str] | None = None) -> bytes:
                 f"ROBOKASSA_TAX={local.get('ROBOKASSA_TAX', 'none')}",
             ]
         )
+        if local.get("ROBOKASSA_PASSWORD3"):
+            lines.append(f"ROBOKASSA_PASSWORD3={local['ROBOKASSA_PASSWORD3']}")
     if shop_id:
         lines.append(f"YOOKASSA_SHOP_ID={shop_id}")
     if secret:
