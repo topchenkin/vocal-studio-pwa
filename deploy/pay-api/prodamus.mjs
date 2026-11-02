@@ -282,6 +282,7 @@ export const prodamus = {
           name: description.slice(0, 128),
           price: String(outSum),
           quantity: "1",
+          sku: `uvs-${invId}`,
         },
       ],
       urlSuccess: successUrl,
@@ -289,6 +290,7 @@ export const prodamus = {
       callbackType: "json",
       payment_method: INTERNATIONAL_METHOD,
       available_payment_methods: INTERNATIONAL_METHODS,
+      customer_extra: String(invId),
       _param_invoice_no: String(invId),
     };
     if (email) data.customer_email = email;

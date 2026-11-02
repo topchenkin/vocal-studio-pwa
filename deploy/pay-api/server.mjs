@@ -177,6 +177,84 @@ async function confirmPayment(invoiceNo, outSum, externalId, provider = "robokas
   });
 }
 
+function pickProdamusInvoiceNo(data) {
+  const candidates = [
+    data.order_num,
+    data._param_invoice_no,
+    data.invoice_no,
+    data.customer_extra,
+    data.products?.[0]?.sku,
+  ];
+  const orderId = String(data.order_id || "").trim();
+  if (/^\d+$/.test(orderId)) candidates.unshift(orderId);
+  for (const value of candidates) {
+    const n = Number(String(value || "").replace(/^uvs-/i, ""));
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+async function loadPaymentByInvoice(invoiceNo) {
+  if (!invoiceNo) return null;
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider,student_id,external_id&limit=1`
+  );
+  const rows = txRes.ok ? await txRes.json() : [];
+  return Array.isArray(rows) ? rows[0] : rows || null;
+}
+
+/**
+ * Prodamus stored-link / LK payments often webhook their own UUID as
+ * order_id and leave order_num / _param_invoice_no empty. Fall back to
+ * the pending Prodamus invoice for that email and amount.
+ */
+async function findProdamusTx(data) {
+  const byInvoice = await loadPaymentByInvoice(pickProdamusInvoiceNo(data));
+  if (byInvoice) return byInvoice;
+
+  const orderId = String(data.order_id || "").trim();
+  if (orderId) {
+    const extRes = await sb(
+      `/rest/v1/payment_transactions?external_id=eq.${encodeURIComponent(orderId)}&select=id,invoice_no,amount_rub,status,provider,student_id,external_id&limit=1`
+    );
+    const extRows = extRes.ok ? await extRes.json() : [];
+    const byExt = Array.isArray(extRows) ? extRows[0] : extRows;
+    if (byExt) return byExt;
+  }
+
+  const email = String(data.customer_email || "").trim().toLowerCase();
+  const paid = Number(data.sum);
+  if (!email || !Number.isFinite(paid) || paid <= 0) return null;
+
+  const profileRes = await sb(
+    `/rest/v1/profiles?email=ilike.${encodeURIComponent(email)}&select=id,email&limit=1`
+  );
+  const profiles = profileRes.ok ? await profileRes.json() : [];
+  const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+  if (!profile?.id) return null;
+
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const txRes = await sb(
+    `/rest/v1/payment_transactions?student_id=eq.${encodeURIComponent(profile.id)}&provider=eq.prodamus&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,status,provider,student_id,external_id,created_at&order=created_at.desc&limit=20`
+  );
+  const list = txRes.ok ? await txRes.json() : [];
+  const rows = Array.isArray(list) ? list : [];
+  const amountOk = (row) => Math.abs(Number(row.amount_rub) - paid) <= 1;
+  const pending = rows.find((row) => row.status === "pending" && amountOk(row));
+  if (pending) {
+    console.log("[uvs:prodamus] matched pending by email", email, pending.invoice_no);
+    return pending;
+  }
+  const confirmed = rows.find(
+    (row) => row.status === "confirmed" && amountOk(row)
+  );
+  if (confirmed) {
+    console.log("[uvs:prodamus] matched confirmed by email", email, confirmed.invoice_no);
+    return confirmed;
+  }
+  return null;
+}
+
 async function markInvoiceFailed(txId) {
   await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(txId)}`, {
     method: "PATCH",
@@ -899,22 +977,28 @@ async function handleProdamusWebhook(req, res) {
   }
 
   const status = String(data.payment_status || "");
-  const invoiceNo = Number(data.order_num || data._param_invoice_no || 0);
-  console.log("[uvs:prodamus] webhook", status || "unknown", invoiceNo || "no-invoice");
+  console.log(
+    "[uvs:prodamus] webhook",
+    status || "unknown",
+    pickProdamusInvoiceNo(data) || data.order_id || "no-invoice"
+  );
   if (status !== "success") {
     return json(res, 200, { ok: true, ignored: status || "unknown" });
   }
-  if (!invoiceNo) return json(res, 400, { error: "missing invoice" });
-
-  const txRes = await sb(
-    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider&limit=1`
-  );
-  const rows = txRes.ok ? await txRes.json() : [];
-  const tx = Array.isArray(rows) ? rows[0] : rows;
-  if (!tx) return json(res, 404, { error: "invoice not found" });
+  const tx = await findProdamusTx(data);
+  if (!tx) {
+    console.error("[uvs:prodamus] invoice not matched", {
+      orderId: data.order_id || null,
+      orderNum: data.order_num || null,
+      email: data.customer_email || null,
+      sum: data.sum || null,
+      keys: Object.keys(data),
+    });
+    return json(res, 400, { error: "missing invoice" });
+  }
   // A Prodamus webhook may only settle Prodamus invoices.
   if (tx.provider !== "prodamus") {
-    console.error("[uvs:prodamus] invoice belongs to", tx.provider, invoiceNo);
+    console.error("[uvs:prodamus] invoice belongs to", tx.provider, tx.invoice_no);
     return json(res, 400, { error: "wrong provider" });
   }
   if (tx.status === "confirmed") return json(res, 200, { ok: true, already: true });
@@ -923,13 +1007,13 @@ async function handleProdamusWebhook(req, res) {
   // in the card currency, so only log a mismatch.
   const paid = Number(data.sum);
   if (Number.isFinite(paid) && Math.abs(paid - Number(tx.amount_rub)) > 0.009) {
-    console.warn("[uvs:prodamus] sum differs", invoiceNo, paid, tx.amount_rub);
+    console.warn("[uvs:prodamus] sum differs", tx.invoice_no, paid, tx.amount_rub);
   }
 
   const confirm = await confirmPayment(
-    invoiceNo,
+    tx.invoice_no,
     tx.amount_rub,
-    String(data.order_id || data.payment_init || "") || null,
+    String(data.order_id || "").trim() || null,
     "prodamus"
   );
   if (!confirm.ok) {
