@@ -217,7 +217,7 @@ assert.ok(!guide.includes("autoShift"));
 assert.ok(practice.includes("useVocalAnalyzer"));
 assert.ok(practice.includes("attachWaveformCanvas"));
 assert.ok(practice.includes("ExerciseAudioPlayer"));
-assert.ok(practice.includes("audioBufferToWavBlob"));
+assert.ok(practice.includes("encodeWavBlob"));
 assert.ok(!practice.includes("MediaAudio"));
 assert.ok(practice.includes("Отправить преподавателю"));
 assert.ok(practice.includes("TIER_RANK"));

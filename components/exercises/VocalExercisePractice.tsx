@@ -32,7 +32,7 @@ import {
   pulseIosPlayback,
   routeHtmlMediaToSpeaker,
 } from "@/lib/ios-audio-session";
-import { audioBufferToWavBlob, decodeBlobToAudioBuffer } from "@/lib/wav-client";
+import { decodeBlobToAudioBuffer, encodeWavBlob } from "@/lib/wav-client";
 
 type PracticeStage = "idle" | "live" | "recording" | "ready" | "sending";
 
@@ -227,7 +227,11 @@ export default function VocalExercisePractice({
       let durationSec = Math.max(1, Math.round(elapsedSec));
       try {
         const decoded = await decodeBlobToAudioBuffer(file);
-        preview = audioBufferToWavBlob(decoded);
+        const channels: Float32Array[] = [];
+        for (let i = 0; i < decoded.numberOfChannels; i += 1) {
+          channels.push(decoded.getChannelData(i));
+        }
+        preview = encodeWavBlob(channels, decoded.sampleRate);
         durationSec = Math.max(1, Math.round(decoded.duration));
       } catch {
         /* keep the recorder blob; seek may be rough until WAV decode works */
