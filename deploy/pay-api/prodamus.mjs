@@ -22,6 +22,22 @@ const SECRET_KEY = process.env.PRODAMUS_SECRET_KEY || "";
 const INTERNATIONAL_ENABLED = ["1", "true", "yes"].includes(
   String(process.env.PRODAMUS_INTERNATIONAL || "").toLowerCase()
 );
+/** Bump when the signed link shape changes so stale Prodamus URLs are not reused. */
+export const PRODAMUS_FLOW = "intl_cis_v1";
+/**
+ * Non-RU cards: world (USD/EUR), Belarus, CIS except RF, Kazakhstan.
+ * If none of these are enabled on the payform, Prodamus ignores the filter.
+ */
+const INTERNATIONAL_METHODS = [
+  "ACUSDKB",
+  "ACEURKB",
+  "ACUSDGTL",
+  "ACEURGTL",
+  "ACBYNGTL",
+  "ACf",
+  "ACkz",
+  "monetaworld",
+].join("|");
 
 function stringifyDeep(value) {
   if (Array.isArray(value)) return value.map(stringifyDeep);
@@ -58,17 +74,59 @@ export function signPayload(data, escapeUnicode = false) {
   return hmac(data, escapeUnicode);
 }
 
+function withoutSignatureFields(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const copy = { ...data };
+  delete copy.signature;
+  delete copy.sign;
+  delete copy.Sign;
+  return copy;
+}
+
 /** Constant-time check; accepts both PHP-style (\uXXXX) and raw unicode JSON. */
 export function verifySignature(data, signature) {
   const given = String(signature || "").trim().toLowerCase();
   if (!SECRET_KEY || !/^[0-9a-f]{64}$/.test(given)) return false;
   const givenBuf = Buffer.from(given, "hex");
+  const payload = withoutSignatureFields(data);
   return [false, true].some((escapeUnicode) => {
-    const expected = Buffer.from(hmac(data, escapeUnicode), "hex");
+    const expected = Buffer.from(hmac(payload, escapeUnicode), "hex");
     return (
       expected.length === givenBuf.length && timingSafeEqual(expected, givenBuf)
     );
   });
+}
+
+/**
+ * JSON webhooks sometimes wrap fields in `submit`; form posts come as-is.
+ * Try every plausible object so a paid order is not left pending.
+ */
+export function webhookPayloads(data, raw) {
+  const out = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const clean = withoutSignatureFields(value);
+    let key;
+    try {
+      key = JSON.stringify(stringifyDeep(clean));
+    } catch {
+      return;
+    }
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(clean);
+    if (clean.submit && typeof clean.submit === "object") add(clean.submit);
+  };
+  add(data);
+  if (raw && typeof raw === "string" && raw.includes("=") && !raw.trim().startsWith("{")) {
+    try {
+      add(parseFormBody(raw));
+    } catch {
+      /* ignore malformed form bodies */
+    }
+  }
+  return out;
 }
 
 function flatten(data, prefix = "", out = []) {
@@ -144,7 +202,7 @@ export const prodamus = {
    * Build a signed link and ask Prodamus for its short form (do=link).
    * `invId` is our payment_transactions.invoice_no.
    */
-  async createPayment({ outSum, invId, description, email }) {
+  async createPayment({ outSum, invId, description, email, phone }) {
     const successUrl = `${APP_ORIGIN}/pay/success?invoice=${encodeURIComponent(String(invId))}`;
     const data = {
       do: "link",
@@ -159,10 +217,13 @@ export const prodamus = {
       urlSuccess: successUrl,
       urlReturn: `${APP_ORIGIN}/pay/fail?invoice=${encodeURIComponent(String(invId))}`,
       callbackType: "json",
+      available_payment_methods: INTERNATIONAL_METHODS,
+      installments_disabled: "1",
       _param_invoice_no: String(invId),
     };
-    // The payform has one card field; foreign cards are recognised by BIN.
     if (email) data.customer_email = email;
+    const phoneDigits = String(phone || "").replace(/[^\d+]/g, "");
+    if (phoneDigits.length >= 10) data.customer_phone = phoneDigits;
 
     // Raw unicode first; Prodamus verifies like PHP, so retry escaped on reject.
     let lastError;

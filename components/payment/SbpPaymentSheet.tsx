@@ -215,8 +215,8 @@ export default function SbpPaymentSheet({
             <span>
               Оплатить международной картой
               <span className="block text-xs font-normal text-studio-muted">
-                Visa и Mastercard банков других стран · сумма в ₽ пересчитается
-                в валюту карты
+                Visa и Mastercard Беларуси, СНГ и других стран · сумма в ₽
+                пересчитается в валюту карты
               </span>
             </span>
           </button>

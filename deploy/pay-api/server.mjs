@@ -4,7 +4,13 @@
  */
 import { createServer } from "node:http";
 import { yookassa } from "./providers.mjs";
-import { parseFormBody, prodamus, verifySignature } from "./prodamus.mjs";
+import {
+  parseFormBody,
+  PRODAMUS_FLOW,
+  prodamus,
+  verifySignature,
+  webhookPayloads,
+} from "./prodamus.mjs";
 
 const PORT = Number(process.env.PORT) || 8791;
 const BIND = process.env.BIND || "127.0.0.1";
@@ -69,7 +75,7 @@ async function authUser(accessToken) {
 
 async function loadProfile(userId) {
   const response = await sb(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,debt_amount,app_sub_variant,app_sub_tier,app_sub_expires_at,lesson_pay_type,custom_abonement_price,custom_lesson_price,lessons_balance&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=id,role,email,full_name,phone,debt_amount,app_sub_variant,app_sub_tier,app_sub_expires_at,lesson_pay_type,custom_abonement_price,custom_lesson_price,lessons_balance&limit=1`
   );
   if (!response.ok) return null;
   const rows = await response.json();
@@ -421,7 +427,10 @@ async function findReusableProdamus(studentId, purpose, metadata, amount) {
   const rows = await res.json();
   const list = Array.isArray(rows) ? rows : [];
   const tx = list.find(
-    (row) => row.metadata?.prodamus_url && samePaymentIntent(row, purpose, metadata)
+    (row) =>
+      row.metadata?.prodamus_url &&
+      row.metadata?.prodamus_flow === PRODAMUS_FLOW &&
+      samePaymentIntent(row, purpose, metadata)
   );
   if (!tx) return null;
   return {
@@ -604,6 +613,7 @@ async function handleInit(req, res) {
           invId,
           description,
           email: email || null,
+          phone: String(profile.phone || "").trim() || null,
         })
       : await yookassa.createPayment({
           outSum,
@@ -632,9 +642,14 @@ async function handleInit(req, res) {
     await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
-        metadata: { ...metadata, prodamus_url: paymentUrl },
+        metadata: {
+          ...metadata,
+          prodamus_url: paymentUrl,
+          prodamus_flow: PRODAMUS_FLOW,
+        },
       }),
     });
+    console.log("[uvs:prodamus] init", invId, purpose, outSum);
   } else {
     await patchExternalId(tx.id, externalId);
   }
@@ -652,9 +667,9 @@ async function handleProdamusWebhook(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const raw = await readBody(req);
   const contentType = String(req.headers["content-type"] || "");
-  let data;
+  let parsed;
   try {
-    data =
+    parsed =
       contentType.includes("json") || raw.trim().startsWith("{")
         ? JSON.parse(raw || "{}")
         : parseFormBody(raw);
@@ -662,8 +677,22 @@ async function handleProdamusWebhook(req, res) {
     return json(res, 400, { error: "invalid body" });
   }
 
-  if (!verifySignature(data, req.headers.sign)) {
-    console.error("[uvs:prodamus] webhook rejected: bad signature");
+  const signature = String(
+    req.headers.sign || parsed?.sign || parsed?.signature || ""
+  );
+  const candidates = webhookPayloads(parsed, raw);
+  const data = candidates.find((item) => verifySignature(item, signature));
+  if (!data) {
+    const sample = candidates[0] || {};
+    console.error("[uvs:prodamus] webhook rejected: bad signature", {
+      contentType,
+      hasSign: Boolean(signature),
+      signLen: signature.length,
+      keys: Object.keys(sample),
+      nestedSubmit: Boolean(parsed && parsed.submit),
+      paymentStatus: sample.payment_status || null,
+      orderNum: sample.order_num || sample._param_invoice_no || null,
+    });
     return json(res, 400, { error: "bad signature" });
   }
 
