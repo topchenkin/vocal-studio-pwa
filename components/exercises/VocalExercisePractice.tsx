@@ -104,7 +104,7 @@ export default function VocalExercisePractice({
         }
       }
       audioRef.current?.pause();
-      stopListening();
+      void stopListening();
       revokeTakeUrl();
     },
     [stopListening]

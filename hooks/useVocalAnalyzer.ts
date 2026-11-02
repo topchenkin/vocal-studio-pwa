@@ -208,7 +208,12 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
 
   // Guarantee mic + AudioContext are released on unmount — no lingering
   // mic indicator after leaving the tool.
-  useEffect(() => () => cleanup(), [cleanup]);
+  useEffect(
+    () => () => {
+      void cleanup();
+    },
+    [cleanup]
+  );
 
   const tick = useCallback(() => {
     const analyser = analyserRef.current;
