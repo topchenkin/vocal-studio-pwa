@@ -32,7 +32,7 @@ function translateAuthMessage(text: string): string {
   if (/already (been )?registered|already exists/i.test(text))
     return "Эта почта уже зарегистрирована. Войдите или восстановите пароль.";
   if (/email not confirmed/i.test(text))
-    return "Почта ещё не подтверждена. Откройте письмо со ссылкой подтверждения.";
+    return "Почта ещё не подтверждена. Если письма нет или ссылка устарела — запросите новое ниже.";
   if (/error sending .*email|sending .*email/i.test(text))
     return "Не удалось отправить письмо. Попробуйте позже или напишите преподавателю.";
   const waitSec = text.match(/after\s+(\d+)\s+seconds/i);
@@ -53,6 +53,12 @@ function translateAuthMessage(text: string): string {
 
 export function isEmailConfirmPendingError(text: string): boolean {
   return /письмо уже отправлено|подождите \d+ сек|подождите минуту и проверьте почту/i.test(
+    text
+  );
+}
+
+export function isEmailUnconfirmedError(text: string): boolean {
+  return /почта ещё не подтверждена|email not confirmed|ссылка устарела/i.test(
     text
   );
 }

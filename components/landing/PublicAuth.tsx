@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ComponentProps,
@@ -29,6 +30,33 @@ export function PublicAuthProvider({ children }: { children: ReactNode }) {
     setMode(next);
     setOpen(true);
   }, []);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const hash = url.hash.startsWith("#") ? url.hash.slice(1) : "";
+      const hashParams = new URLSearchParams(hash);
+      const err =
+        hashParams.get("error_description") ||
+        hashParams.get("error") ||
+        url.searchParams.get("error_description") ||
+        url.searchParams.get("error");
+      if (!err) return;
+      sessionStorage.setItem("uvs-auth-link-error", err);
+      url.hash = "";
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_code");
+      url.searchParams.delete("error_description");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        url.pathname + url.search
+      );
+      openAuth("login");
+    } catch {
+      /* ignore */
+    }
+  }, [openAuth]);
 
   const value = useMemo(() => ({ openAuth }), [openAuth]);
 

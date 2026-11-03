@@ -9,6 +9,7 @@ import { formatGiftCode, normalizeGiftCode } from "@/lib/gift-certificates";
 import { supabase } from "@/lib/supabase";
 import {
   isEmailConfirmPendingError,
+  isEmailUnconfirmedError,
   mapBackendError,
 } from "@/lib/supabase-errors";
 
@@ -64,6 +65,21 @@ export default function AuthModal({
     setError("");
     setMessage("");
     setAwaitingConfirm(false);
+    try {
+      const stored = sessionStorage.getItem("uvs-auth-link-error");
+      if (!stored) return;
+      sessionStorage.removeItem("uvs-auth-link-error");
+      const mapped = mapBackendError(stored);
+      setError(mapped);
+      if (isEmailUnconfirmedError(mapped) || isEmailConfirmPendingError(mapped)) {
+        setAwaitingConfirm(true);
+        setMessage(
+          "Нажмите «Отправить письмо ещё раз», затем откройте новое письмо."
+        );
+      }
+    } catch {
+      /* private mode */
+    }
   }, [initialMode, open]);
 
   const redeemIfNeeded = async (codeRaw: string, name: string) => {
@@ -134,10 +150,12 @@ export default function AuthModal({
     setSubmitting(false);
 
     if (result.error) {
-      if (mode === "register" && isEmailConfirmPendingError(result.error)) {
+      if (isEmailConfirmPendingError(result.error) || isEmailUnconfirmedError(result.error)) {
         setAwaitingConfirm(true);
         setMessage(
-          "Аккаунт уже создан. Откройте письмо со ссылкой — повторно отправить его можно через минуту."
+          mode === "register" && isEmailConfirmPendingError(result.error)
+            ? "Аккаунт уже создан. Откройте письмо со ссылкой — повторно отправить его можно через минуту."
+            : "Если письма нет или ссылка не сработала — отправьте его ещё раз."
         );
       }
       setError(result.error);
