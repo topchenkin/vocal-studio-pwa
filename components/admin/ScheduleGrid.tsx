@@ -229,24 +229,36 @@ function ScheduleCard({
       )}
 
       {lesson.status === "scheduled" && hasStudent && (
-        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
-          <Button
-            fullWidth
-            variant="secondary"
-            disabled={completingId === lesson.id}
-            onClick={() => void onComplete(lesson.id)}
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            {completingId === lesson.id ? "Завершаем..." : "Завершить"}
-          </Button>
-          <button
-            type="button"
-            onClick={() => void onCancel(lesson.id)}
-            className="rounded-xl px-3 text-studio-muted ring-1 ring-studio-border hover:text-red-400"
-            aria-label="Отменить урок"
-          >
-            <XCircle className="h-4 w-4" />
-          </button>
+        <div className="mt-4 space-y-2">
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <Button
+              fullWidth
+              variant="secondary"
+              disabled={completingId === lesson.id}
+              onClick={() => void onComplete(lesson.id)}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {completingId === lesson.id ? "Завершаем..." : "Завершить"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => void onCancel(lesson.id)}
+              className="rounded-xl px-3 text-studio-muted ring-1 ring-studio-border hover:text-red-400"
+              aria-label="Отменить урок"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+          {lesson.reschedule_request !== "pending" ? (
+            <Button
+              fullWidth
+              variant="secondary"
+              onClick={() => onOpenReschedule(lesson)}
+            >
+              <CalendarClock className="h-4 w-4" />
+              Изменить время
+            </Button>
+          ) : null}
         </div>
       )}
     </article>
@@ -678,20 +690,37 @@ export default function ScheduleGrid() {
             ? {
                 ...lesson,
                 datetime: newDatetime ?? lesson.datetime,
-                reschedule_request: approve ? "approved" : "rejected",
+                reschedule_request: approve ? "none" : "rejected",
                 preferred_reschedule_at: null,
                 reschedule_note: null,
               }
             : lesson
         )
       );
+    } else if (approve && newDatetime) {
+      const { error: resolveError } = await supabase.rpc(
+        "admin_reschedule_lesson",
+        {
+          lesson_id: lessonId,
+          new_datetime: newDatetime,
+        }
+      );
+      if (resolveError) {
+        setError(
+          /not found/i.test(resolveError.message)
+            ? "Урок не найден или уже отменён"
+            : `Не удалось перенести урок: ${resolveError.message}`
+        );
+        return;
+      }
+      await loadSchedule();
     } else {
       const { error: resolveError } = await supabase.rpc(
         "admin_resolve_reschedule",
         {
           lesson_id: lessonId,
-          approve,
-          new_datetime: newDatetime,
+          approve: false,
+          new_datetime: null,
         }
       );
       if (resolveError) {
@@ -1104,7 +1133,11 @@ export default function ScheduleGrid() {
       <Modal
         open={Boolean(rescheduleLesson)}
         onClose={() => setRescheduleLesson(null)}
-        title="Подтвердить перенос"
+        title={
+          rescheduleLesson?.reschedule_request === "pending"
+            ? "Подтвердить перенос"
+            : "Изменить время урока"
+        }
         size="sm"
       >
         <div className="space-y-4">
@@ -1138,8 +1171,7 @@ export default function ScheduleGrid() {
             </label>
           </div>
           <p className="text-xs text-studio-muted">
-            Ученик получит Push и email через 5 минут, если не прочитает
-            уведомление.
+            Ученик получит уведомление о новом времени.
           </p>
           <Button
             fullWidth
@@ -1150,18 +1182,22 @@ export default function ScheduleGrid() {
             }
           >
             <CalendarClock className="h-4 w-4" />
-            Подтвердить новое время
+            {rescheduleLesson?.reschedule_request === "pending"
+              ? "Подтвердить новое время"
+              : "Сохранить новое время"}
           </Button>
-          <Button
-            fullWidth
-            variant="secondary"
-            onClick={() =>
-              rescheduleLesson &&
-              void resolveReschedule(rescheduleLesson.id, false)
-            }
-          >
-            Отклонить перенос
-          </Button>
+          {rescheduleLesson?.reschedule_request === "pending" ? (
+            <Button
+              fullWidth
+              variant="secondary"
+              onClick={() =>
+                rescheduleLesson &&
+                void resolveReschedule(rescheduleLesson.id, false)
+              }
+            >
+              Отклонить перенос
+            </Button>
+          ) : null}
         </div>
       </Modal>
 

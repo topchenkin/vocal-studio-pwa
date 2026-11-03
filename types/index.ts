@@ -1058,6 +1058,13 @@ export interface Database {
         };
         Returns: undefined;
       };
+      admin_reschedule_lesson: {
+        Args: {
+          lesson_id: string;
+          new_datetime: string;
+        };
+        Returns: undefined;
+      };
       admin_cancel_lesson: {
         Args: { lesson_id: string };
         Returns: undefined;
