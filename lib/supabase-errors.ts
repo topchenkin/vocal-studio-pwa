@@ -26,13 +26,25 @@ function pickErrorText(value: unknown): string | null {
   return null;
 }
 
+export const AUTH_EMAIL_UNCONFIRMED_RU =
+  "Почта ещё не подтверждена. Если письма нет или ссылка устарела — запросите новое ниже.";
+export const AUTH_LINK_EXPIRED_RU =
+  "Ссылка устарела. Запросите новую на экране входа.";
+export const AUTH_LINK_GENERIC_RU =
+  "Ссылка входа недействительна. Войдите или запросите новое письмо.";
+
+const AUTH_LINK_SAFE_COPY = new Set([
+  AUTH_EMAIL_UNCONFIRMED_RU,
+  AUTH_LINK_EXPIRED_RU,
+  AUTH_LINK_GENERIC_RU,
+]);
+
 /** Known GoTrue (Supabase Auth) English messages → Russian student copy. */
 function translateAuthMessage(text: string): string {
   if (/invalid login credentials/i.test(text)) return "Неверная почта или пароль.";
   if (/already (been )?registered|already exists/i.test(text))
     return "Эта почта уже зарегистрирована. Войдите или восстановите пароль.";
-  if (/email not confirmed/i.test(text))
-    return "Почта ещё не подтверждена. Если письма нет или ссылка устарела — запросите новое ниже.";
+  if (/email not confirmed/i.test(text)) return AUTH_EMAIL_UNCONFIRMED_RU;
   if (/error sending .*email|sending .*email/i.test(text))
     return "Не удалось отправить письмо. Попробуйте позже или напишите преподавателю.";
   const waitSec = text.match(/after\s+(\d+)\s+seconds/i);
@@ -47,8 +59,40 @@ function translateAuthMessage(text: string): string {
   if (/unable to validate email|invalid format|invalid email/i.test(text))
     return "Проверьте адрес почты.";
   if (/otp.*expired|token.*(expired|invalid)|link.*expired/i.test(text))
-    return "Ссылка устарела. Запросите новую на экране входа.";
+    return AUTH_LINK_EXPIRED_RU;
   return text;
+}
+
+/**
+ * Auth callback query/hash (`error`, `error_code`, `error_description`).
+ * Never echoes attacker-controlled text into the login form.
+ */
+export function mapAuthCallbackError(params: {
+  error?: string | null;
+  errorCode?: string | null;
+  errorDescription?: string | null;
+}): string | null {
+  const error = (params.error ?? "").trim();
+  const errorCode = (params.errorCode ?? "").trim();
+  const errorDescription = (params.errorDescription ?? "").trim();
+  if (!error && !errorCode && !errorDescription) return null;
+
+  for (const value of [errorDescription, error, errorCode]) {
+    if (AUTH_LINK_SAFE_COPY.has(value)) return value;
+  }
+
+  const blob = [errorCode, error, errorDescription].filter(Boolean).join(" ");
+  if (
+    /otp_expired|flow_state_expired/i.test(blob) ||
+    /email link is invalid or has expired/i.test(blob) ||
+    /otp.*expired|token.*(expired|invalid)|link.*expired/i.test(blob)
+  ) {
+    return AUTH_LINK_EXPIRED_RU;
+  }
+  if (/email_not_confirmed|email not confirmed/i.test(blob)) {
+    return AUTH_EMAIL_UNCONFIRMED_RU;
+  }
+  return AUTH_LINK_GENERIC_RU;
 }
 
 export function isEmailConfirmPendingError(text: string): boolean {

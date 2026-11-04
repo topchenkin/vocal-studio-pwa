@@ -12,6 +12,7 @@ import {
 } from "react";
 import AuthModal from "@/components/auth/AuthModal";
 import Button from "@/components/ui/Button";
+import { mapAuthCallbackError } from "@/lib/supabase-errors";
 
 type AuthMode = "login" | "register";
 
@@ -36,13 +37,17 @@ export function PublicAuthProvider({ children }: { children: ReactNode }) {
       const url = new URL(window.location.href);
       const hash = url.hash.startsWith("#") ? url.hash.slice(1) : "";
       const hashParams = new URLSearchParams(hash);
-      const err =
-        hashParams.get("error_description") ||
-        hashParams.get("error") ||
-        url.searchParams.get("error_description") ||
-        url.searchParams.get("error");
-      if (!err) return;
-      sessionStorage.setItem("uvs-auth-link-error", err);
+      const pick = (key: string) =>
+        hashParams.get(key) || url.searchParams.get(key);
+      const error = pick("error");
+      const errorCode = pick("error_code");
+      const errorDescription = pick("error_description");
+      if (!error && !errorCode && !errorDescription) return;
+      const mapped = mapAuthCallbackError({
+        error,
+        errorCode,
+        errorDescription,
+      });
       url.hash = "";
       url.searchParams.delete("error");
       url.searchParams.delete("error_code");
@@ -52,6 +57,8 @@ export function PublicAuthProvider({ children }: { children: ReactNode }) {
         "",
         url.pathname + url.search
       );
+      if (!mapped) return;
+      sessionStorage.setItem("uvs-auth-link-error", mapped);
       openAuth("login");
     } catch {
       /* ignore */

@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import {
   isEmailConfirmPendingError,
   isEmailUnconfirmedError,
+  mapAuthCallbackError,
   mapBackendError,
 } from "@/lib/supabase-errors";
 
@@ -69,7 +70,8 @@ export default function AuthModal({
       const stored = sessionStorage.getItem("uvs-auth-link-error");
       if (!stored) return;
       sessionStorage.removeItem("uvs-auth-link-error");
-      const mapped = mapBackendError(stored);
+      const mapped = mapAuthCallbackError({ errorDescription: stored });
+      if (!mapped) return;
       setError(mapped);
       if (isEmailUnconfirmedError(mapped) || isEmailConfirmPendingError(mapped)) {
         setAwaitingConfirm(true);
