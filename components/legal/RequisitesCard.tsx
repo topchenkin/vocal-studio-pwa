@@ -13,6 +13,15 @@ export default function RequisitesCard() {
         <dd>Самозанятый (НПД)</dd>
         <dt className="text-studio-muted">ИНН</dt>
         <dd>{LEGAL.inn}</dd>
+        <dt className="text-studio-muted">Email</dt>
+        <dd>
+          <a
+            className="text-studio-accent-light underline"
+            href={`mailto:${LEGAL.email}`}
+          >
+            {LEGAL.email}
+          </a>
+        </dd>
         <dt className="text-studio-muted">Город</dt>
         <dd>{LEGAL.city}</dd>
       </dl>

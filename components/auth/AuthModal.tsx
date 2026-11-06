@@ -62,6 +62,7 @@ export default function AuthModal({
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [acceptOffer, setAcceptOffer] = useState(false);
   const [acceptPrivacy, setAcceptPrivacy] = useState(false);
+  const [acceptAdult, setAcceptAdult] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +72,7 @@ export default function AuthModal({
     setAwaitingConfirm(false);
     setAcceptOffer(false);
     setAcceptPrivacy(false);
+    setAcceptAdult(false);
     try {
       const stored = sessionStorage.getItem("uvs-auth-link-error");
       if (!stored) return;
@@ -148,6 +150,12 @@ export default function AuthModal({
     }
     if (mode === "register" && !acceptPrivacy) {
       setError("Чтобы создать кабинет, примите политику конфиденциальности");
+      return;
+    }
+    if (mode === "register" && !acceptAdult) {
+      setError(
+        "Кабинет создаёт совершеннолетний или законный представитель ученика"
+      );
       return;
     }
 
@@ -241,6 +249,7 @@ export default function AuthModal({
     setAwaitingConfirm(false);
     setAcceptOffer(false);
     setAcceptPrivacy(false);
+    setAcceptAdult(false);
   };
 
   const handleResendConfirm = async () => {
@@ -418,6 +427,19 @@ export default function AuthModal({
                 >
                   политикой конфиденциальности
                 </a>
+              </span>
+            </label>
+            <label className="flex min-h-10 cursor-pointer items-start gap-3 text-sm leading-snug text-studio-muted">
+              <input
+                type="checkbox"
+                checked={acceptAdult}
+                onChange={(event) => setAcceptAdult(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 rounded border-studio-border accent-studio-accent"
+              />
+              <span>
+                Мне есть 18 лет, либо я законный представитель ученика и даю
+                согласие на обработку его данных, в том числе если ученику нет
+                14 лет.
               </span>
             </label>
           </div>

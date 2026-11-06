@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, MapPin } from "lucide-react";
+import { ArrowRight, Mail, MapPin } from "lucide-react";
 import Header from "@/components/Header";
 import RequisitesCard from "@/components/legal/RequisitesCard";
 import SiteFooter from "@/components/legal/SiteFooter";
@@ -46,6 +46,15 @@ export default function ContactsPage() {
                   {STUDIO_PLACE.postalCode}, {STUDIO_PLACE.area}
                 </span>
               </span>
+            </li>
+            <li className="flex items-start gap-3">
+              <Mail className="mt-0.5 h-4 w-4 shrink-0 text-studio-accent" />
+              <a
+                className="text-studio-accent-light underline"
+                href={`mailto:${LEGAL.email}`}
+              >
+                {LEGAL.email}
+              </a>
             </li>
           </ul>
           <a

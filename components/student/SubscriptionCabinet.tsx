@@ -239,7 +239,7 @@ export default function SubscriptionCabinet() {
                   {profile.debt_amount.toLocaleString("ru-RU")} ₽
                 </p>
                 <p className="mt-1 text-xs text-red-300/70">
-                  Погасите задолженность целиком через СБП / ЮKassa.
+                  Погасите задолженность целиком через СБП.
                 </p>
               </div>
             </div>
@@ -262,7 +262,7 @@ export default function SubscriptionCabinet() {
                 Абонемент на {ABONEMENT_LESSONS} урока
               </p>
               <p className="mt-1 text-sm text-studio-muted">
-                Оплата пакета из {ABONEMENT_LESSONS} уроков через ЮKassa (СБП).
+                Оплата пакета из {ABONEMENT_LESSONS} уроков через СБП.
                 После оплаты на баланс начислятся {ABONEMENT_LESSONS} урока.
               </p>
               <Button
@@ -291,7 +291,7 @@ export default function SubscriptionCabinet() {
             <p className="mt-1 text-sm text-studio-muted">
               {active
                 ? "Можно продлить текущий тариф или перейти на более высокий. Понижение недоступно. 3 месяца −10%, 6 месяцев −15%, год −20%. Без автопродления."
-                : "Выберите тариф и срок. 3 месяца −10%, 6 месяцев −15%, год −20%. Оплата через СБП на странице ЮKassa."}
+                : "Выберите тариф и срок. 3 месяца −10%, 6 месяцев −15%, год −20%. Оплата через СБП."}
             </p>
           </div>
 
@@ -356,7 +356,7 @@ export default function SubscriptionCabinet() {
                 Тестовая оплата · 1 ₽
               </button>
               <p className="text-center text-xs text-studio-muted">
-                Реальная оплата через ЮKassa (СБП) для проверки. Тариф и срок не
+                Реальная оплата через СБП для проверки. Тариф и срок не
                 меняются.
               </p>
             </>

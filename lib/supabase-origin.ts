@@ -1,11 +1,11 @@
 /**
- * Browser talks to Supabase through two equal paths and keeps the winner:
- *   https://<ref>.supabase.co          — works with VPN / from abroad
- *   https://sb.uniquevocal.ru          — Moscow proxy, works in RU without VPN
+ * Live API is self-hosted Supabase on the Moscow VPS:
+ *   https://sb.uniquevocal.ru  →  127.0.0.1:8000 (Kong/Envoy)
  *
- * Do not "detect VPN". Race both; the first response is the detection.
- * Preference lives in memory only — sessionStorage sticky-direct is what
- * made a phone fail after turning VPN off.
+ * NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PROXY_URL both point here,
+ * so supabaseOriginsMatch() is true and the old cloud race is skipped.
+ * Keep the proxy/direct helpers: they still rewrite Storage URLs if a legacy
+ * session ever stored the other origin.
  */
 
 export const SUPABASE_PROJECT_URL = (
@@ -25,7 +25,7 @@ function browserOrigin() {
   return (
     SUPABASE_PROXY_URL ||
     SUPABASE_PROJECT_URL ||
-    "https://placeholder.supabase.co"
+    "https://sb.uniquevocal.ru"
   );
 }
 
@@ -125,7 +125,7 @@ function toWs(httpUrl: string): string {
 export function projectAuthStorageKey(): string {
   try {
     const host = new URL(
-      SUPABASE_PROJECT_URL || "https://placeholder.supabase.co"
+      SUPABASE_PROJECT_URL || "https://sb.uniquevocal.ru"
     ).hostname;
     return `sb-${host.split(".")[0]}-auth-token`;
   } catch {

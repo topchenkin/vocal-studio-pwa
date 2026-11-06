@@ -151,8 +151,10 @@ export default function OfertaPage() {
           </P>
           <P>
             Оплата принимается в безналичном порядке через платёжный сервис
-            ЮKassa, в том числе через Систему быстрых платежей (СБП). Иные
-            способы — только если они явно включены на Сайте.
+            Robokassa, в том числе через Систему быстрых платежей (СБП). По
+            решению Исполнителя может использоваться ЮKassa. Для карт,
+            выпущенных вне РФ, Заказчик может выбрать Prodamus. Иные способы —
+            только если они явно включены на Сайте.
           </P>
           <P>
             Услуга считается оплаченной после подтверждения платежа платёжным
@@ -211,8 +213,14 @@ export default function OfertaPage() {
             законных обязанностей.
           </P>
           <P>
-            Для приёма оплаты данные в необходимом объёме передаются ЮKassa.
-            Подробности обработки могут уточняться отдельной политикой на Сайте.
+            Для приёма оплаты данные в необходимом объёме передаются платёжному
+            сервису (Robokassa, при выборе Заказчика — ЮKassa или Prodamus).
+            Учётные записи хранятся на сервере Исполнителя в Российской
+            Федерации. Подробности — в{" "}
+            <Link href={LEGAL.privacyPath} className="underline">
+              политике конфиденциальности
+            </Link>
+            .
           </P>
           <P>
             Стороны не разглашают конфиденциальную информацию, полученную при
@@ -285,6 +293,15 @@ export default function OfertaPage() {
               <dd>{LEGAL.city}</dd>
               <dt className="text-studio-muted">ИНН</dt>
               <dd>{LEGAL.inn}</dd>
+              <dt className="text-studio-muted">Email</dt>
+              <dd>
+                <a
+                  className="text-studio-accent-light underline"
+                  href={`mailto:${LEGAL.email}`}
+                >
+                  {LEGAL.email}
+                </a>
+              </dd>
               <dt className="text-studio-muted">Бренд</dt>
               <dd>{LEGAL.brand}</dd>
               <dt className="text-studio-muted">Сайт</dt>

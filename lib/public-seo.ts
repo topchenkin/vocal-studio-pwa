@@ -43,6 +43,7 @@ export function organizationJsonLd() {
     "@type": "MusicSchool",
     name: APP_NAME,
     url: LEGAL.site,
+    email: LEGAL.email,
     image: `${LEGAL.site}${OG_IMAGE}`,
     description:
       "Индивидуальные уроки вокала для взрослых и детей: очно в центре Екатеринбурга и онлайн по всей России.",

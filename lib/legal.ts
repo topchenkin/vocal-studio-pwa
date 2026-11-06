@@ -5,9 +5,10 @@ export const LEGAL = {
   inn: "668400292050",
   fullName: "Топченкина Ирина Алексеевна",
   city: "Екатеринбург",
+  email: "iris.jar008@gmail.com",
   status:
     "физическое лицо, применяющее специальный налоговый режим «Налог на профессиональный доход» (самозанятый)",
-  offerDate: "21 августа 2026 г.",
+  offerDate: "6 ноября 2026 г.",
   privacyDate: "6 ноября 2026 г.",
   offerPath: "/oferta",
   privacyPath: "/privacy",

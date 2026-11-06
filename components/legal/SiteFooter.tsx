@@ -37,6 +37,14 @@ export default function SiteFooter({
             {" · "}
             {LEGAL.city}
           </p>
+          <p>
+            <a
+              className="underline hover:text-studio-accent-light"
+              href={`mailto:${LEGAL.email}`}
+            >
+              {LEGAL.email}
+            </a>
+          </p>
         </div>
         <nav className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {links.map((item) => (
