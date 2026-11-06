@@ -6,6 +6,7 @@ import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { formatGiftCode, normalizeGiftCode } from "@/lib/gift-certificates";
+import { LEGAL } from "@/lib/legal";
 import { supabase } from "@/lib/supabase";
 import {
   isEmailConfirmPendingError,
@@ -59,6 +60,8 @@ export default function AuthModal({
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [acceptOffer, setAcceptOffer] = useState(false);
+  const [acceptPrivacy, setAcceptPrivacy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +69,8 @@ export default function AuthModal({
     setError("");
     setMessage("");
     setAwaitingConfirm(false);
+    setAcceptOffer(false);
+    setAcceptPrivacy(false);
     try {
       const stored = sessionStorage.getItem("uvs-auth-link-error");
       if (!stored) return;
@@ -135,6 +140,14 @@ export default function AuthModal({
     const code = normalizeGiftCode(giftCode);
     if (mode === "register" && giftCode.trim() && code.length !== 12) {
       setError("Код сертификата — 12 букв и цифр");
+      return;
+    }
+    if (mode === "register" && !acceptOffer) {
+      setError("Чтобы создать кабинет, примите публичную оферту");
+      return;
+    }
+    if (mode === "register" && !acceptPrivacy) {
+      setError("Чтобы создать кабинет, примите политику конфиденциальности");
       return;
     }
 
@@ -226,6 +239,8 @@ export default function AuthModal({
     setError("");
     setMessage("");
     setAwaitingConfirm(false);
+    setAcceptOffer(false);
+    setAcceptPrivacy(false);
   };
 
   const handleResendConfirm = async () => {
@@ -364,6 +379,49 @@ export default function AuthModal({
             </button>
           </span>
         </label>
+
+        {mode === "register" ? (
+          <div className="space-y-2">
+            <label className="flex min-h-10 cursor-pointer items-start gap-3 text-sm leading-snug text-studio-muted">
+              <input
+                type="checkbox"
+                checked={acceptOffer}
+                onChange={(event) => setAcceptOffer(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 rounded border-studio-border accent-studio-accent"
+              />
+              <span>
+                Принимаю{" "}
+                <a
+                  href={LEGAL.offerPath}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-studio-accent-light underline"
+                >
+                  публичную оферту
+                </a>
+              </span>
+            </label>
+            <label className="flex min-h-10 cursor-pointer items-start gap-3 text-sm leading-snug text-studio-muted">
+              <input
+                type="checkbox"
+                checked={acceptPrivacy}
+                onChange={(event) => setAcceptPrivacy(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 rounded border-studio-border accent-studio-accent"
+              />
+              <span>
+                Соглашаюсь с{" "}
+                <a
+                  href={LEGAL.privacyPath}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-studio-accent-light underline"
+                >
+                  политикой конфиденциальности
+                </a>
+              </span>
+            </label>
+          </div>
+        ) : null}
 
         {error && <p className="text-sm text-red-400">{error}</p>}
         {!error && backendError && (

@@ -4,13 +4,8 @@ import { Cormorant_Garamond, Inter } from "next/font/google";
 import AppProviders from "@/components/providers/AppProviders";
 import InstallPrompt from "@/components/pwa/InstallPrompt";
 import PushNavigationListener from "@/components/pwa/PushNavigationListener";
-import YandexMetrika from "@/components/YandexMetrika";
 import { APP_NAME, APP_SHORT_NAME } from "@/lib/constants";
 import { APP_RELEASE } from "@/lib/app-release";
-import {
-  YANDEX_METRIKA_ID,
-  YANDEX_METRIKA_SCRIPT,
-} from "@/lib/yandex-metrika";
 import "./globals.css";
 
 const display = Cormorant_Garamond({
@@ -192,21 +187,6 @@ export default function RootLayout({
         <AppProviders>{children}</AppProviders>
         <InstallPrompt />
         <PushNavigationListener />
-        <script
-          type="text/javascript"
-          dangerouslySetInnerHTML={{ __html: YANDEX_METRIKA_SCRIPT }}
-        />
-        <noscript>
-          <div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`https://mc.yandex.ru/watch/${YANDEX_METRIKA_ID}`}
-              style={{ position: "absolute", left: "-9999px" }}
-              alt=""
-            />
-          </div>
-        </noscript>
-        <YandexMetrika />
       </body>
     </html>
   );

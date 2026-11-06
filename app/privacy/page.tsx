@@ -27,7 +27,7 @@ export default function PrivacyPage() {
             Политика конфиденциальности
           </h1>
           <p className="mt-2 text-sm text-studio-muted">
-            Обработка персональных данных · редакция от {LEGAL.offerDate}
+            Обработка персональных данных · редакция от {LEGAL.privacyDate}
           </p>
 
           <h2 className="mt-8 font-display text-xl font-semibold">
@@ -73,9 +73,9 @@ export default function PrivacyPage() {
           </h2>
           <p className="mt-3 text-sm leading-relaxed">
             Данные передаются только если это нужно для услуги или закона: сервис
-            ЮKassa (расчёты), Яндекс.Метрика (посещения, карта кликов и
-            вебвизор), хостинг и инфраструктура Сайта, ФНС / «Мой налог»
-            (учёт дохода и чек). Исполнитель не продаёт персональные данные.
+            ЮKassa (расчёты), хостинг и инфраструктура Сайта, ФНС / «Мой налог»
+            (учёт дохода и чек). Исполнитель не продаёт персональные данные и не
+            использует счётчики посещаемости.
           </p>
 
           <h2 className="mt-8 font-display text-xl font-semibold">
