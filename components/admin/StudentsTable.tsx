@@ -41,6 +41,7 @@ import {
   studioEndOfDayIso,
 } from "@/lib/studio-tz";
 import { normalizeOnlineLessonUrl } from "@/lib/lesson-format";
+import { adminStudentName } from "@/lib/admin-student-name";
 import CatLevelText from "@/components/ui/CatLevelText";
 import type {
   AppSubscriptionTier,
@@ -260,6 +261,7 @@ function StudentEditor({
       draft.lesson_format === "online" ? "online" : "offline";
 
     const updates = {
+      admin_display_name: draft.admin_display_name?.trim() || null,
       phone: draft.phone?.trim() || null,
       lesson_format: lessonFormat,
       online_lesson_url: onlineUrl || null,
@@ -371,6 +373,25 @@ function StudentEditor({
             Контакты
           </p>
           <p className="mt-2 truncate text-sm">{draft.email || "Почта не указана"}</p>
+          <p className="mt-1 truncate text-xs text-studio-muted">
+            Имя при регистрации: {draft.full_name?.trim() || "не указано"}
+          </p>
+          <label className="mt-3 block">
+            <span className="mb-1.5 block text-xs font-medium text-studio-muted">
+              Имя в админке
+            </span>
+            <input
+              value={draft.admin_display_name ?? ""}
+              onChange={(event) =>
+                updateDraft("admin_display_name", event.target.value)
+              }
+              placeholder="Как отличать, если имена совпадают"
+              className="w-full rounded-xl bg-studio-bg px-4 py-3 text-sm ring-1 ring-studio-border focus:outline-none focus:ring-studio-accent"
+            />
+            <span className="mt-1 block text-[11px] text-studio-muted">
+              Видно только вам. Ученик по-прежнему видит своё имя.
+            </span>
+          </label>
           <label className="mt-3 block">
             <span className="mb-1.5 block text-xs font-medium text-studio-muted">
               Телефон
@@ -920,6 +941,7 @@ export default function StudentsTable() {
     const matchesSearch =
       !query ||
       student.full_name?.toLowerCase().includes(query) ||
+      student.admin_display_name?.toLowerCase().includes(query) ||
       student.email?.toLowerCase().includes(query) ||
       student.phone?.toLowerCase().includes(query) ||
       (queryDigits.length >= 4 && phoneDigits.includes(queryDigits));
@@ -995,7 +1017,7 @@ export default function StudentsTable() {
   };
 
   const deleteStudent = async (student: StudentProfile) => {
-    const name = student.full_name || student.email || "этого ученика";
+    const name = adminStudentName(student, "этого ученика");
     const debtNote =
       student.debt_amount > 0
         ? `\n\nУ ученика долг ${student.debt_amount.toLocaleString("ru-RU")} ₽.`
@@ -1178,8 +1200,16 @@ export default function StudentsTable() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate font-medium">
-                        {student.full_name || "Ученик без имени"}
+                        {adminStudentName(student, "Ученик без имени")}
                       </p>
+                      {student.admin_display_name?.trim() &&
+                      student.full_name?.trim() &&
+                      student.admin_display_name.trim() !==
+                        student.full_name.trim() ? (
+                        <p className="truncate text-xs text-studio-muted">
+                          в кабинете ученика: {student.full_name}
+                        </p>
+                      ) : null}
                       <p className="truncate text-xs text-studio-muted">
                         {student.email || student.id.slice(0, 12)}
                       </p>

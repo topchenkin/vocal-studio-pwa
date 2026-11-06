@@ -22,6 +22,7 @@ create table if not exists public.profiles (
 
 alter table public.profiles add column if not exists email text;
 alter table public.profiles add column if not exists full_name text;
+alter table public.profiles add column if not exists admin_display_name text;
 alter table public.profiles add column if not exists deleted_at timestamptz;
 
 create table if not exists public.lessons (

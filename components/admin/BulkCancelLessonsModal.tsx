@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CalendarX2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
@@ -40,7 +41,7 @@ export function periodIsoBounds(fromDate: string, toDate: string) {
 }
 
 function studentLabel(student: StudentProfile) {
-  return student.full_name || student.email || `Ученик ${student.id.slice(0, 8)}`;
+  return adminStudentName(student);
 }
 
 function lessonWhen(lesson: Lesson) {

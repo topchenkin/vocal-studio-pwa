@@ -33,6 +33,7 @@ import {
   clampLessonDurationMin,
   lessonsOverlap,
 } from "@/lib/lesson-duration";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { supabase } from "@/lib/supabase";
 import type { Lesson, StudentProfile } from "@/types";
 
@@ -828,9 +829,7 @@ export default function ScheduleGrid() {
   const studentLabel = (studentId: string | null) => {
     if (!studentId) return "Свободно";
     const profile = students.find((student) => student.id === studentId);
-    return profile
-      ? profile.full_name || profile.email || `Ученик ${profile.id.slice(0, 8)}`
-      : "Ученик удален";
+    return profile ? adminStudentName(profile) : "Ученик удален";
   };
 
   if (loading) {
@@ -1057,7 +1056,7 @@ export default function ScheduleGrid() {
               <option value="">Выберите ученика</option>
               {students.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.full_name || student.email || student.id.slice(0, 8)}
+                  {adminStudentName(student)}
                 </option>
               ))}
             </select>
@@ -1216,7 +1215,7 @@ export default function ScheduleGrid() {
             <option value="">Выберите ученика</option>
             {students.map((student) => (
               <option key={student.id} value={student.id}>
-                {student.full_name || student.email || student.id.slice(0, 8)}
+                {adminStudentName(student)}
               </option>
             ))}
           </select>

@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { supabase } from "@/lib/supabase";
 import type { StudentProfile } from "@/types";
 
@@ -51,14 +52,14 @@ function formatRub(amount: number) {
   return `${amount.toLocaleString("ru-RU")} ₽`;
 }
 
-function studentLabel(student: StudentProfile) {
+function studentPublicName(student: StudentProfile) {
   return student.full_name?.trim() || student.email || "Ученик";
 }
 
 function fillTemplate(template: string, student: StudentProfile) {
   return template
     .split("{name}")
-    .join(studentLabel(student))
+    .join(studentPublicName(student))
     .split("{amount}")
     .join(formatRub(student.debt_amount))
     .trim();
@@ -66,7 +67,7 @@ function fillTemplate(template: string, student: StudentProfile) {
 
 function defaultMessage(student?: StudentProfile) {
   if (student) {
-    return `Здравствуйте, ${studentLabel(student)}! По данным студии у вас задолженность ${formatRub(student.debt_amount)}. Пожалуйста, оплатите в разделе «Подписка».`;
+    return `Здравствуйте, ${studentPublicName(student)}! По данным студии у вас задолженность ${formatRub(student.debt_amount)}. Пожалуйста, оплатите в разделе «Подписка».`;
   }
   return "Здравствуйте, {name}! По данным студии у вас задолженность {amount}. Пожалуйста, оплатите в разделе «Подписка».";
 }
@@ -233,7 +234,7 @@ export default function DebtorsPanel() {
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">
-                    {studentLabel(student)}
+                    {adminStudentName(student)}
                   </p>
                   <p className="text-sm text-red-400">
                     {formatRub(student.debt_amount)}
@@ -255,7 +256,7 @@ export default function DebtorsPanel() {
         }}
         title={
           targets?.length === 1
-            ? `Уведомить: ${studentLabel(targets[0])}`
+            ? `Уведомить: ${adminStudentName(targets[0])}`
             : `Уведомить всех (${targets?.length ?? 0})`
         }
       >

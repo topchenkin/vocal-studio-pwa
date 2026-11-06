@@ -21,6 +21,7 @@ import {
   mediaAcceptFor,
   rejectedMediaMessage,
 } from "@/lib/file-accept";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { supabase } from "@/lib/supabase";
 import { CAT_LEVEL_LABELS, CAT_LEVEL_OPTIONS } from "@/lib/cat-levels";
 import type {
@@ -635,8 +636,7 @@ export default function ContentManager() {
               title="Конкретные ученики"
               items={students.map((student) => ({
                 id: student.id,
-                label:
-                  student.full_name || student.email || student.id.slice(0, 8),
+                label: adminStudentName(student),
               }))}
               selected={selectedStudents}
               onChange={setSelectedStudents}

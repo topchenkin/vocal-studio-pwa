@@ -50,6 +50,7 @@ export interface StudentProfile {
   id: string;
   email: string | null;
   full_name: string | null;
+  admin_display_name?: string | null;
   role: Exclude<UserRole, "guest">;
   app_sub_tier: AppSubscriptionTier;
   app_sub_variant: AppSubscriptionVariant;

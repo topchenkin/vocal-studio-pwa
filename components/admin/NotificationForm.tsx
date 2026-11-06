@@ -5,6 +5,7 @@ import { BellRing, Send, UsersRound, WalletCards } from "lucide-react";
 import Button from "@/components/ui/Button";
 import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { effectiveAppTier, formatAppTier } from "@/lib/constants";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -238,7 +239,7 @@ export default function NotificationForm() {
                 <optgroup label="Конкретный ученик">
                   {students.map((student) => (
                     <option key={student.id} value={student.id}>
-                      {student.full_name || student.email || student.id.slice(0, 8)}
+                      {adminStudentName(student)}
                       {" · "}
                       {effectiveAppTier(
                         student.app_sub_tier,

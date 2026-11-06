@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useChatMessages } from "@/hooks/useChatMessages";
 import { useGroupChatMessages } from "@/hooks/useGroupChatMessages";
 import { ADMIN_DISPLAY_NAME } from "@/lib/admin";
+import { adminStudentName } from "@/lib/admin-student-name";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { GroupChat, StudentFolder, StudentFolderMember, StudentProfile } from "@/types";
@@ -65,10 +66,7 @@ export default function AdminChat() {
       const rows = [...(studentsResult.data ?? [])].sort((a, b) => {
         const deleted = Number(Boolean(a.deleted_at)) - Number(Boolean(b.deleted_at));
         if (deleted !== 0) return deleted;
-        return (a.full_name || a.email || "").localeCompare(
-          b.full_name || b.email || "",
-          "ru"
-        );
+        return adminStudentName(a).localeCompare(adminStudentName(b), "ru");
       });
       setStudents(rows);
       setGroups(groupsResult.data ?? []);
@@ -208,7 +206,7 @@ export default function AdminChat() {
                     student.deleted_at && "text-studio-muted"
                   )}
                 >
-                  {student.full_name || student.email || "Ученик"}
+                  {adminStudentName(student)}
                   {student.deleted_at ? " удален" : ""}
                 </p>
               </button>
@@ -345,7 +343,7 @@ export default function AdminChat() {
                       }
                     />
                     <span className="truncate">
-                      {student.full_name || student.email || student.id.slice(0, 8)}
+                      {adminStudentName(student)}
                     </span>
                   </label>
                 );
