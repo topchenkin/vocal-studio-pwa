@@ -55,9 +55,28 @@ function json(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff",
+    "cache-control": "no-store",
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+const INIT_WINDOW_MS = 15 * 60 * 1000;
+const INIT_MAX = 20;
+/** @type {Map<string, number[]>} */
+const initHits = new Map();
+
+function tooManyInits(userId) {
+  const now = Date.now();
+  const hits = (initHits.get(userId) || []).filter((t) => now - t < INIT_WINDOW_MS);
+  if (hits.length >= INIT_MAX) {
+    initHits.set(userId, hits);
+    return true;
+  }
+  hits.push(now);
+  initHits.set(userId, hits);
+  return false;
 }
 
 function readBody(req) {
@@ -454,6 +473,9 @@ async function handleInitGift(req, res) {
   if (!user?.id) {
     return json(res, 401, { error: "Сессия истекла, войдите снова" });
   }
+  if (tooManyInits(`gift:${user.id}`)) {
+    return json(res, 429, { error: "Слишком много попыток. Подождите несколько минут." });
+  }
 
   const profile = await loadProfile(user.id);
   if (!profile || profile.role !== "admin") {
@@ -689,6 +711,9 @@ async function handleInit(req, res) {
   const user = await authUser(token);
   if (!user?.id) {
     return json(res, 401, { error: "Сессия истекла, войдите снова" });
+  }
+  if (tooManyInits(user.id)) {
+    return json(res, 429, { error: "Слишком много попыток оплаты. Подождите несколько минут." });
   }
 
   let body = {};
@@ -1282,35 +1307,15 @@ const server = createServer(async (req, res) => {
       path === "/api/payments/health" ||
       path === "/api/payments"
     ) {
-      const rfProvider = getRfProvider();
-      const [auth, payouts] = await Promise.all([
-        yookassa.isReady()
-          ? yookassa.diagnoseAuth()
-          : Promise.resolve({ authOk: false, accountKind: "missing" }),
-        yookassa.diagnosePayouts(),
-      ]);
-      const kassa = rfAdapter(rfProvider);
       return json(res, 200, {
         ok: ready(),
-        provider: rfProvider,
-        isTest: kassa.isTest,
-        yookassaReady: yookassa.isReady(),
-        ...yookassa.healthExtra(),
-        ...robokassa.healthExtra(),
-        ...prodamus.healthExtra(),
-        auth,
-        payouts,
-        payoutsSbpOk: payouts.authOk === true && payouts.sbpAvailable === true,
+        provider: getRfProvider(),
       });
     }
 
     if (!ready()) {
-      const rfProvider = getRfProvider();
       return json(res, 503, {
-        error:
-          rfProvider === "robokassa"
-            ? "pay-api: нужны ROBOKASSA_MERCHANT_LOGIN, ROBOKASSA_PASSWORD1 и ROBOKASSA_PASSWORD2"
-            : "pay-api: нужны YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY магазина",
+        error: "Оплата временно недоступна",
       });
     }
 

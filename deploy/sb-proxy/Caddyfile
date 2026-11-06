@@ -21,6 +21,10 @@
 (site) {
 	header Alt-Svc "clear"
 	header Permissions-Policy "microphone=(self), camera=(self)"
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	header X-Content-Type-Options "nosniff"
+	header X-Frame-Options "DENY"
+	header Referrer-Policy "strict-origin-when-cross-origin"
 	root * /var/www/uniquevocal
 	encode gzip
 	redir /dashboard/student/pocket-studio /dashboard/student 302
@@ -139,6 +143,10 @@ www.uniquevocal.ru, uniquevocal.ru {
 sb.uniquevocal.ru {
 	import tls12
 	header Alt-Svc "clear"
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	header X-Content-Type-Options "nosniff"
+	header X-Frame-Options "DENY"
+	header Referrer-Policy "strict-origin-when-cross-origin"
 	# Sibling project Family shares this host. These paths must stay ahead of
 	# the vocal catch-all, or a site deploy sends Family at the vocal gateway.
 	handle /family/__health {

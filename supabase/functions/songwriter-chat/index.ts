@@ -1,9 +1,21 @@
-const CORS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const ALLOWED_ORIGINS = new Set([
+  "https://www.uniquevocal.ru",
+  "https://uniquevocal.ru",
+]);
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  const allow = ALLOWED_ORIGINS.has(origin)
+    ? origin
+    : "https://www.uniquevocal.ru";
+  return {
+    "Access-Control-Allow-Origin": allow,
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    Vary: "Origin",
+  };
+}
 
 const SYSTEM_PROMPT =
   "Ты профессиональный музыкальный продюсер и автор хитов. Твоя задача — помогать вокалистам писать тексты песен, придумывать структуру (Куплет, Бридж, Припев) и рифмы. Давай советы по вокалу (где петь тише (субтон), где использовать бэлтинг, где добавить вибрато). Общайся вдохновляюще, как наставник. Отвечай кратко и структурировано. Пиши только по-русски. Текст песни тоже на русском, если ученик явно не попросил другой язык.";
@@ -13,10 +25,10 @@ const MAX_CONTENT = 4000;
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 
-function json(body: unknown, status = 200) {
+function json(req: Request, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS, "Content-Type": "application/json" },
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
@@ -147,43 +159,45 @@ async function completeChat(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
   if (req.method !== "POST") {
-    return json({ error: "method_not_allowed" }, 405);
+    return json(req, { error: "method_not_allowed" }, 405);
   }
 
   try {
     const userId = await userIdFromJwt(req);
-    if (!userId) return json({ error: "unauthorized" }, 401);
+    if (!userId) return json(req, { error: "unauthorized" }, 401);
     const profile = await loadProfile(userId);
-    if (!canUse(profile)) return json({ error: "premium_required" }, 403);
+    if (!canUse(profile)) return json(req, { error: "premium_required" }, 403);
 
     const payload = (await req.json().catch(() => null)) as {
       messages?: unknown;
     } | null;
     const history = sanitizeMessages(payload?.messages);
-    if (history.length === 0) return json({ error: "empty_prompt" }, 400);
+    if (history.length === 0) return json(req, { error: "empty_prompt" }, 400);
     if (history.at(-1)?.role !== "user") {
-      return json({ error: "empty_prompt" }, 400);
+      return json(req, { error: "empty_prompt" }, 400);
     }
 
     const groqKey = usableKey(Deno.env.get("GROQ_API_KEY"));
-    if (!groqKey) return json({ error: "missing_groq_key" }, 503);
+    if (!groqKey) return json(req, { error: "missing_groq_key" }, 503);
 
     const result = await completeChat(groqKey, [
       { role: "system", content: SYSTEM_PROMPT },
       ...history,
     ]);
 
-    if (result.reply) return json({ reply: result.reply });
-    if (result.error === "busy") return json({ error: "busy" }, 429);
-    if (result.error === "llm_forbidden") return json({ error: "llm_forbidden" }, 502);
-    return json({ error: result.error || "failed" }, result.status || 502);
+    if (result.reply) return json(req, { reply: result.reply });
+    if (result.error === "busy") return json(req, { error: "busy" }, 429);
+    if (result.error === "llm_forbidden") {
+      return json(req, { error: "llm_forbidden" }, 502);
+    }
+    return json(req, { error: result.error || "failed" }, result.status || 502);
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed";
     console.error("songwriter-chat failed", message);
-    if (/timeout|abort/i.test(message)) return json({ error: "timeout" }, 504);
-    return json({ error: "failed" }, 500);
+    if (/timeout|abort/i.test(message)) return json(req, { error: "timeout" }, 504);
+    return json(req, { error: "failed" }, 500);
   }
 });
