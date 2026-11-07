@@ -28,18 +28,28 @@ export default function Modal({
   useEffect(() => {
     if (open) {
       document.body.style.overflow = "hidden";
+      document.documentElement.setAttribute("data-uvs-modal", "1");
     } else {
       document.body.style.overflow = "";
+      document.documentElement.removeAttribute("data-uvs-modal");
     }
     return () => {
       document.body.style.overflow = "";
+      document.documentElement.removeAttribute("data-uvs-modal");
     };
   }, [open]);
 
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+        <div
+          className="fixed inset-x-0 z-[90] flex items-start justify-center overflow-hidden px-4 pt-[max(0.75rem,env(safe-area-inset-top))] sm:items-center sm:pt-4"
+          style={{
+            top: "var(--uvs-vv-top, 0px)",
+            height: "var(--uvs-vv-height, 100dvh)",
+            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+          }}
+        >
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -51,11 +61,11 @@ export default function Modal({
             role="dialog"
             aria-modal="true"
             aria-label={title}
-            initial={{ opacity: 0, y: 40, scale: 0.97 }}
+            initial={{ opacity: 0, y: 24, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.97 }}
+            exit={{ opacity: 0, y: 16, scale: 0.97 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className={`relative w-full ${sizes[size]} max-h-[90vh] overflow-y-auto rounded-2xl bg-studio-card ring-1 ring-studio-border shadow-card`}
+            className={`relative w-full ${sizes[size]} max-h-[calc(var(--uvs-vv-height,100dvh)-1.5rem)] overflow-y-auto rounded-2xl bg-studio-card ring-1 ring-studio-border shadow-card`}
           >
             {title && (
               <div className="flex items-center justify-between border-b border-studio-border px-5 py-4">

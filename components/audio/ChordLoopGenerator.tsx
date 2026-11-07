@@ -10,6 +10,7 @@ import {
   INSTRUMENTS,
   ROOTS,
   VIBES,
+  accompanimentMidi,
   buildProgression,
   clampBpm,
   defaultGroove,
@@ -232,13 +233,12 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
           }
         }
         playTone(ctx, dest, chord.midi[0], when, barSec * 0.35, 0, "bass");
+      } else if (currentInstrument === "bass") {
+        playTone(ctx, dest, chord.midi[0], when, barSec * 0.88, 0, "bass");
       } else {
-        const notes =
-          currentInstrument === "bass"
-            ? [chord.midi[0]]
-            : currentInstrument === "guitar"
-              ? chord.midi.slice(0, 4)
-              : chord.midi;
+        const notes = accompanimentMidi(chord.midi, currentInstrument);
+        const plucked =
+          currentInstrument === "guitar" || currentInstrument === "rock-guitar";
         if (grooveRef.current === "arpeggio") {
           const step = barSec / Math.max(4, notes.length * 2);
           notes.forEach((midi, i) => {
@@ -248,7 +248,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
               dest,
               midi,
               when + i * step,
-              step * 1.6,
+              plucked ? step * 2.2 : step * 1.6,
               pan,
               currentInstrument
             );
@@ -256,9 +256,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
         } else {
           notes.forEach((midi, i) => {
             const pan = (i / Math.max(1, notes.length - 1)) * 1.1 - 0.55;
-            const strum = currentInstrument === "guitar" ? i * 0.024 : 0;
-            const hold =
-              currentInstrument === "guitar" ? barSec * 0.5 : barSec * 0.92;
+            const strum = plucked ? i * 0.022 : 0;
+            const hold = plucked ? barSec * 0.78 : barSec * 0.92;
             playTone(ctx, dest, midi, when + strum, hold, pan, currentInstrument);
           });
         }
@@ -277,7 +276,7 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     const ctx = ctxRef.current;
     if (!ctx || !playingRef.current) return;
     const barSec = (4 * 60) / bpmRef.current;
-    while (nextTimeRef.current < ctx.currentTime + 0.16) {
+    while (nextTimeRef.current < ctx.currentTime + 0.32) {
       scheduleChord(nextTimeRef.current);
       nextTimeRef.current += barSec;
       chordIndexRef.current =
@@ -310,9 +309,15 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     if (!ctxRef.current || ctxRef.current.state === "closed") {
       const ctx = ensureAudioContext();
       const master = ctx.createGain();
-      master.gain.value = 0.9;
+      master.gain.value = 0.85;
       const voiceBus = ctx.createGain();
       voiceBus.gain.value = 1;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -12;
+      limiter.knee.value = 10;
+      limiter.ratio.value = 6;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.18;
       const dry = ctx.createGain();
       const wet = ctx.createGain();
       const mix = INSTRUMENT_MIX[instrumentRef.current] ?? INSTRUMENT_MIX.piano;
@@ -320,7 +325,8 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
       wet.gain.value = mix.wet;
       const convolver = ctx.createConvolver();
       convolver.buffer = makePadImpulse(ctx);
-      voiceBus.connect(master);
+      voiceBus.connect(limiter);
+      limiter.connect(master);
       master.connect(dry);
       dry.connect(ctx.destination);
       master.connect(convolver);
@@ -356,10 +362,10 @@ export default function ChordLoopGenerator({ locked = false }: Props) {
     setSampleBusy(false);
     applyMix(instrumentRef.current);
     if (masterRef.current) {
-      masterRef.current.gain.setValueAtTime(0.9, ctx.currentTime);
+      masterRef.current.gain.setValueAtTime(0.85, ctx.currentTime);
     }
     chordIndexRef.current = 0;
-    nextTimeRef.current = ctx.currentTime + 0.06;
+    nextTimeRef.current = ctx.currentTime + 0.08;
     playingRef.current = true;
     setPlaying(true);
     beginAudioKeepAlive();

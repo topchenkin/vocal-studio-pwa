@@ -115,9 +115,14 @@ function nearestPad(instrument: SampledInstrument, midi: number): SamplePad | nu
 
 const PEAK: Record<SampledInstrument, number> = {
   piano: 0.22,
-  guitar: 0.28,
-  "rock-guitar": 0.18,
+  guitar: 0.15,
+  "rock-guitar": 0.11,
 };
+
+function startAtOrSkip(ctx: AudioContext, when: number): number | null {
+  if (when < ctx.currentTime - 0.04) return null;
+  return Math.max(when, ctx.currentTime + 0.003);
+}
 
 function playPad(
   ctx: AudioContext,
@@ -159,47 +164,83 @@ export function playSampledNote(
   dur: number,
   pan: number
 ): AudioScheduledSourceNode[] {
-  const pitchMidi = instrument === "rock-guitar" ? midi - 12 : midi;
-  const pad = nearestPad(instrument, pitchMidi);
+  const startAt = startAtOrSkip(ctx, when);
+  if (startAt === null) return [];
+  const pad = nearestPad(instrument, midi);
   if (!pad) return [];
 
-  if (instrument === "guitar") {
-    const source = ctx.createBufferSource();
-    source.buffer = pad.buffer;
-    source.playbackRate.value = Math.pow(2, (pitchMidi - pad.midi) / 12);
-    const filter = ctx.createBiquadFilter();
-    filter.type = "highpass";
-    filter.frequency.value = 70;
-    const gain = ctx.createGain();
-    const panner = ctx.createStereoPanner();
-    panner.pan.value = pan;
-    const peak = PEAK.guitar;
-    gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.exponentialRampToValueAtTime(peak, when + 0.005);
-    gain.gain.exponentialRampToValueAtTime(peak * 0.45, when + 0.12);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + 1.35);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(panner);
-    panner.connect(dest);
-    source.start(when);
-    source.stop(when + 1.45);
-    return [source];
+  if (instrument === "piano") {
+    return [
+      playPad(
+        ctx,
+        dest,
+        pad,
+        midi,
+        startAt,
+        pan,
+        PEAK.piano,
+        0.01,
+        Math.max(0.08, dur),
+        0.5
+      ),
+    ];
   }
 
-  const release = instrument === "piano" ? 0.5 : 0.2;
-  return [
-    playPad(
-      ctx,
-      dest,
-      pad,
-      pitchMidi,
-      when,
-      pan,
-      PEAK[instrument],
-      0.01,
-      Math.max(0.08, dur),
-      release
-    ),
-  ];
+  const rate = Math.pow(2, (midi - pad.midi) / 12);
+  const source = ctx.createBufferSource();
+  source.buffer = pad.buffer;
+  source.playbackRate.value = rate;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.Q.value = 0.7;
+  const body = ctx.createBiquadFilter();
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.Q.value = 0.8;
+
+  if (instrument === "guitar") {
+    hp.frequency.value = 78;
+    body.type = "lowshelf";
+    body.frequency.value = 210;
+    body.gain.value = 3.2;
+    lp.frequency.value = Math.min(6200, 13000 / Math.max(1, rate));
+  } else {
+    hp.frequency.value = 95;
+    body.type = "peaking";
+    body.frequency.value = 2700;
+    body.Q.value = 0.85;
+    body.gain.value = -5.5;
+    lp.frequency.value = Math.min(5000, 11000 / Math.max(1, rate));
+  }
+
+  const gain = ctx.createGain();
+  const panner = ctx.createStereoPanner();
+  panner.pan.value = pan;
+  const peak = PEAK[instrument];
+  const attack = instrument === "guitar" ? 0.008 : 0.012;
+  const hold = Math.max(0.1, dur * 0.78);
+  const release =
+    instrument === "guitar"
+      ? Math.min(0.5, Math.max(0.16, dur * 0.32))
+      : 0.2;
+  const releaseAt = startAt + attack + hold;
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(peak, startAt + attack);
+  gain.gain.exponentialRampToValueAtTime(
+    peak * 0.58,
+    startAt + attack + Math.min(0.16, hold * 0.35)
+  );
+  gain.gain.setValueAtTime(peak * 0.5, releaseAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, releaseAt + release);
+
+  source.connect(hp);
+  hp.connect(body);
+  body.connect(lp);
+  lp.connect(gain);
+  gain.connect(panner);
+  panner.connect(dest);
+  source.start(startAt);
+  source.stop(releaseAt + release + 0.05);
+  return [source];
 }

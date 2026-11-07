@@ -321,6 +321,21 @@ export function clampBpm(value: number): number {
   return Math.max(50, Math.min(140, Math.round(value)));
 }
 
+/** Compact guitar voicing: root + third + seventh, skip the fifth and extra tensions. */
+export function accompanimentMidi(
+  midi: number[],
+  instrument: ChordInstrument
+): number[] {
+  if (!midi.length) return midi;
+  if (instrument === "bass") return [midi[0]];
+  if (instrument === "guitar" || instrument === "rock-guitar") {
+    if (midi.length <= 3) return midi;
+    return [midi[0], midi[1], midi[3]];
+  }
+  if (midi.length > 4) return midi.slice(0, 4);
+  return midi;
+}
+
 export function midiToHz(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }

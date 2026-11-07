@@ -78,26 +78,32 @@ function playBass(
   pan: number,
   noise: AudioBuffer
 ): ScheduledVoice[] {
+  if (when < ctx.currentTime - 0.04) return [];
+  const startAt = Math.max(when, ctx.currentTime + 0.003);
   const out = panTo(ctx, dest, pan);
-  const gain = envGain(ctx, 0.28, when, 0.01, 0.16, 0.55, dur, 0.22);
+  const gain = envGain(ctx, 0.2, startAt, 0.018, 0.2, 0.62, dur, 0.28);
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.frequency.setValueAtTime(900, when);
-  lp.frequency.exponentialRampToValueAtTime(280, when + 0.2);
+  lp.Q.value = 0.65;
+  lp.frequency.setValueAtTime(1300, startAt);
+  lp.frequency.exponentialRampToValueAtTime(
+    420,
+    startAt + Math.min(0.28, Math.max(0.12, dur * 0.3))
+  );
   gain.connect(lp);
   lp.connect(out);
   const click = ctx.createGain();
-  click.gain.value = 0.12;
+  click.gain.value = 0.03;
   const hp = ctx.createBiquadFilter();
   hp.type = "highpass";
-  hp.frequency.value = 800;
+  hp.frequency.value = 520;
   click.connect(hp);
   hp.connect(gain);
-  const stopAt = when + dur + 0.3;
+  const stopAt = startAt + dur + 0.35;
   return [
-    noiseBurst(ctx, noise, when, 0.008, click),
-    startOsc(ctx, "sine", hz, when, stopAt, gain),
-    startOsc(ctx, "triangle", hz, when, stopAt, gain, -6),
+    noiseBurst(ctx, noise, startAt, 0.005, click),
+    startOsc(ctx, "sine", hz, startAt, stopAt, gain),
+    startOsc(ctx, "triangle", hz, startAt, stopAt, gain, -6),
   ];
 }
 
@@ -200,8 +206,8 @@ export function playDrumHit(
 
 export const INSTRUMENT_MIX: Record<ChordInstrument, { dry: number; wet: number }> = {
   piano: { dry: 0.86, wet: 0.14 },
-  guitar: { dry: 0.98, wet: 0.02 },
-  "rock-guitar": { dry: 0.95, wet: 0.05 },
+  guitar: { dry: 0.9, wet: 0.1 },
+  "rock-guitar": { dry: 0.92, wet: 0.08 },
   bass: { dry: 0.94, wet: 0.06 },
   organ: { dry: 0.62, wet: 0.34 },
   synth: { dry: 0.7, wet: 0.26 },

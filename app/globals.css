@@ -77,7 +77,8 @@ html.light {
   }
 }
 
-html[data-uvs-keyboard] [data-student-bottom-nav] {
+html[data-uvs-keyboard] [data-student-bottom-nav],
+html[data-uvs-modal] [data-student-bottom-nav] {
   display: none !important;
 }
 
