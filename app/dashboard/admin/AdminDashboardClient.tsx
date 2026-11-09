@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Sparkles,
   LibraryBig,
+  ScrollText,
   Shield,
   UserRound,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import DebtorsPanel from "@/components/admin/DebtorsPanel";
 import GiftCertificatesPanel from "@/components/admin/GiftCertificatesPanel";
 import TeacherCardEditor from "@/components/admin/TeacherCardEditor";
 import AiToolsAccessSettings from "@/components/admin/AiToolsAccessSettings";
+import AdminLogsPanel from "@/components/admin/AdminLogsPanel";
 import RfKassaSettings from "@/components/admin/RfKassaSettings";
 import {
   CABINET_TAB_EVENT,
@@ -48,6 +50,11 @@ const TABS = [
     id: "notifications",
     label: "Уведомления",
     icon: <Bell className="h-4 w-4" />,
+  },
+  {
+    id: "logs",
+    label: "Логи",
+    icon: <ScrollText className="h-4 w-4" />,
   },
   {
     id: "content",
@@ -143,13 +150,17 @@ export default function AdminDashboardClient() {
           ? "Должники"
           : activeTab === "gifts"
             ? "Сертификаты"
-            : "Панель администратора";
+            : activeTab === "logs"
+              ? "Логи"
+              : "Панель администратора";
   const subtitle =
     isChat || activeTab === "audio" || activeTab === "debtors" || activeTab === "gifts"
       ? undefined
       : isAiTools
         ? "Доступ учеников и инструменты по вкладкам"
-        : "Unique Vocal Studio — управление";
+        : activeTab === "logs"
+          ? "Входы в кабинет и ошибки"
+          : "Unique Vocal Studio — управление";
 
   return (
     <DashboardLayout
@@ -198,6 +209,7 @@ export default function AdminDashboardClient() {
             {activeTab === "students" && <StudentsTable />}
             {activeTab === "schedule" && <ScheduleGrid />}
             {activeTab === "notifications" && <NotificationForm />}
+            {activeTab === "logs" && <AdminLogsPanel />}
             {activeTab === "content" && <ContentManager />}
             {activeTab === "access" && (
               <div className="space-y-6">

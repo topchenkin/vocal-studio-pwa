@@ -150,7 +150,7 @@ function noteConnectFailure(url: string, error: unknown) {
   void import("./client-log")
     .then((mod) => {
       mod.logClientEvent({
-        kind: "connect",
+        kind: "error",
         name: "fetch_fail",
         detail: { host, status },
       });

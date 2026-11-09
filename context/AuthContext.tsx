@@ -173,7 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       if (unreachable) {
         setReconnecting(true);
-        logClientEvent({ kind: "connect", name: "backend_unreachable" });
+        logClientEvent({ kind: "error", name: "backend_unreachable" });
         const kept = profileRef.current ?? readCachedProfile();
         if (kept) setProfile(kept);
         else if (!quiet) {
@@ -246,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setReconnecting(true);
         } else {
           setBackendError(SUPABASE_UNREACHABLE_RU);
-          logClientEvent({ kind: "connect", name: "backend_unreachable" });
+          logClientEvent({ kind: "error", name: "backend_unreachable" });
         }
         setLoading(false);
       }
@@ -389,6 +389,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           await loadProfile(data.user);
+          logClientEvent({ kind: "login", name: "sign_up" });
         }
 
         setBackendError(null);
@@ -452,6 +453,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         await loadProfile(data.user);
         setBackendError(null);
+        logClientEvent({ kind: "login", name: "sign_in" });
         return { error: null };
       } catch (error) {
         const message = mapBackendError(error);

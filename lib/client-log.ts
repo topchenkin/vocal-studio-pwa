@@ -1,7 +1,7 @@
 import { APP_RELEASE } from "@/lib/app-release";
 import { supabase } from "@/lib/supabase";
 
-export type ClientLogKind = "screen" | "action" | "error" | "connect";
+export type ClientLogKind = "login" | "error";
 
 export type ClientLogDetail = Record<
   string,
@@ -21,12 +21,9 @@ const queue: QueuedEvent[] = [];
 const sentAt: number[] = [];
 
 let flushing = false;
-let lastScreen = "";
-let lastScreenAt = 0;
-let lastConnectKey = "";
-let lastConnectAt = 0;
-let lastActionKey = "";
-let lastActionAt = 0;
+let lastErrorKey = "";
+let lastErrorAt = 0;
+let lastLoginAt = 0;
 
 function clip(value: string, max = 180): string {
   return value.replace(/\s+/g, " ").trim().slice(0, max);
@@ -73,37 +70,38 @@ function underRateLimit(): boolean {
   return sentAt.length < MAX_PER_MIN;
 }
 
+function asKind(kind: string): ClientLogKind | null {
+  if (kind === "login" || kind === "error") return kind;
+  if (kind === "connect") return "error";
+  return null;
+}
+
 export function logClientEvent(input: {
-  kind: ClientLogKind;
+  kind: ClientLogKind | "connect";
   name: string;
   path?: string;
   detail?: ClientLogDetail;
 }): void {
   if (typeof window === "undefined") return;
+  const kind = asKind(input.kind);
+  if (!kind) return;
   const name = clip(input.name, 80);
   if (!name) return;
 
   const now = Date.now();
-  if (input.kind === "screen") {
-    if (name === lastScreen && now - lastScreenAt < 2_000) return;
-    lastScreen = name;
-    lastScreenAt = now;
-  }
-  if (input.kind === "connect") {
+  if (kind === "error") {
     const key = `${name}:${JSON.stringify(input.detail ?? {})}`;
-    if (key === lastConnectKey && now - lastConnectAt < 15_000) return;
-    lastConnectKey = key;
-    lastConnectAt = now;
+    if (key === lastErrorKey && now - lastErrorAt < 8_000) return;
+    lastErrorKey = key;
+    lastErrorAt = now;
   }
-  if (input.kind === "action") {
-    const key = `${name}:${input.path ?? ""}`;
-    if (key === lastActionKey && now - lastActionAt < 1_200) return;
-    lastActionKey = key;
-    lastActionAt = now;
+  if (kind === "login") {
+    if (now - lastLoginAt < 4_000) return;
+    lastLoginAt = now;
   }
 
   queue.push({
-    kind: input.kind,
+    kind,
     name,
     path: safePath(input.path),
     detail: cleanDetail(input.detail),
@@ -145,7 +143,7 @@ export async function flushClientLog(): Promise<void> {
       }
     }
   } catch {
-    // Keep the queue; the next screen or reconnect will retry.
+    // Keep the queue; the next login or error will retry.
   } finally {
     flushing = false;
   }

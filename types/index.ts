@@ -944,7 +944,7 @@ export interface Database {
           id: string;
           user_id: string;
           created_at: string;
-          kind: "screen" | "action" | "error" | "connect";
+          kind: "login" | "error" | "screen" | "action" | "connect";
           name: string;
           path: string;
           detail: Record<string, string | number | boolean | null>;
