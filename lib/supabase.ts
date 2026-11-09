@@ -130,6 +130,34 @@ function callerAborted(signal?: AbortSignal): boolean {
   return Boolean(signal?.aborted);
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function noteConnectFailure(url: string, error: unknown) {
+  if (typeof window === "undefined") return;
+  if (/log_client_event/i.test(url)) return;
+  let host = "";
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = "";
+  }
+  const status = error instanceof Error ? error.message.slice(0, 80) : "fail";
+  void import("./client-log")
+    .then((mod) => {
+      mod.logClientEvent({
+        kind: "connect",
+        name: "fetch_fail",
+        detail: { host, status },
+      });
+    })
+    .catch(() => undefined);
+}
+
 /**
  * iOS Safari often ignores AbortController while a TLS handshake is stuck
  * (VPN on/off). Reject on a timer even if fetch() never settles.
@@ -416,14 +444,21 @@ async function fetchOneThenOther(
     return response;
   } catch (error) {
     if (callerAborted(callerSignal)) throw error;
-    const response = await fetchKnown(
-      secondUrl,
-      init,
-      timeoutFor(secondUrl),
-      callerSignal
-    );
-    rememberRoute(firstRoute === "direct" ? "proxy" : "direct");
-    return response;
+    try {
+      const response = await fetchKnown(
+        secondUrl,
+        init,
+        timeoutFor(secondUrl),
+        callerSignal
+      );
+      rememberRoute(firstRoute === "direct" ? "proxy" : "direct");
+      return response;
+    } catch (second) {
+      if (!callerAborted(callerSignal) && !isAbortError(second)) {
+        noteConnectFailure(secondUrl, second);
+      }
+      throw second;
+    }
   }
 }
 
@@ -451,7 +486,14 @@ async function fetchWithFallback(
   const method = String(requestInit.method || "GET").toUpperCase();
 
   if (!canFallback) {
-    return fetchOnce(url, requestInit, timeoutFor(url), callerSignal);
+    try {
+      return await fetchOnce(url, requestInit, timeoutFor(url), callerSignal);
+    } catch (error) {
+      if (!callerAborted(callerSignal) && !isAbortError(error)) {
+        noteConnectFailure(url, error);
+      }
+      throw error;
+    }
   }
 
   if (callerAborted(callerSignal)) {

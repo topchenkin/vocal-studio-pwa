@@ -3,6 +3,7 @@ import {
   cancelArmedIosCapture,
   holdIosCapture,
 } from "@/lib/ios-audio-session";
+import { logClientEvent } from "@/lib/client-log";
 
 /**
  * Shared mic graph helpers for singing analysis (tuner + star-double).
@@ -53,6 +54,11 @@ export function singingInputGainValue(): number {
 export function mapMicError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : "";
   const message = error instanceof Error ? error.message : "";
+  logClientEvent({
+    kind: "error",
+    name: "mic",
+    detail: { code: name || "Error" },
+  });
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return "Браузер не дал доступ к микрофону. Разрешите микрофон для uniquevocal.ru и нажмите ещё раз.";
   }

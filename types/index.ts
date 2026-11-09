@@ -939,6 +939,22 @@ export interface Database {
         Update: Partial<Omit<TeacherCardRow, "id">>;
         Relationships: [];
       };
+      client_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          created_at: string;
+          kind: "screen" | "action" | "error" | "connect";
+          name: string;
+          path: string;
+          detail: Record<string, string | number | boolean | null>;
+          release: string;
+          ua: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -953,6 +969,17 @@ export interface Database {
       log_practice_seconds: {
         Args: { p_kind: string; p_seconds: number };
         Returns: Record<string, unknown>;
+      };
+      log_client_event: {
+        Args: {
+          p_kind: string;
+          p_name: string;
+          p_path?: string;
+          p_detail?: Record<string, string | number | boolean | null>;
+          p_release?: string;
+          p_ua?: string;
+        };
+        Returns: undefined;
       };
       student_cabinet_progress: {
         Args: Record<string, never>;

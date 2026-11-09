@@ -9,7 +9,7 @@ export const LEGAL = {
   status:
     "физическое лицо, применяющее специальный налоговый режим «Налог на профессиональный доход» (самозанятый)",
   offerDate: "6 ноября 2026 г.",
-  privacyDate: "6 ноября 2026 г.",
+  privacyDate: "9 ноября 2026 г.",
   offerPath: "/oferta",
   privacyPath: "/privacy",
   uslugiPath: "/uslugi",

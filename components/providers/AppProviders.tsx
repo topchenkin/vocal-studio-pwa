@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 import { AppDataProvider } from "@/context/AppDataContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import ClientActivityLogger from "@/components/pwa/ClientActivityLogger";
 import IosAudioSession from "@/components/pwa/IosAudioSession";
 import PullToRefresh from "@/components/pwa/PullToRefresh";
 import RegisterServiceWorker from "@/components/pwa/RegisterServiceWorker";
@@ -53,6 +54,7 @@ export default function AppProviders({
       <RegisterServiceWorker />
       <AuthProvider>
         <IosAudioSession />
+        <ClientActivityLogger />
         <AppDataProvider>
           <RouteStatusChip />
           <XpToastStack />

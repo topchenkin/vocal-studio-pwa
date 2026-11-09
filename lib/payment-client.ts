@@ -1,3 +1,4 @@
+import { logClientEvent } from "@/lib/client-log";
 import { supabase } from "@/lib/supabase";
 import {
   PAYMENT_API_BASE,
@@ -50,6 +51,11 @@ async function postPayment(path: string, body: unknown) {
   }
 
   if (!response.ok || !payload.paymentUrl) {
+    logClientEvent({
+      kind: "error",
+      name: "payment_init",
+      detail: { status: response.status },
+    });
     throw new Error(payload.error || "Не удалось открыть оплату");
   }
 

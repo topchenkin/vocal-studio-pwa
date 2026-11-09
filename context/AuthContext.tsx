@@ -30,6 +30,7 @@ import {
   SUPABASE_UNREACHABLE_RU,
 } from "@/lib/supabase-errors";
 import { effectiveAppTier } from "@/lib/constants";
+import { logClientEvent } from "@/lib/client-log";
 import type {
   AppSubscriptionTier,
   StudentProfile,
@@ -172,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       if (unreachable) {
         setReconnecting(true);
+        logClientEvent({ kind: "connect", name: "backend_unreachable" });
         const kept = profileRef.current ?? readCachedProfile();
         if (kept) setProfile(kept);
         else if (!quiet) {
@@ -244,6 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setReconnecting(true);
         } else {
           setBackendError(SUPABASE_UNREACHABLE_RU);
+          logClientEvent({ kind: "connect", name: "backend_unreachable" });
         }
         setLoading(false);
       }
@@ -414,7 +417,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           password,
         });
 
-        if (error) return { error: mapBackendError(error) };
+        if (error) {
+          logClientEvent({
+            kind: "error",
+            name: "sign_in",
+            detail: { code: error.code || "auth" },
+          });
+          return { error: mapBackendError(error) };
+        }
 
         const { data: signedProfile, error: profileError } = await supabase
           .from("profiles")

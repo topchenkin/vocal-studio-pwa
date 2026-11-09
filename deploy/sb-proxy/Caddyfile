@@ -18,7 +18,19 @@
 	}
 }
 
+# Access logs without cookies / bearer tokens.
+(access_json) {
+	log {
+		format filter {
+			wrap json
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
+}
+
 (site) {
+	import access_json
 	header Alt-Svc "clear"
 	header Permissions-Policy "microphone=(self), camera=(self)"
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -142,6 +154,7 @@ www.uniquevocal.ru, uniquevocal.ru {
 
 sb.uniquevocal.ru {
 	import tls12
+	import access_json
 	header Alt-Svc "clear"
 	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	header X-Content-Type-Options "nosniff"
