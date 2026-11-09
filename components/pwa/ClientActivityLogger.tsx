@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { flushClientLog, logClientEvent } from "@/lib/client-log";
+import {
+  flushClientLog,
+  logClientEvent,
+  shouldSkipLoginLog,
+} from "@/lib/client-log";
+
+const SESSION_HEARTBEAT_MS = 5 * 60 * 1000;
 
 function isNoisyError(message: string) {
   return (
@@ -34,11 +41,60 @@ function drainBootLogs() {
 }
 
 export default function ClientActivityLogger() {
-  const { isAuthenticated } = useAuth();
+  const pathname = usePathname() || "/";
+  const { isAuthenticated, isAdmin, profile, user } = useAuth();
+  const skipLogin = shouldSkipLoginLog(
+    user?.email ?? profile?.email,
+    isAdmin ? "admin" : profile?.role
+  );
 
   useEffect(() => {
     if (isAuthenticated) void flushClientLog();
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || skipLogin) return;
+    logClientEvent({
+      kind: "login",
+      name: "session",
+      path: pathname,
+    });
+  }, [isAuthenticated, pathname, skipLogin]);
+
+  useEffect(() => {
+    if (!isAuthenticated || skipLogin) return;
+
+    const ping = () => {
+      if (document.visibilityState !== "visible") return;
+      logClientEvent({
+        kind: "login",
+        name: "session",
+        path: pathname,
+      });
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") ping();
+      else void flushClientLog();
+    };
+    const onOnline = () => {
+      ping();
+      void flushClientLog();
+    };
+
+    ping();
+    const timer = window.setInterval(ping, SESSION_HEARTBEAT_MS);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("focus", ping);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("focus", ping);
+    };
+  }, [isAuthenticated, pathname, skipLogin]);
 
   useEffect(() => {
     drainBootLogs();
@@ -79,23 +135,12 @@ export default function ClientActivityLogger() {
       });
     };
 
-    const onOnline = () => {
-      void flushClientLog();
-    };
-    const onHidden = () => {
-      if (document.visibilityState === "hidden") void flushClientLog();
-    };
-
     window.addEventListener("error", onError, true);
     window.addEventListener("unhandledrejection", onReject);
-    window.addEventListener("online", onOnline);
-    document.addEventListener("visibilitychange", onHidden);
 
     return () => {
       window.removeEventListener("error", onError, true);
       window.removeEventListener("unhandledrejection", onReject);
-      window.removeEventListener("online", onOnline);
-      document.removeEventListener("visibilitychange", onHidden);
     };
   }, []);
 

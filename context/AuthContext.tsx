@@ -30,7 +30,7 @@ import {
   SUPABASE_UNREACHABLE_RU,
 } from "@/lib/supabase-errors";
 import { effectiveAppTier } from "@/lib/constants";
-import { logClientEvent } from "@/lib/client-log";
+import { logClientEvent, shouldSkipLoginLog } from "@/lib/client-log";
 import type {
   AppSubscriptionTier,
   StudentProfile,
@@ -389,7 +389,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           await loadProfile(data.user);
-          logClientEvent({ kind: "login", name: "sign_up" });
+          if (!shouldSkipLoginLog(data.user.email)) {
+            logClientEvent({ kind: "login", name: "sign_up" });
+          }
         }
 
         setBackendError(null);
@@ -453,7 +455,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         await loadProfile(data.user);
         setBackendError(null);
-        if (signedProfile?.role !== "admin") {
+        if (!shouldSkipLoginLog(data.user.email, signedProfile?.role)) {
           logClientEvent({ kind: "login", name: "sign_in" });
         }
         return { error: null };

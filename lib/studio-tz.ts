@@ -85,3 +85,24 @@ export function formatStudioDateTime(value: Date | string) {
     minute: "2-digit",
   });
 }
+
+/** First–last activity in the studio zone, e.g. «9 ноября, 18:00–18:59». */
+export function formatStudioTimeRange(
+  start: Date | string,
+  end?: Date | string | null
+) {
+  const from = formatStudioDateTime(start);
+  if (end == null || end === "") return from;
+  const startDate = start instanceof Date ? start : new Date(start);
+  const endDate = end instanceof Date ? end : new Date(end);
+  if (Number.isNaN(endDate.getTime())) return from;
+  if (endDate.getTime() - startDate.getTime() < 60_000) return from;
+  const endClock = formatStudioDate(endDate, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (studioDateKey(startDate) === studioDateKey(endDate)) {
+    return `${from}–${endClock}`;
+  }
+  return `${from} – ${formatStudioDateTime(endDate)}`;
+}

@@ -7,7 +7,7 @@ import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/context/AuthContext";
 import { adminStudentName } from "@/lib/admin-student-name";
 import { realtimeTopic } from "@/lib/client-instance";
-import { formatStudioDateTime } from "@/lib/studio-tz";
+import { formatStudioDateTime, formatStudioTimeRange } from "@/lib/studio-tz";
 import { supabase } from "@/lib/supabase";
 
 type LogKind = "login" | "error";
@@ -39,8 +39,8 @@ const DEMO: LogRow[] = [
     kind: "login",
     name: "sign_in",
     path: "/",
-    detail: {},
-    release: "147",
+    detail: { last_at: new Date(Date.now() + 42 * 60 * 1000).toISOString() },
+    release: "149",
     ua: "Chrome",
     profiles: {
       full_name: "Анна Волкова",
@@ -94,6 +94,20 @@ function eventDetail(row: LogRow) {
   return String(message);
 }
 
+function hideLoginRow(row: LogRow) {
+  if (row.kind !== "login") return false;
+  if (row.profiles?.role === "admin") return true;
+  return (row.profiles?.email || "").trim().toLowerCase() === "yangta4@gmail.com";
+}
+
+function loginWhen(row: LogRow) {
+  const last = row.detail?.last_at;
+  return formatStudioTimeRange(
+    row.created_at,
+    typeof last === "string" ? last : undefined
+  );
+}
+
 export default function AdminLogsPanel() {
   const { isMockAdmin } = useAuth();
   const searchParams = useSearchParams();
@@ -126,11 +140,7 @@ export default function AdminLogsPanel() {
       return;
     }
     setError("");
-    setRows(
-      ((data as unknown as LogRow[]) ?? []).filter(
-        (row) => !(row.kind === "login" && row.profiles?.role === "admin")
-      )
-    );
+    setRows(((data as unknown as LogRow[]) ?? []).filter((row) => !hideLoginRow(row)));
     setLoading(false);
   }, [isMockAdmin]);
 
@@ -144,7 +154,7 @@ export default function AdminLogsPanel() {
       .channel(realtimeTopic("admin-client-events"))
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "client_events" },
+        { event: "*", schema: "public", table: "client_events" },
         () => {
           void load();
         }
@@ -172,8 +182,8 @@ export default function AdminLogsPanel() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-studio-muted">
-        Только входы в кабинет и ошибки. Если ученик ловит ошибку, приходит
-        уведомление.
+        Один вход на час по Екатеринбургу: первое и последнее действие. Ошибки
+        пишутся отдельно и приходят уведомлением.
       </p>
       <div className="flex flex-wrap gap-2">
         {filters.map((item) => (
@@ -234,9 +244,10 @@ export default function AdminLogsPanel() {
                       <span className="text-studio-muted"> · {eventTitle(row)}</span>
                     </p>
                     <p className="mt-1 text-xs text-studio-muted">
-                      {formatStudioDateTime(row.created_at)}
-                      {row.path ? ` · ${row.path}` : ""}
-                      {row.release ? ` · ${row.release}` : ""}
+                      {isError
+                        ? formatStudioDateTime(row.created_at)
+                        : loginWhen(row)}
+                      {isError && row.path ? ` · ${row.path}` : ""}
                     </p>
                     {extra ? (
                       <p className="mt-1 break-words text-xs text-studio-muted">

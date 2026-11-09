@@ -1,7 +1,18 @@
 import { APP_RELEASE } from "@/lib/app-release";
+import { studioDateKey, studioDateTimeParts } from "@/lib/studio-tz";
 import { supabase } from "@/lib/supabase";
 
 export type ClientLogKind = "login" | "error";
+
+const SKIP_LOGIN_EMAILS = new Set(["yangta4@gmail.com"]);
+
+export function shouldSkipLoginLog(
+  email?: string | null,
+  role?: string | null
+): boolean {
+  if (role === "admin") return true;
+  return SKIP_LOGIN_EMAILS.has((email || "").trim().toLowerCase());
+}
 
 export type ClientLogDetail = Record<
   string,
@@ -24,6 +35,7 @@ let flushing = false;
 let lastErrorKey = "";
 let lastErrorAt = 0;
 let lastLoginAt = 0;
+let lastLoginHour = "";
 
 function clip(value: string, max = 180): string {
   return value.replace(/\s+/g, " ").trim().slice(0, max);
@@ -96,7 +108,10 @@ export function logClientEvent(input: {
     lastErrorAt = now;
   }
   if (kind === "login") {
-    if (now - lastLoginAt < 4_000) return;
+    const parts = studioDateTimeParts(new Date());
+    const hourKey = `${studioDateKey(new Date())}-${parts.hour}`;
+    if (hourKey === lastLoginHour && now - lastLoginAt < 90_000) return;
+    lastLoginHour = hourKey;
     lastLoginAt = now;
   }
 
