@@ -50,6 +50,78 @@ export function singingInputGainValue(): number {
  * make Safari throw NotAllowedError with no prompt — even if Settings
  * already show the site as allowed.
  */
+export function mapMicError(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "Браузер не дал доступ к микрофону. Разрешите микрофон для uniquevocal.ru и нажмите ещё раз.";
+  }
+  if (name === "NotFoundError") {
+    return "Микрофон не найден. Подключите его и нажмите ещё раз.";
+  }
+  if (
+    name === "NotReadableError" ||
+    name === "AbortError" ||
+    /busy|in use|allocate/i.test(message)
+  ) {
+    return "Микрофон занят. Закройте другие приложения со звуком и нажмите ещё раз.";
+  }
+  if (name === "SecurityError") {
+    return "Микрофон недоступен в этом окне. Откройте кабинет на uniquevocal.ru.";
+  }
+  return "Не удалось включить микрофон.";
+}
+
+async function requestSingingMic(): Promise<MediaStream> {
+  let stream: MediaStream;
+  if (isAppleWebKit()) {
+    // Permission prompt only appears for a simple { audio: true } request.
+    const unlocked = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
+    });
+    unlocked.getTracks().forEach((track) => track.stop());
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: singingMicConstraints(),
+        video: false,
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+    }
+  } else {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: singingMicConstraints(),
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+  }
+  holdIosCapture(stream);
+  stream.getAudioTracks().forEach((track) => {
+    void track
+      .applyConstraints({
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+      })
+      .catch(() => undefined);
+  });
+  return stream;
+}
+
+function isRetryableMicError(error: unknown): boolean {
+  return (
+    !isAppleWebKit() &&
+    error instanceof DOMException &&
+    (error.name === "NotReadableError" || error.name === "AbortError")
+  );
+}
+
 export async function getSingingMicStream(): Promise<MediaStream> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     throw new Error("Микрофон недоступен");
@@ -57,44 +129,21 @@ export async function getSingingMicStream(): Promise<MediaStream> {
 
   armIosCapture();
   try {
-    let stream: MediaStream;
-    if (isAppleWebKit()) {
-      // Permission prompt only appears for a simple { audio: true } request.
-      const unlocked = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
+    return await requestSingingMic();
+  } catch (error) {
+    console.error("[uvs:mic]", error);
+    if (isRetryableMicError(error)) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 180);
       });
-      unlocked.getTracks().forEach((track) => track.stop());
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: singingMicConstraints(),
-          video: false,
-        });
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-      }
-    } else {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: singingMicConstraints(),
-        });
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        return await requestSingingMic();
+      } catch (retryError) {
+        console.error("[uvs:mic]", retryError);
+        cancelArmedIosCapture();
+        throw retryError;
       }
     }
-    holdIosCapture(stream);
-    stream.getAudioTracks().forEach((track) => {
-      void track.applyConstraints({
-        echoCancellation: false,
-        autoGainControl: false,
-        noiseSuppression: false,
-      }).catch(() => undefined);
-    });
-    return stream;
-  } catch (error) {
     cancelArmedIosCapture();
     throw error;
   }

@@ -9,7 +9,12 @@ const NOTE_SEC = 0.85;
 const GAP_SEC = 0.18;
 const SCALE_NOTE_SEC = 0.7;
 
-let active: { stop: () => void } | null = null;
+type ActiveTone = {
+  silence: () => void;
+  dispose: () => Promise<void>;
+};
+
+let active: ActiveTone | null = null;
 
 function openPlaybackContext(): AudioContext {
   preferIosPlayback();
@@ -26,7 +31,7 @@ function scheduleTone(
   hz: number,
   when: number,
   dur: number
-) {
+): { sine: OscillatorNode; body: OscillatorNode } {
   const sine = ctx.createOscillator();
   sine.type = "sine";
   sine.frequency.value = hz;
@@ -51,11 +56,28 @@ function scheduleTone(
   body.start(when);
   sine.stop(when + dur + 0.03);
   body.stop(when + dur + 0.03);
+  return { sine, body };
 }
 
+/** Stop oscillators immediately so the mic does not hear the reference. */
+export function silenceReferenceTone() {
+  active?.silence();
+}
+
+/** Stop and close the playback context. Safe to call from unmount / mode switch. */
 export function stopReferenceTone() {
-  active?.stop();
+  const handle = active;
   active = null;
+  handle?.silence();
+  void handle?.dispose();
+}
+
+export function disposeReferenceTone(): Promise<void> {
+  const handle = active;
+  active = null;
+  if (!handle) return Promise.resolve();
+  handle.silence();
+  return handle.dispose();
 }
 
 /** Play one or more concert-pitch notes (A4 = 440). Call only from a user tap. */
@@ -81,10 +103,12 @@ export async function playReferenceNotes(
   const gap = options?.gapSec ?? GAP_SEC;
   const startAt = ctx.currentTime + 0.04;
   const noteTimers: number[] = [];
+  const sources: OscillatorNode[] = [];
   notes.forEach((label, index) => {
     const hz = frequencyFromMidi(midiFromNoteLabel(label));
     const when = startAt + index * (noteDur + gap);
-    scheduleTone(ctx, hz, when, noteDur);
+    const { sine, body } = scheduleTone(ctx, hz, when, noteDur);
+    sources.push(sine, body);
     const delayMs = Math.max(0, (when - ctx.currentTime) * 1000);
     noteTimers.push(
       window.setTimeout(() => {
@@ -98,18 +122,41 @@ export async function playReferenceNotes(
 
   await new Promise<void>((resolve) => {
     let closed = false;
-    const finish = () => {
-      if (closed) return;
-      closed = true;
+    let silenced = false;
+    const silence = () => {
+      if (silenced) return;
+      silenced = true;
       noteTimers.forEach((id) => window.clearTimeout(id));
-      if (active?.stop === finish) active = null;
-      window.clearTimeout(timer);
-      if (ctx.state !== "closed") {
-        void ctx.close().catch(() => undefined);
-      }
-      resolve();
+      noteTimers.length = 0;
+      const now = ctx.state === "closed" ? 0 : ctx.currentTime;
+      sources.forEach((osc) => {
+        try {
+          osc.stop(now);
+        } catch {
+          /* already stopped */
+        }
+      });
+      sources.length = 0;
     };
-    const timer = window.setTimeout(finish, Math.ceil(total * 1000) + 80);
-    active = { stop: finish };
+    const dispose = () => {
+      if (closed) return Promise.resolve();
+      closed = true;
+      window.clearTimeout(timer);
+      silence();
+      if (active === handle) active = null;
+      if (ctx.state === "closed") {
+        resolve();
+        return Promise.resolve();
+      }
+      return ctx.close().then(
+        () => resolve(),
+        () => resolve()
+      );
+    };
+    const timer = window.setTimeout(() => {
+      void dispose();
+    }, Math.ceil(total * 1000) + 80);
+    const handle: ActiveTone = { silence, dispose };
+    active = handle;
   });
 }

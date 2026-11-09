@@ -45,7 +45,11 @@ import {
 import { awardCatXp, submitVocalTestForReview } from "@/lib/cat-xp";
 import { useVocalAnalyzer } from "@/hooks/useVocalAnalyzer";
 import { usePracticeHeartbeat } from "@/hooks/usePracticeHeartbeat";
-import { playReferenceNotes, stopReferenceTone } from "@/lib/reference-tone";
+import {
+  playReferenceNotes,
+  silenceReferenceTone,
+  stopReferenceTone,
+} from "@/lib/reference-tone";
 
 type TuneZone = "flat" | "in-tune" | "sharp" | "silent";
 
@@ -160,7 +164,13 @@ export default function PitchAnalyzer({
   };
 
   const startProfessionalTest = async () => {
-    haltPreview();
+    previewGen.current += 1;
+    previewingRef.current = false;
+    setPreviewing(false);
+    setPreviewNoteIndex(0);
+    // Mute the C–E–G preview but keep its AudioContext until the mic is up.
+    // Closing it first is what made "Начать тест" fail on phones.
+    silenceReferenceTone();
     setSendNote("");
     setSentOk(false);
     setSavedResultId(null);

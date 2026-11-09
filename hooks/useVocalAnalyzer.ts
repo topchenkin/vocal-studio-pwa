@@ -31,9 +31,11 @@ import {
   connectAnalyserToDestination,
   getSingingMicStream,
   isAppleWebKit,
+  mapMicError,
   readAnalyserTimeDomain,
   singingInputGainValue,
 } from "@/lib/mic-audio";
+import { disposeReferenceTone, silenceReferenceTone } from "@/lib/reference-tone";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import { restoreIosPlaybackAfterCapture, preferIosPlayback } from "@/lib/ios-audio-session";
 
@@ -327,11 +329,18 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     if (streamRef.current && audioContextRef.current && analyserRef.current) {
       return;
     }
+    if (streamRef.current || audioContextRef.current) {
+      cleanup();
+    }
     if (typeof window === "undefined") {
       throw new Error("Микрофон недоступен в этом браузере.");
     }
 
+    // Preview AudioContext must not close in the same beat as getUserMedia:
+    // that is the usual "Не удалось запустить тест" after listening to C–E–G.
+    silenceReferenceTone();
     const stream = await getSingingMicStream();
+    void disposeReferenceTone();
     preferIosPlayback();
     streamRef.current = stream;
     const AudioCtx =
@@ -363,14 +372,14 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     setListening(true);
     beginAudioKeepAlive();
     rafRef.current = requestAnimationFrame(tick);
-  }, [tick]);
+  }, [cleanup, tick]);
 
   const startListening = useCallback(async () => {
     setError(null);
     try {
       await ensureAudio();
-    } catch {
-      setError("Не удалось включить микрофон.");
+    } catch (err) {
+      setError(mapMicError(err));
       cleanup();
     }
   }, [ensureAudio, cleanup]);
@@ -381,14 +390,14 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
 
   const startTest = useCallback(
     (durationMs: number) => {
-      return new Promise<VocalTestResult>((resolve, reject) => {
-        setError(null);
-        void (async () => {
-          try {
-            await ensureAudio();
-            if (!analyserRef.current || !audioContextRef.current) {
-              throw new Error("Audio pipeline not ready");
-            }
+      setError(null);
+      return (async () => {
+        try {
+          await ensureAudio();
+          if (!analyserRef.current || !audioContextRef.current) {
+            throw new Error("Audio pipeline not ready");
+          }
+          return await new Promise<VocalTestResult>((resolve, reject) => {
             testFramesRef.current = [];
             testResolveRef.current = resolve;
             testRejectRef.current = reject;
@@ -397,14 +406,17 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
             testingRef.current = true;
             setTesting(true);
             setTestProgress(0);
-          } catch (err) {
-            setError("Не удалось запустить тест.");
-            reject(err instanceof Error ? err : new Error("Failed to start test"));
-          }
-        })();
-      });
+          });
+        } catch (err) {
+          console.error("[uvs:pro-test]", err);
+          const message = mapMicError(err);
+          setError(message);
+          cleanup();
+          throw new Error(message);
+        }
+      })();
     },
-    [ensureAudio]
+    [cleanup, ensureAudio]
   );
 
   return {
