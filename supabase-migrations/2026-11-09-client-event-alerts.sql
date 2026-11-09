@@ -83,6 +83,13 @@ begin
     return;
   end if;
 
+  if v_kind = 'login' and exists (
+    select 1 from public.profiles
+    where id = v_uid and role = 'admin'
+  ) then
+    return;
+  end if;
+
   insert into public.client_events (
     user_id, kind, name, path, detail, release, ua
   ) values (
@@ -158,5 +165,11 @@ begin
     and p.deleted_at is null;
 end;
 $$;
+
+delete from public.client_events e
+using public.profiles p
+where e.user_id = p.id
+  and p.role = 'admin'
+  and e.kind = 'login';
 
 notify pgrst, 'reload schema';

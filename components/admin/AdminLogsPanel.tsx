@@ -27,6 +27,7 @@ type LogRow = {
     full_name: string | null;
     email: string | null;
     admin_display_name: string | null;
+    role?: string | null;
   } | null;
 };
 
@@ -112,7 +113,7 @@ export default function AdminLogsPanel() {
     const { data, error: loadError } = await supabase
       .from("client_events")
       .select(
-        "id, user_id, created_at, kind, name, path, detail, release, ua, profiles!user_id(full_name, email, admin_display_name)"
+        "id, user_id, created_at, kind, name, path, detail, release, ua, profiles!user_id(full_name, email, admin_display_name, role)"
       )
       .in("kind", ["login", "error"])
       .order("created_at", { ascending: false })
@@ -125,7 +126,11 @@ export default function AdminLogsPanel() {
       return;
     }
     setError("");
-    setRows((data as unknown as LogRow[]) ?? []);
+    setRows(
+      ((data as unknown as LogRow[]) ?? []).filter(
+        (row) => !(row.kind === "login" && row.profiles?.role === "admin")
+      )
+    );
     setLoading(false);
   }, [isMockAdmin]);
 

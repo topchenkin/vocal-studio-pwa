@@ -453,7 +453,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         await loadProfile(data.user);
         setBackendError(null);
-        logClientEvent({ kind: "login", name: "sign_in" });
+        if (signedProfile?.role !== "admin") {
+          logClientEvent({ kind: "login", name: "sign_in" });
+        }
         return { error: null };
       } catch (error) {
         const message = mapBackendError(error);
