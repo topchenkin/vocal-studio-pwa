@@ -136,10 +136,12 @@ const BOOT_SCRIPT = `(function(){
     var el=e.target;
     if(!el||el.tagName!=="SCRIPT"||!el.src)return;
     if(el.src.indexOf("/_next/")===-1&&el.src.indexOf("/worker-")===-1&&el.src.indexOf("/sw.js")===-1)return;
+    if(document.documentElement.getAttribute("data-uvs-busting"))return;
     log("script "+el.src);
     recover();
   },true);
   window.addEventListener("unhandledrejection",function(e){
+    if(document.documentElement.getAttribute("data-uvs-busting"))return;
     log(e&&e.reason?e.reason:"unhandledrejection");
   });
   setTimeout(function(){

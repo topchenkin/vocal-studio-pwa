@@ -15,7 +15,8 @@ function isNoisyError(message: string) {
   return (
     /resizeobserver|script error\.?$/i.test(message) ||
     /chrome-extension:|moz-extension:|safari-extension:/i.test(message) ||
-    message.includes("log_client_event")
+    message.includes("log_client_event") ||
+    /script https?:\/\/\S+\/(_next\/|worker-|sw\.js)/i.test(message)
   );
 }
 

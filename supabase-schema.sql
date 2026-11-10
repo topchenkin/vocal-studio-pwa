@@ -3669,7 +3669,8 @@ begin
     where created_at < now() - interval '30 days';
   end if;
 
-  if v_name = 'resource' then
+  -- boot rows are flushed after a successful recover; do not page the teacher.
+  if v_name in ('resource', 'boot') then
     return;
   end if;
 
