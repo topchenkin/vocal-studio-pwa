@@ -379,8 +379,10 @@ export function useVocalAnalyzer(): UseVocalAnalyzerApi {
     try {
       await ensureAudio();
     } catch (err) {
-      setError(mapMicError(err));
+      const message = mapMicError(err);
+      setError(message);
       cleanup();
+      throw new Error(message);
     }
   }, [ensureAudio, cleanup]);
 

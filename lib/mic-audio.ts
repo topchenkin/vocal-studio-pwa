@@ -53,11 +53,34 @@ export function singingInputGainValue(): number {
  * first getUserMedia make Safari and Chrome Android throw NotAllowedError
  * with no prompt — even if Settings already show the site as allowed.
  */
-function isStandaloneApp(): boolean {
+export function isStandaloneApp(): boolean {
   if (typeof window === "undefined") return false;
   const nav = navigator as Navigator & { standalone?: boolean };
   if (nav.standalone) return true;
   return window.matchMedia("(display-mode: standalone)").matches;
+}
+
+export function isAndroid(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android/i.test(navigator.userAgent);
+}
+
+/** Chrome Android WebAPK never shows a mic prompt; grant has to happen in a tab. */
+export function openSiteInAndroidChrome(): void {
+  if (typeof window === "undefined") return;
+  const { host, pathname, search, hash, href } = window.location;
+  const intent =
+    `intent://${host}${pathname}${search}${hash}` +
+    `#Intent;scheme=https;package=com.android.chrome;` +
+    `S.browser_fallback_url=${encodeURIComponent(href)};end`;
+  window.location.assign(intent);
+}
+
+export function isMicDeniedMessage(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return /микрофон запрещ|не дал доступ к микрофону|разрешите микрофон|Permission denied|NotAllowed|PermissionDenied/i.test(
+    text
+  );
 }
 
 export function mapMicError(error: unknown): string {
@@ -73,6 +96,9 @@ export function mapMicError(error: unknown): string {
     },
   });
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    if (isStandaloneApp() && isAndroid()) {
+      return "Микрофон запрещён в приложении. На Android разрешение нужно дать в Chrome — кнопка ниже откроет сайт в браузере.";
+    }
     if (isStandaloneApp()) {
       return "Микрофон запрещён для приложения. В настройках телефона откройте Unique Vocal Studio → Разрешения → Микрофон и нажмите ещё раз.";
     }

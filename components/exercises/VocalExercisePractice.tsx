@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Headphones, Mic, RotateCcw, Send, Square, Waves } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { MicErrorBlock } from "@/components/audio/MicDeniedHelp";
 import { useAuth } from "@/context/AuthContext";
 import { awardCatXp } from "@/lib/cat-xp";
 import { logPracticeSeconds } from "@/lib/practice-log";
@@ -536,7 +537,10 @@ export default function VocalExercisePractice({
           </div>
         )}
 
-        {error && <p className="mt-3 break-words text-sm text-red-300">{error}</p>}
+        <MicErrorBlock
+          error={error || analyzer.error}
+          onRetry={() => void startLive()}
+        />
         <p className="mt-4 flex items-start gap-2 text-[11px] text-studio-muted">
           <Headphones className="h-4 w-4 shrink-0" />
           <span>

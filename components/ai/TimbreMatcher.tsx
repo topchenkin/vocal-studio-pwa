@@ -35,7 +35,8 @@ import {
   startContextPcmCapture,
   type PcmCaptureSession,
 } from "@/lib/pcm-capture";
-import { getSingingMicStream } from "@/lib/mic-audio";
+import { getSingingMicStream, mapMicError } from "@/lib/mic-audio";
+import { MicErrorBlock } from "@/components/audio/MicDeniedHelp";
 import { preferIosPlayback, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 
 const RECORD_MS = 10_000;
@@ -314,9 +315,9 @@ export default function TimbreMatcher({ locked = false }: Props) {
       }, RECORD_MS);
       timersRef.current = [progressTimer, finishTimer];
       endCaptureRef.current = endCapture;
-    } catch {
+    } catch (caught) {
       if (isStale(analysisId)) return;
-      setError("Не удалось включить микрофон");
+      setError(mapMicError(caught));
       await cleanupAudio();
       busyRef.current = false;
       setStage("idle");
@@ -529,7 +530,7 @@ export default function TimbreMatcher({ locked = false }: Props) {
         </div>
       )}
 
-      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+      <MicErrorBlock error={error} onRetry={() => void start()} />
     </section>
   );
 }

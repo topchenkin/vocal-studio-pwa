@@ -15,6 +15,7 @@ import {
   Waves,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { MicErrorBlock } from "@/components/audio/MicDeniedHelp";
 import Modal from "@/components/ui/Modal";
 import { straightDashNodes } from "@/components/ui/StraightDashText";
 import Link from "next/link";
@@ -382,11 +383,14 @@ export default function PitchAnalyzer({
             fullWidth
             size="lg"
             onClick={() => {
-              void analyzer.startListening().then(() => {
-                void awardCatXp("analyzer").then((result) => {
-                  if (result?.awarded) void refreshProfile();
-                });
-              });
+              void analyzer
+                .startListening()
+                .then(() => {
+                  void awardCatXp("analyzer").then((result) => {
+                    if (result?.awarded) void refreshProfile();
+                  });
+                })
+                .catch(() => undefined);
             }}
           >
             <Mic className="h-5 w-5" />
@@ -667,7 +671,23 @@ export default function PitchAnalyzer({
       </div>
       )}
 
-      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+      <MicErrorBlock
+        error={error}
+        onRetry={() => {
+          if (isExam) {
+            void startProfessionalTest();
+            return;
+          }
+          void analyzer
+            .startListening()
+            .then(() => {
+              void awardCatXp("analyzer").then((result) => {
+                if (result?.awarded) void refreshProfile();
+              });
+            })
+            .catch(() => undefined);
+        }}
+      />
 
       <Modal
         open={reportOpen && Boolean(report)}

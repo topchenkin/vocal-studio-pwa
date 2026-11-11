@@ -18,7 +18,8 @@ import Modal from "@/components/ui/Modal";
 import LibraryTrackPicker from "@/components/student/LibraryTrackPicker";
 import { useAuth } from "@/context/AuthContext";
 import { AUDIO_FILE_ACCEPT, isAllowedAudioFile } from "@/lib/file-accept";
-import { getSingingMicStream } from "@/lib/mic-audio";
+import { getSingingMicStream, mapMicError } from "@/lib/mic-audio";
+import { MicErrorBlock } from "@/components/audio/MicDeniedHelp";
 import { beginAudioKeepAlive, endAudioKeepAlive } from "@/lib/audio-keep-alive";
 import { cancelArmedIosCapture, preferIosPlayback, restoreIosPlaybackAfterCapture } from "@/lib/ios-audio-session";
 import { downloadAudioUrl, saveAudioFromUrl } from "@/lib/student-audio";
@@ -336,9 +337,9 @@ export default function VocalFxBox({ locked = false }: Props) {
         setElapsed(sec);
         if (sec >= MAX_RECORD_SEC) stopRecording();
       }, 200);
-    } catch {
+    } catch (caught) {
       cancelArmedIosCapture();
-      setError("Разрешите микрофон в браузере и повторите.");
+      setError(mapMicError(caught));
     }
   };
 
@@ -602,7 +603,7 @@ export default function VocalFxBox({ locked = false }: Props) {
           {fileName || "трек"} · {formatTime(buffer.duration)}
         </p>
       )}
-      {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
+      <MicErrorBlock error={error} onRetry={() => void startRecording()} />
 
       <LibraryTrackPicker
         open={libraryOpen}

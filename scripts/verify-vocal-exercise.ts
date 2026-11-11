@@ -266,6 +266,20 @@ assert.ok(micAudio.includes("echoCancellation: { ideal: false }"));
 assert.ok(micAudio.includes("autoGainControl: { ideal: false }"));
 assert.ok(micAudio.includes("noiseSuppression: { ideal: false }"));
 assert.ok(micAudio.includes("audio: true"));
+assert.ok(micAudio.includes("openSiteInAndroidChrome"));
+assert.ok(micAudio.includes("package=com.android.chrome"));
+assert.ok(practice.includes("MicErrorBlock"));
+assert.ok(practice.includes("error || analyzer.error"));
+const micHelp = readFileSync(
+  path.join(process.cwd(), "components", "audio", "MicDeniedHelp.tsx"),
+  "utf8"
+);
+assert.ok(micHelp.includes("Открыть в Chrome"));
+const analyzerHook = readFileSync(
+  path.join(process.cwd(), "hooks", "useVocalAnalyzer.ts"),
+  "utf8"
+);
+assert.ok(analyzerHook.includes("throw new Error(message)"));
 assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
 
 assert.equal(hzToMidiNote(440), 69);
