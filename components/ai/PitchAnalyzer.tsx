@@ -382,10 +382,11 @@ export default function PitchAnalyzer({
             fullWidth
             size="lg"
             onClick={() => {
-              void awardCatXp("analyzer").then((result) => {
-                if (result?.awarded) void refreshProfile();
+              void analyzer.startListening().then(() => {
+                void awardCatXp("analyzer").then((result) => {
+                  if (result?.awarded) void refreshProfile();
+                });
               });
-              void analyzer.startListening();
             }}
           >
             <Mic className="h-5 w-5" />

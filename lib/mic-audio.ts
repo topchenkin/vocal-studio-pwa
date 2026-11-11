@@ -27,11 +27,13 @@ export function isAppleWebKit(): boolean {
 }
 
 export function singingMicConstraints(): MediaTrackConstraints {
+  // `ideal`, not a bare boolean/`1`: on Chrome Android a mandatory
+  // echoCancellation:false is often reported as NotAllowedError with no prompt.
   return {
-    channelCount: 1,
-    echoCancellation: false,
-    autoGainControl: false,
-    noiseSuppression: false,
+    channelCount: { ideal: 1 },
+    echoCancellation: { ideal: false },
+    autoGainControl: { ideal: false },
+    noiseSuppression: { ideal: false },
   };
 }
 
@@ -47,20 +49,37 @@ export function singingInputGainValue(): number {
 /**
  * Ask for the mic the same way chat does: arm iOS audio session first,
  * request a simple `{ audio: true }` so the OS prompt actually appears,
- * then optionally tighten constraints. Strict singing constraints alone
- * make Safari throw NotAllowedError with no prompt — even if Settings
- * already show the site as allowed.
+ * then tighten with applyConstraints. Strict singing constraints on the
+ * first getUserMedia make Safari and Chrome Android throw NotAllowedError
+ * with no prompt — even if Settings already show the site as allowed.
  */
+function isStandaloneApp(): boolean {
+  if (typeof window === "undefined") return false;
+  const nav = navigator as Navigator & { standalone?: boolean };
+  if (nav.standalone) return true;
+  return window.matchMedia("(display-mode: standalone)").matches;
+}
+
 export function mapMicError(error: unknown): string {
   const name = error instanceof DOMException ? error.name : "";
   const message = error instanceof Error ? error.message : "";
   logClientEvent({
     kind: "error",
     name: "mic",
-    detail: { code: name || "Error" },
+    detail: {
+      code: name || "Error",
+      message: message.slice(0, 80) || null,
+      pwa: isStandaloneApp(),
+    },
   });
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-    return "Браузер не дал доступ к микрофону. Разрешите микрофон для uniquevocal.ru и нажмите ещё раз.";
+    if (isStandaloneApp()) {
+      return "Микрофон запрещён для приложения. В настройках телефона откройте Unique Vocal Studio → Разрешения → Микрофон и нажмите ещё раз.";
+    }
+    if (isAppleWebKit()) {
+      return "Браузер не дал доступ к микрофону. На iPhone: Настройки → Safari → Микрофон, разрешите uniquevocal.ru и нажмите ещё раз.";
+    }
+    return "Браузер не дал доступ к микрофону. Нажмите на замочек у адреса сайта, разрешите микрофон для uniquevocal.ru и нажмите ещё раз.";
   }
   if (name === "NotFoundError") {
     return "Микрофон не найден. Подключите его и нажмите ещё раз.";
@@ -79,50 +98,22 @@ export function mapMicError(error: unknown): string {
 }
 
 async function requestSingingMic(): Promise<MediaStream> {
-  let stream: MediaStream;
-  if (isAppleWebKit()) {
-    // Permission prompt only appears for a simple { audio: true } request.
-    const unlocked = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: false,
-    });
-    unlocked.getTracks().forEach((track) => track.stop());
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: singingMicConstraints(),
-        video: false,
-      });
-    } catch {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      });
-    }
-  } else {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: singingMicConstraints(),
-      });
-    } catch {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    }
-  }
+  // One simple getUserMedia so the OS prompt actually appears. Strict
+  // singing constraints on the first request make Chrome Android (and Safari
+  // if we then stop-and-reopen) throw NotAllowedError with no prompt.
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: false,
+  });
   holdIosCapture(stream);
   stream.getAudioTracks().forEach((track) => {
-    void track
-      .applyConstraints({
-        echoCancellation: false,
-        autoGainControl: false,
-        noiseSuppression: false,
-      })
-      .catch(() => undefined);
+    void track.applyConstraints(singingMicConstraints()).catch(() => undefined);
   });
   return stream;
 }
 
 function isRetryableMicError(error: unknown): boolean {
   return (
-    !isAppleWebKit() &&
     error instanceof DOMException &&
     (error.name === "NotReadableError" || error.name === "AbortError")
   );
@@ -156,11 +147,11 @@ export async function getSingingMicStream(): Promise<MediaStream> {
 }
 
 /**
- * Mixer / overdub mic. One getUserMedia — the singing path's unlock-then-
- * re-open cycle flips Safari between play-and-record and playback and kills
- * monitor audio. Echo cancellation is applied by the caller when speakers
- * are playing previous takes. holdIosCapture immediately returns the session
- * to playback so minusovka never stays on the earpiece.
+ * Mixer / overdub mic. One getUserMedia — do not unlock-then-reopen, that
+ * flips Safari between play-and-record and playback and kills monitor audio.
+ * Echo cancellation is applied by the caller when speakers are playing
+ * previous takes. holdIosCapture immediately returns the session to playback
+ * so minusovka never stays on the earpiece.
  */
 export async function getStudioMicStream(): Promise<MediaStream> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {

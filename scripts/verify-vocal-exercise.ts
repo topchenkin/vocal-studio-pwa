@@ -262,9 +262,10 @@ assert.ok(noteBlocks.includes("HITBOX_TIMING_SLACK_SEC = 0.3"));
 assert.ok(noteBlocks.includes("userNote") || noteBlocks.includes("pitchClassDistance"));
 assert.ok(noteBlocks.includes("finalizeKaraokeScore"));
 const micAudio = readFileSync(path.join(process.cwd(), "lib", "mic-audio.ts"), "utf8");
-assert.ok(micAudio.includes("echoCancellation: false"));
-assert.ok(micAudio.includes("autoGainControl: false"));
-assert.ok(micAudio.includes("noiseSuppression: false"));
+assert.ok(micAudio.includes("echoCancellation: { ideal: false }"));
+assert.ok(micAudio.includes("autoGainControl: { ideal: false }"));
+assert.ok(micAudio.includes("noiseSuppression: { ideal: false }"));
+assert.ok(micAudio.includes("audio: true"));
 assert.ok(editor.includes("эталон вокала") || editor.includes("Эталон вокала"));
 
 assert.equal(hzToMidiNote(440), 69);
