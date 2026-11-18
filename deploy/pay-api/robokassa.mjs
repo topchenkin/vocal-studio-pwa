@@ -195,9 +195,10 @@ export const robokassa = {
       last = { status: "pending", stateCode, resultCode, invoiceNo: invoice };
       // 1 = bad signature for this password; try the other.
       if (resultCode === 1) continue;
-      // 100 = paid; 10 cancelled; 60 refunded.
+      // 100 = paid. 60 = refunded. 10 = user closed the form — they can still
+      // pay the same InvId; do not treat that as a final cancel.
       if (stateCode === 100) last.status = "succeeded";
-      else if (stateCode === 10 || stateCode === 60) last.status = "canceled";
+      else if (stateCode === 60) last.status = "canceled";
       return last;
     }
     return last;

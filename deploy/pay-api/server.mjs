@@ -275,10 +275,22 @@ async function findProdamusTx(data) {
 }
 
 async function markInvoiceFailed(txId) {
+  console.error("[uvs:pay] mark invoice failed", txId);
   await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(txId)}`, {
     method: "PATCH",
     body: JSON.stringify({ status: "failed" }),
   });
+}
+
+async function reopenInvoice(tx) {
+  if (!tx?.id) return tx;
+  if (tx.status === "pending" || tx.status === "confirmed") return tx;
+  console.log("[uvs:pay] reopen invoice", tx.invoice_no, tx.status);
+  await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "pending" }),
+  });
+  return { ...tx, status: "pending" };
 }
 
 async function syncYookassaPayment(tx) {
@@ -333,6 +345,7 @@ async function syncRobokassaPayment(tx) {
   if (payment.status === "succeeded") {
     const outSum = Number(tx.amount_rub || 0);
     if (!(outSum > 0)) throw new Error("missing invoice amount");
+    tx = await reopenInvoice(tx);
     const confirm = await confirmPayment(
       invoiceNo,
       outSum,
@@ -435,7 +448,10 @@ async function handleStatus(req, res) {
   if (tx.status === "confirmed") {
     return json(res, 200, { status: "confirmed", paid: true, invoiceNo });
   }
-  if (tx.status === "failed" || tx.status === "cancelled") {
+  if (
+    (tx.status === "failed" || tx.status === "cancelled") &&
+    tx.provider !== "robokassa"
+  ) {
     return json(res, 200, { status: "failed", paid: false, invoiceNo });
   }
 
@@ -1167,13 +1183,14 @@ async function handleRobokassaResult(req, res) {
     `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider&limit=1`
   );
   const rows = txRes.ok ? await txRes.json() : [];
-  const tx = Array.isArray(rows) ? rows[0] : rows;
+  let tx = Array.isArray(rows) ? rows[0] : rows;
   if (!tx) return json(res, 404, { error: "invoice not found" });
   if (tx.provider !== "robokassa") {
     console.error("[uvs:robokassa] invoice belongs to", tx.provider, invoiceNo);
     return json(res, 400, { error: "wrong provider" });
   }
   if (tx.status === "confirmed") return plain(res, 200, `OK${invoiceNo}`);
+  tx = await reopenInvoice(tx);
 
   const confirm = await confirmPayment(
     invoiceNo,
