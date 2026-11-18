@@ -104,6 +104,34 @@ async function sb(path, init = {}) {
   });
 }
 
+async function logPayAlert({ studentId, name, invoiceNo, message, amount }) {
+  try {
+    const detail = {};
+    if (invoiceNo != null && String(invoiceNo) !== "") {
+      const invoice = Number(invoiceNo);
+      detail.invoice = Number.isFinite(invoice) ? invoice : String(invoiceNo).slice(0, 16);
+    }
+    if (message) detail.message = String(message).slice(0, 180);
+    if (amount != null && Number.isFinite(Number(amount))) {
+      detail.amount = Number(amount);
+    }
+    const response = await sb("/rest/v1/rpc/log_ops_event", {
+      method: "POST",
+      body: JSON.stringify({
+        p_user_id: studentId || null,
+        p_name: name,
+        p_path: "/pay",
+        p_detail: detail,
+      }),
+    });
+    if (!response.ok) {
+      console.error("[uvs:pay] log_ops_event", response.status, await response.text());
+    }
+  } catch (error) {
+    console.error("[uvs:pay] log_ops_event", error);
+  }
+}
+
 async function authUser(accessToken) {
   const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: {
@@ -286,6 +314,15 @@ async function reopenInvoice(tx) {
   if (!tx?.id) return tx;
   if (tx.status === "pending" || tx.status === "confirmed") return tx;
   console.log("[uvs:pay] reopen invoice", tx.invoice_no, tx.status);
+  if (tx.status === "failed" || tx.status === "cancelled") {
+    void logPayAlert({
+      studentId: tx.student_id,
+      name: "payment_mismatch",
+      invoiceNo: tx.invoice_no,
+      message: `Счёт был ${tx.status}, касса прислала оплату`,
+      amount: tx.amount_rub,
+    });
+  }
   await sb(`/rest/v1/payment_transactions?id=eq.${encodeURIComponent(tx.id)}`, {
     method: "PATCH",
     body: JSON.stringify({ status: "pending" }),
@@ -317,6 +354,13 @@ async function syncYookassaPayment(tx) {
     if (!confirm.ok) {
       const text = await confirm.text();
       console.error("yookassa confirm failed", confirm.status, text);
+      void logPayAlert({
+        studentId: tx.student_id,
+        name: "payment_confirm",
+        invoiceNo,
+        message: text.slice(0, 180) || "confirm failed",
+        amount: outSum,
+      });
       throw new Error("confirm failed");
     }
     return { status: "confirmed", paid: true };
@@ -355,6 +399,13 @@ async function syncRobokassaPayment(tx) {
     if (!confirm.ok) {
       const text = await confirm.text();
       console.error("[uvs:robokassa] confirm failed", confirm.status, text);
+      void logPayAlert({
+        studentId: tx.student_id,
+        name: "payment_confirm",
+        invoiceNo,
+        message: text.slice(0, 180) || "confirm failed",
+        amount: outSum,
+      });
       throw new Error("confirm failed");
     }
     return { status: "confirmed", paid: true };
@@ -382,7 +433,7 @@ async function syncPendingPayments() {
   try {
     const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const response = await sb(
-      `/rest/v1/payment_transactions?status=eq.pending&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,status,provider&order=created_at.desc&limit=40`
+      `/rest/v1/payment_transactions?status=eq.pending&created_at=gte.${encodeURIComponent(since)}&select=id,invoice_no,amount_rub,external_id,status,provider,student_id&order=created_at.desc&limit=40`
     );
     if (!response.ok) {
       console.error("pending payments query failed", response.status);
@@ -1035,6 +1086,13 @@ async function handleProdamusWebhook(req, res) {
       sum: data.sum || null,
       keys: Object.keys(data),
     });
+    void logPayAlert({
+      studentId: null,
+      name: "payment_mismatch",
+      invoiceNo: pickProdamusInvoiceNo(data) || data.order_num,
+      message: "Касса прислала оплату, счёт не найден",
+      amount: data.sum,
+    });
     return json(res, 400, { error: "missing invoice" });
   }
   // A Prodamus webhook may only settle Prodamus invoices.
@@ -1058,7 +1116,15 @@ async function handleProdamusWebhook(req, res) {
     "prodamus"
   );
   if (!confirm.ok) {
-    console.error("[uvs:prodamus] confirm failed", confirm.status, await confirm.text());
+    const text = await confirm.text();
+    console.error("[uvs:prodamus] confirm failed", confirm.status, text);
+    void logPayAlert({
+      studentId: tx.student_id,
+      name: "payment_confirm",
+      invoiceNo: tx.invoice_no,
+      message: text.slice(0, 180) || "confirm failed",
+      amount: tx.amount_rub,
+    });
     return json(res, 500, { error: "confirm failed" });
   }
   return json(res, 200, { ok: true });
@@ -1088,14 +1154,14 @@ async function handleYookassaWebhook(req, res) {
   let tx = null;
   if (invoiceNo) {
     const txRes = await sb(
-      `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,external_id,status&limit=1`
+      `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,external_id,status,student_id&limit=1`
     );
     const rows = txRes.ok ? await txRes.json() : [];
     tx = Array.isArray(rows) ? rows[0] : rows;
   }
   if (!tx) {
     const txRes = await sb(
-      `/rest/v1/payment_transactions?external_id=eq.${encodeURIComponent(paymentId)}&select=id,invoice_no,amount_rub,external_id,status&limit=1`
+      `/rest/v1/payment_transactions?external_id=eq.${encodeURIComponent(paymentId)}&select=id,invoice_no,amount_rub,external_id,status,student_id&limit=1`
     );
     const rows = txRes.ok ? await txRes.json() : [];
     tx = Array.isArray(rows) ? rows[0] : rows;
@@ -1116,6 +1182,15 @@ async function handleYookassaWebhook(req, res) {
     return json(res, 200, { ok: true, ...result });
   } catch (error) {
     console.error("yookassa webhook sync failed", paymentId, error);
+    if (event === "payment.succeeded") {
+      void logPayAlert({
+        studentId: tx.student_id,
+        name: "payment_confirm",
+        invoiceNo: tx.invoice_no,
+        message: String(error?.message || error).slice(0, 180),
+        amount: tx.amount_rub,
+      });
+    }
     return json(res, 500, { error: "confirm failed" });
   }
 }
@@ -1179,12 +1254,18 @@ async function handleRobokassaResult(req, res) {
     return json(res, 400, { error: "bad signature" });
   }
 
-  const txRes = await sb(
-    `/rest/v1/payment_transactions?invoice_no=eq.${encodeURIComponent(String(invoiceNo))}&select=id,invoice_no,amount_rub,status,provider&limit=1`
-  );
-  const rows = txRes.ok ? await txRes.json() : [];
-  let tx = Array.isArray(rows) ? rows[0] : rows;
-  if (!tx) return json(res, 404, { error: "invoice not found" });
+  let tx = await loadPaymentByInvoice(invoiceNo);
+  if (!tx) {
+    console.error("[uvs:robokassa] invoice not found", invoiceNo);
+    void logPayAlert({
+      studentId: null,
+      name: "payment_mismatch",
+      invoiceNo,
+      message: "Касса прислала оплату, счёта нет",
+      amount: outSum,
+    });
+    return json(res, 404, { error: "invoice not found" });
+  }
   if (tx.provider !== "robokassa") {
     console.error("[uvs:robokassa] invoice belongs to", tx.provider, invoiceNo);
     return json(res, 400, { error: "wrong provider" });
@@ -1199,7 +1280,15 @@ async function handleRobokassaResult(req, res) {
     "robokassa"
   );
   if (!confirm.ok) {
-    console.error("[uvs:robokassa] confirm failed", confirm.status, await confirm.text());
+    const text = await confirm.text();
+    console.error("[uvs:robokassa] confirm failed", confirm.status, text);
+    void logPayAlert({
+      studentId: tx.student_id,
+      name: "payment_confirm",
+      invoiceNo,
+      message: text.slice(0, 180) || "confirm failed",
+      amount: tx.amount_rub,
+    });
     return json(res, 500, { error: "confirm failed" });
   }
   return plain(res, 200, `OK${invoiceNo}`);

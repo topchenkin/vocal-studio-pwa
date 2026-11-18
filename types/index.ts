@@ -981,6 +981,15 @@ export interface Database {
         };
         Returns: undefined;
       };
+      log_ops_event: {
+        Args: {
+          p_user_id?: string | null;
+          p_name: string;
+          p_path?: string;
+          p_detail?: Record<string, string | number | boolean | null>;
+        };
+        Returns: undefined;
+      };
       student_cabinet_progress: {
         Args: Record<string, never>;
         Returns: Record<string, unknown>;

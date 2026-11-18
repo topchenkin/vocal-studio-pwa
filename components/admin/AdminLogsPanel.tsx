@@ -73,6 +73,10 @@ function eventTitle(row: LogRow) {
       return "Микрофон";
     case "payment_init":
       return "Оплата";
+    case "payment_confirm":
+      return "Оплата не начислилась";
+    case "payment_mismatch":
+      return "Оплата без уроков";
     case "sign_in":
       return "Не удалось войти";
     case "fetch_fail":
@@ -89,9 +93,13 @@ function eventTitle(row: LogRow) {
 
 function eventDetail(row: LogRow) {
   const detail = row.detail || {};
+  const bits: string[] = [];
+  if (detail.invoice != null && String(detail.invoice) !== "") {
+    bits.push(`счёт ${detail.invoice}`);
+  }
   const message = detail.message || detail.code || detail.status || detail.host;
-  if (message == null || message === "") return "";
-  return String(message);
+  if (message != null && message !== "") bits.push(String(message));
+  return bits.join(" · ");
 }
 
 function hideLoginRow(row: LogRow) {
