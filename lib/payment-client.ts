@@ -134,7 +134,7 @@ export async function waitForPayment(
   return { status: "pending" as const, paid: false, invoiceNo };
 }
 
-export async function startPayment(
+export async function initPayment(
   purpose: PaymentPurpose,
   gateway: PaymentGateway = "rf"
 ) {
@@ -157,6 +157,14 @@ export async function startPayment(
 
   const payload = await postPayment("/init", body);
   rememberCheckout(payload.invoiceNo);
+  return payload;
+}
+
+export async function startPayment(
+  purpose: PaymentPurpose,
+  gateway: PaymentGateway = "rf"
+) {
+  const payload = await initPayment(purpose, gateway);
   openCheckout(payload.paymentUrl!);
   return payload;
 }

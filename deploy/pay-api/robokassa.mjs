@@ -158,8 +158,11 @@ export const robokassa = {
       throw new Error("Robokassa: задайте ROBOKASSA_MERCHANT_LOGIN, PASSWORD1 и PASSWORD2");
     }
     const built = paymentFields({ outSum, invId, description, email });
+    const go = String(token || "").trim();
     return {
-      paymentUrl: paymentUrlFromFields(built.fields),
+      paymentUrl: go
+        ? robokassaGoUrl(invId, go)
+        : paymentUrlFromFields(built.fields),
       externalId: String(invId),
       fields: built.fields,
     };
